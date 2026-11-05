@@ -1,0 +1,1281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>html,body{margin:0}body{font:14px system-ui,-apple-system,"Segoe UI",sans-serif}img{max-width:100%}</style>
+<title>Lead Line Leveler</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&family=Familjen+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: workbench — controls rail on the left, the pattern laid on a cutting mat on the right. */
+:root{
+  --bg:#eef1f2; --panel:#ffffff; --ink:#1b2326; --muted:#5d6b70; --line:#d5dcdf;
+  --accent:#24509c; --accent-ink:#ffffff; --accent-soft:#e3eaf7;
+  --mat:#3f5e4f; --mat-grid:rgba(255,255,255,.10); --mat-grid-major:rgba(255,255,255,.22);
+  --warn:#9a5b00;
+  --f-display:"Young Serif", Georgia, "Times New Roman", serif;
+  --f-body:"Familjen Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121719; --panel:#1a2124; --ink:#e6ecee; --muted:#93a2a8; --line:#2c3639;
+  --accent:#7ea3ea; --accent-ink:#0c1530; --accent-soft:#1f2b44;
+  --mat:#22342b; --mat-grid:rgba(255,255,255,.06); --mat-grid-major:rgba(255,255,255,.13);
+  --warn:#f0b35c; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#121719; --panel:#1a2124; --ink:#e6ecee; --muted:#93a2a8; --line:#2c3639;
+  --accent:#7ea3ea; --accent-ink:#0c1530; --accent-soft:#1f2b44;
+  --mat:#22342b; --mat-grid:rgba(255,255,255,.06); --mat-grid-major:rgba(255,255,255,.13);
+  --warn:#f0b35c; color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.45}
+.app{display:grid;grid-template-columns:340px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);height:100%;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:14px;gap:14px}
+header{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px}
+h1{font-family:var(--f-display);font-weight:400;font-size:1.6rem;margin:0;letter-spacing:.005em;text-wrap:balance}
+.file-name{font-family:var(--f-mono);font-size:.8rem;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 160px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+button,.btn{font:inherit;font-weight:500;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:8px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;position:relative}
+button:hover,.btn:hover{border-color:var(--muted)}
+button:focus-visible,.btn:focus-within,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.primary:hover{filter:brightness(1.08);border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:default}
+.btn input{position:absolute;width:1px;height:1px;opacity:0}
+
+aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;overflow:auto;display:flex;flex-direction:column;gap:20px;min-height:0}
+section.group{display:flex;flex-direction:column;gap:10px}
+.label{font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.big-width{display:flex;align-items:center;gap:8px}
+.big-width input{width:120px;font:500 1.8rem/1 var(--f-mono);border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--bg);color:var(--ink)}
+select{font:inherit;font-family:var(--f-mono);border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:var(--bg);color:var(--ink)}
+.conv{font-family:var(--f-mono);font-size:.82rem;color:var(--muted);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.presets{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.presets button{padding:6px 4px;justify-content:center;font-family:var(--f-mono);font-size:.8rem}
+.presets button[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--ink)}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.row label{flex:1 1 auto}
+.field-col{display:flex;flex-direction:column;gap:6px}
+.field-col select{align-self:flex-start;max-width:100%}
+.size-row{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+.size-field{display:flex;flex-direction:column;gap:2px}
+.times{font-family:var(--f-mono);color:var(--muted);padding-bottom:5px}
+.inline-num{width:82px;font:inherit;font-family:var(--f-mono);border:1px solid var(--line);border-radius:6px;padding:4px 6px;background:var(--bg);color:var(--ink)}
+.check{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+.check input{margin-top:3px;accent-color:var(--accent)}
+.hint{font-size:.82rem;color:var(--muted);margin:0}
+.slider-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center}
+.slider-row .val{font-family:var(--f-mono);font-size:.82rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.slider-row input{grid-column:1/-1}
+details summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:"+";font-family:var(--f-mono);color:var(--muted)}
+details[open] summary::after{content:"–"}
+details .inner{display:flex;flex-direction:column;gap:14px;margin-top:12px}
+.stats{border-top:1px solid var(--line);padding-top:14px;display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:.88rem;margin:0}
+.stats dt{color:var(--muted)}
+.stats dd{margin:0;font-family:var(--f-mono);font-variant-numeric:tabular-nums;text-align:right}
+.warn{color:var(--warn)}
+
+main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;border-radius:0;padding:6px 12px;background:transparent}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--ink);font-weight:600}
+.status{font-size:.85rem;color:var(--muted);display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:#3a9a5b}
+.busy .dot{background:var(--accent);animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion: reduce){.busy .dot{animation:none}}
+.mat{flex:1;min-height:340px;border-radius:12px;overflow:auto;position:relative;
+  background-color:var(--mat);
+  background-image:
+    linear-gradient(var(--mat-grid-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--mat-grid-major) 1px, transparent 1px),
+    linear-gradient(var(--mat-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--mat-grid) 1px, transparent 1px);
+  background-size:96px 96px,96px 96px,24px 24px,24px 24px}
+.mat.dragging{outline:3px dashed var(--accent);outline-offset:-6px}
+.stage{min-width:100%;min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
+.stage img{display:block;background:#fff;box-shadow:0 2px 14px rgba(0,0,0,.35)}
+.mat.fit .stage{height:100%}
+.mat.fit .stage img{max-width:100%;max-height:100%;object-fit:contain}
+.mat:not(.fit) .stage img{max-width:none}
+.sample-tag{position:absolute;top:12px;left:12px;background:rgba(0,0,0,.55);color:#fff;font-size:.78rem;padding:4px 10px;border-radius:20px;pointer-events:none;z-index:1}
+.drop-note{font-size:.82rem;color:var(--muted)}
+
+@media (max-width: 820px){
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto;height:auto}
+  aside{overflow:visible}
+  .mat{min-height:62vh}
+}
+</style>
+
+<div class="app">
+  <header>
+    <h1>Lead Line Leveler</h1>
+    <div class="file-name" id="fileName">sample-pattern</div>
+    <div class="actions">
+      <label class="btn" for="fileInput">Open pattern image<input id="fileInput" type="file" accept="image/*"></label>
+      <button id="saveSvg" disabled>Save SVG</button>
+      <button class="primary" id="savePng" disabled>Save PNG</button>
+    </div>
+  </header>
+
+  <aside>
+    <section class="group">
+      <div class="label">Pattern size</div>
+      <div class="size-row">
+        <label class="size-field" for="sizeW"><span class="hint">Width</span><input id="sizeW" class="inline-num" type="number" min="0.5" max="96" step="0.01" value="9"></label>
+        <span class="times" aria-hidden="true">×</span>
+        <label class="size-field" for="sizeH"><span class="hint">Height</span><input id="sizeH" class="inline-num" type="number" min="0.5" max="96" step="0.01" value="12"></label>
+        <span class="conv">in</span>
+      </div>
+      <label class="check"><input id="lockRatio" type="checkbox" checked><span>Keep the pattern's proportions</span></label>
+      <p class="hint" id="panelNote">—</p>
+    </section>
+
+    <section class="group">
+      <div class="label">Line width</div>
+      <div class="big-width">
+        <input id="widthNum" type="number" min="0.001" step="0.001" value="0.042" aria-label="Line width">
+        <select id="unit" aria-label="Line width unit"><option value="in">in</option><option value="pt">pt</option><option value="mm">mm</option></select>
+      </div>
+      <div class="conv" id="widthConv">—</div>
+      <div class="presets" id="presets">
+        <button data-in="0.041667">3 pt</button>
+        <button data-in="0.03125">1/32″</button>
+        <button data-in="0.0625">1/16″</button>
+        <button data-in="0.09375">3/32″</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <label class="check"><input id="borderOn" type="checkbox"><span>Give the outer border its own width<br><span class="hint">For a zinc or wide lead border around the panel</span></span></label>
+      <div class="row" id="borderRow" hidden>
+        <label for="borderNum">Border width</label>
+        <input id="borderNum" class="inline-num" type="number" min="0.001" step="0.001" value="0.125"><span class="conv" id="borderUnit">in</span>
+      </div>
+      <div class="field-col">
+        <label for="borderPos">Border line position</label>
+        <select id="borderPos">
+          <option value="center">Centered on the original line</option>
+          <option value="outer">Keep the original outer edge</option>
+          <option value="inner">Keep the original inner edge</option>
+        </select>
+        <p class="hint" id="borderPosHint">The new border sits on the middle of the original border.</p>
+      </div>
+      <p class="hint warn" id="borderWarn" hidden>No straight outer border found, so every line uses the main width.</p>
+    </section>
+
+    <section class="group">
+      <details>
+        <summary><span class="label">Cleanup</span></summary>
+        <div class="inner">
+          <div class="slider-row">
+            <label for="smooth">Curve smoothing</label><span class="val" id="smoothVal">normal</span>
+            <input id="smooth" type="range" min="0.4" max="2.5" step="0.1" value="1">
+          </div>
+          <div class="slider-row">
+            <label for="thresh">Dark cutoff</label><span class="val" id="threshVal">auto</span>
+            <input id="thresh" type="range" min="1" max="254" value="128">
+          </div>
+          <label class="check"><input id="threshAuto" type="checkbox" checked><span>Pick the cutoff automatically</span></label>
+          <label class="check"><input id="invert" type="checkbox"><span>Lines are light on a dark background</span></label>
+          <label class="check"><input id="exactShapes" type="checkbox" checked><span>Make straight lines and circles exact</span></label>
+          <label class="check"><input id="squareUp" type="checkbox" checked><span>Square up the panel<br><span class="hint">Lines that are nearly level or upright become exactly level or upright, so the border has true right angles and sits straight on the page</span></span></label>
+          <label class="check"><input id="transparent" type="checkbox"><span>Save PNG with a transparent background</span></label>
+        </div>
+      </details>
+    </section>
+
+    <dl class="stats">
+      <dt>Source image</dt><dd id="sSize">—</dd>
+      <dt>Original thin lines</dt><dd id="sThin">—</dd>
+      <dt>Original typical</dt><dd id="sMid">—</dd>
+      <dt>Original thick lines</dt><dd id="sThick">—</dd>
+      <dt>Output</dt><dd id="sOut">—</dd>
+    </dl>
+  </aside>
+
+  <main>
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="View">
+        <button data-view="result" aria-pressed="true">Result</button>
+        <button data-view="original" aria-pressed="false">Original</button>
+        <button data-view="overlay" aria-pressed="false">Overlay</button>
+      </div>
+      <div class="status" id="status"><span class="dot"></span><span id="statusText">Ready</span></div>
+      <div class="seg" role="group" aria-label="Zoom">
+        <button data-zoom="fit" aria-pressed="true">Fit</button>
+        <button data-zoom="0.5" aria-pressed="false">50%</button>
+        <button data-zoom="1" aria-pressed="false">100%</button>
+      </div>
+    </div>
+    <div class="mat fit" id="mat">
+      <div class="sample-tag" id="sampleTag">Example pattern · open or drop your own</div>
+      <div class="stage"><img id="view" alt="Pattern preview"></div>
+    </div>
+    <div class="drop-note" id="note">Drop an image on the mat, paste one, or use Open pattern image. Overlay shows the new lines in red over the original. 100% zoom is 300 pixels per inch.</div>
+  </main>
+</div>
+
+<script type="text/plain" id="worker-src">
+const INF=1e20;
+let W=0,H=0,gray=null,otsuT=128;
+
+function otsu(g){const h=new Float64Array(256);for(let i=0;i<g.length;i++)h[g[i]]++;
+  const n=g.length;let sum=0;for(let t=0;t<256;t++)sum+=t*h[t];
+  let sB=0,wB=0,best=0,bt=128;for(let t=0;t<256;t++){wB+=h[t];if(!wB)continue;const wF=n-wB;if(!wF)break;
+    sB+=t*h[t];const mB=sB/wB,mF=(sum-sB)/wF;const v=wB*wF*(mB-mF)*(mB-mF);if(v>best){best=v;bt=t;}}
+  return bt+1;}
+
+function removeSmall(m,val,minA,conn8,keepBorder){
+  if(minA<=0)return;const seen=new Uint8Array(W*H);const st=new Int32Array(W*H);const comp=[];
+  for(let s=0;s<W*H;s++){if(m[s]!==val||seen[s])continue;
+    let sp=0,touch=false;st[sp++]=s;seen[s]=1;comp.length=0;
+    while(sp){const i=st[--sp];comp.push(i);const x=i%W,y=(i/W)|0;
+      if(x===0||y===0||x===W-1||y===H-1)touch=true;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;if(!conn8&&dx&&dy)continue;
+        const xx=x+dx,yy=y+dy;if(xx<0||yy<0||xx>=W||yy>=H)continue;const j=yy*W+xx;
+        if(m[j]===val&&!seen[j]){seen[j]=1;st[sp++]=j;}}}
+    if(comp.length<minA&&!(keepBorder&&touch))for(const i of comp)m[i]=1-val;}}
+
+function edt1d(f,n,d,v,z){let k=0;v[0]=0;z[0]=-INF;z[1]=INF;
+  for(let q=1;q<n;q++){let s=((f[q]+q*q)-(f[v[k]]+v[k]*v[k]))/(2*q-2*v[k]);
+    while(s<=z[k]){k--;s=((f[q]+q*q)-(f[v[k]]+v[k]*v[k]))/(2*q-2*v[k]);}
+    k++;v[k]=q;z[k]=s;z[k+1]=INF;}
+  k=0;for(let q=0;q<n;q++){while(z[k+1]<q)k++;const dq=q-v[k];d[q]=dq*dq+f[v[k]];}}
+function edt(src){const N=Math.max(W,H);const f=new Float64Array(N),d=new Float64Array(N),v=new Int32Array(N),z=new Float64Array(N+1);
+  const out=new Float32Array(W*H);
+  for(let x=0;x<W;x++){for(let y=0;y<H;y++)f[y]=src[y*W+x]?0:INF;edt1d(f,H,d,v,z);for(let y=0;y<H;y++)out[y*W+x]=d[y];}
+  for(let y=0;y<H;y++){const o=y*W;for(let x=0;x<W;x++)f[x]=out[o+x];edt1d(f,W,d,v,z);for(let x=0;x<W;x++)out[o+x]=d[x];}
+  return out;}
+
+function thin(img,PW,PH){
+  const off=[-PW,-PW+1,1,PW+1,PW,PW-1,-1,-PW-1];
+  let list=[];for(let y=1;y<PH-1;y++)for(let x=1;x<PW-1;x++){const i=y*PW+x;if(img[i])list.push(i);}
+  const del=new Int32Array(list.length);let changed=true,it=0;
+  while(changed){changed=false;it++;
+    for(let step=0;step<2;step++){let nd=0;
+      for(let a=0;a<list.length;a++){const k=list[a];if(!img[k])continue;
+        const p2=img[k+off[0]],p3=img[k+off[1]],p4=img[k+off[2]],p5=img[k+off[3]],p6=img[k+off[4]],p7=img[k+off[5]],p8=img[k+off[6]],p9=img[k+off[7]];
+        const B=p2+p3+p4+p5+p6+p7+p8+p9;if(B<2||B>6)continue;
+        const A=(!p2&&p3)+(!p3&&p4)+(!p4&&p5)+(!p5&&p6)+(!p6&&p7)+(!p7&&p8)+(!p8&&p9)+(!p9&&p2);if(A!==1)continue;
+        if(step===0){if(p2&&p4&&p6)continue;if(p4&&p6&&p8)continue;}else{if(p2&&p4&&p8)continue;if(p2&&p6&&p8)continue;}
+        del[nd++]=k;}
+      for(let j=0;j<nd;j++)img[del[j]]=0;if(nd)changed=true;}
+    if(it%3===0)list=list.filter(k=>img[k]);}}
+
+// ---- curve helpers ----
+function gauss1d(arr,sig,wrap){const n=arr.length;if(sig<0.3||n<3)return arr.slice();
+  const r=Math.ceil(3.5*sig);const k=[];let s=0;for(let i=-r;i<=r;i++){const v=Math.exp(-i*i/(2*sig*sig));k.push(v);s+=v;}
+  const out=new Float64Array(n);for(let i=0;i<n;i++){let a=0;for(let j=-r;j<=r;j++){let t=i+j;
+    if(wrap)t=((t%n)+n)%n;else t=t<0?0:t>=n?n-1:t;a+=arr[t]*k[j+r];}out[i]=a/s;}return out;}
+function savgolCoef(m){const h=(m-1)/2;const G=[[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
+  for(let j=-h;j<=h;j++){const p=[1,j,j*j,j*j*j];for(let a=0;a<4;a++)for(let b=0;b<4;b++)G[a][b]+=p[a]*p[b];}
+  const Gi=inv4(G);const c=[];for(let j=-h;j<=h;j++){const p=[1,j,j*j,j*j*j];let v=0;for(let b=0;b<4;b++)v+=Gi[0][b]*p[b];c.push(v);}return c;}
+function inv4(M){const n=4;const A=M.map((r,i)=>[...r,...[0,0,0,0].map((_,j)=>i===j?1:0)]);
+  for(let c=0;c<n;c++){let p=c;for(let r=c+1;r<n;r++)if(Math.abs(A[r][c])>Math.abs(A[p][c]))p=r;[A[c],A[p]]=[A[p],A[c]];
+    const d=A[c][c];for(let j=0;j<2*n;j++)A[c][j]/=d;for(let r=0;r<n;r++)if(r!==c){const f=A[r][c];for(let j=0;j<2*n;j++)A[r][j]-=f*A[c][j];}}
+  return A.map(r=>r.slice(n));}
+const sgCache={};
+function savgol(arr,m,wrap){const n=arr.length;if(m<7||n<m)return arr;const c=sgCache[m]||(sgCache[m]=savgolCoef(m));const h=(m-1)/2;
+  const out=new Float64Array(n);for(let i=0;i<n;i++){let a=0;for(let j=-h;j<=h;j++){let t=i+j;
+    if(wrap)t=((t%n)+n)%n;else t=t<0?0:t>=n?n-1:t;a+=arr[t]*c[j+h];}out[i]=a;}return out;}
+
+function process(p){
+  const say=t=>postMessage({type:'progress',text:t});
+  say('Finding lines…');
+  const t=p.auto?otsuT:p.threshold;const m=new Uint8Array(W*H);
+  for(let i=0;i<W*H;i++)m[i]=p.invert?(gray[i]>=t?1:0):(gray[i]<t?1:0);
+  // estimate typical line thickness from ridge of distance map
+  const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;
+  let dbg=edt(bg);const ridge=[];
+  for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const i=y*W+x;const d=dbg[i];if(d<1)continue;
+    if(d>=dbg[i-1]&&d>=dbg[i+1]&&d>=dbg[i-W]&&d>=dbg[i+W])ridge.push(2*Math.sqrt(d)-1);}
+  ridge.sort((a,b)=>a-b);const med=ridge.length?ridge[ridge.length>>1]:3;
+  const u=Math.max(1.5,med/1.75); // working unit ≈ one source-pixel line width
+  // close gaps narrower than ~2/3 of a line width (hollow or skipping marker strokes),
+  // using distance maps: grow the lines by r, then shrink them back by r
+  {const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
+    for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
+    const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
+    // pixels outside the image count as paper so the outer border is not pulled inward
+    const d2=edt(notd);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
+      const edge=Math.min(x+1,y+1,W-x,H-y);if(!m[i]&&d2[i]>r2&&edge*edge>r2)m[i]=1;}}
+  removeSmall(m,1,Math.round(40*u*u),true,false);
+  removeSmall(m,0,Math.round(4*u*u),false,true);
+  say('Finding line centers…');
+  const PW=W+2,PH=H+2;const img=new Uint8Array(PW*PH);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)img[(y+1)*PW+x+1]=m[y*W+x];
+  thin(img,PW,PH);
+  // remove staircase pixels: drop a pixel whose neighbours stay connected without it,
+  // so ordinary line pixels have exactly two neighbours and only real junctions have three
+  {const ring=[[-1,-1],[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0]];const ro=ring.map(([dx,dy])=>dy*PW+dx);
+    for(let pass=0;pass<2;pass++)for(let k=PW;k<PW*(PH-1);k++){if(!img[k])continue;
+      const on=[];for(let r=0;r<8;r++)if(img[k+ro[r]])on.push(r);if(on.length<2||on.length>4)continue;
+      const par=on.map((_,i)=>i);const f=i=>par[i]===i?i:(par[i]=f(par[i]));
+      for(let a=0;a<on.length;a++)for(let b=a+1;b<on.length;b++){const A=ring[on[a]],B=ring[on[b]];
+        if(Math.abs(A[0]-B[0])<=1&&Math.abs(A[1]-B[1])<=1)par[f(a)]=f(b);}
+      let comps=0;for(let i=0;i<on.length;i++)if(f(i)===i)comps++;
+      if(comps===1&&on.length<=3)img[k]=0;}}
+  const sk=new Uint8Array(W*H);for(let y=0;y<H;y++)for(let x=0;x<W;x++)sk[y*W+x]=img[(y+1)*PW+x+1];
+  // stats: thickness sampled on the centerline
+  for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;dbg=edt(bg);let dbg2=dbg;const th=[];
+  for(let i=0;i<W*H;i++)if(sk[i])th.push(2*Math.sqrt(dbg[i])-1);th.sort((a,b)=>a-b);
+  const q=f=>th.length?th[Math.min(th.length-1,Math.floor(f*th.length))]:0;
+  const stats={thin:q(.08),mid:q(.5),thick:q(.92),threshold:t};
+  dbg=null;
+
+  say('Tracing curves…');
+  const dmap=new Float32Array(W*H);for(let i=0;i<W*H;i++)dmap[i]=Math.sqrt(dbg2[i]);dbg2=null;
+  const built=buildStrokes(sk,u,med,dmap,p.smooth,say,p);const strokes=built.strokes;
+  const fl=[],fo=[0],cl=[],co=[0];for(const f of built.fillets){for(const q of f.fill)fl.push(q[1]+0.5,q[0]+0.5);fo.push(fl.length/2);for(const q of f.curve)cl.push(q[1]+0.5,q[0]+0.5);co.push(cl.length/2);}
+  const flat=[],offs=[0],hwf=[];
+  // the original line's half-width at each point (largest distance-to-paper nearby), with a running
+  // median along the line so junction blobs don't count; used to line a border up with an edge
+  for(const S of strokes){const raw=S.map(q=>{let mx=0;const yy=Math.round(q[0]),xx=Math.round(q[1]);
+      for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const y=yy+dy,x=xx+dx;if(y>=0&&x>=0&&y<H&&x<W)mx=Math.max(mx,dmap[y*W+x]);}return Math.max(0.5,mx-0.5);});
+    const hw=raw.map((_,i)=>{const a=raw.slice(Math.max(0,i-75),Math.min(raw.length,i+76)).sort((p,q)=>p-q);return a[Math.floor(a.length*0.4)];});
+    S.forEach((q,i)=>{flat.push(q[1]+0.5,q[0]+0.5);hwf.push(hw[i]);});offs.push(flat.length/2);}
+  return{pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
+
+// ===================================================================== curve stage
+// Trace the centerline into a graph of lines and junctions, rebuild junctions the way a
+// pattern is drawn (lines run through, branches land on them, crossings stay crossings),
+// keep real corners sharp, and smooth each long curve with a fidelity-checked smoother.
+function arclen(P){const L=new Float64Array(P.length);for(let i=1;i<P.length;i++)L[i]=L[i-1]+Math.hypot(P[i][0]-P[i-1][0],P[i][1]-P[i-1][1]);return L;}
+function at(P,d,L){L=L||arclen(P);const n=P.length;if(n===1)return[P[0][0],P[0][1]];d=Math.max(0,Math.min(d,L[n-1]));
+  let lo=0,hi=n-1;while(hi-lo>1){const mid=(lo+hi)>>1;if(L[mid]<=d)lo=mid;else hi=mid;}
+  const span=L[hi]-L[lo],t=span>0?(d-L[lo])/span:0;return[P[lo][0]+t*(P[hi][0]-P[lo][0]),P[lo][1]+t*(P[hi][1]-P[lo][1])];}
+function resample(P,step,w){const L=arclen(P),tot=L[L.length-1];
+  if(tot<1e-9)return[[P[0].slice()],[w?w[0]:1]];
+  const n=Math.max(2,Math.ceil(tot/step)+1);const Q=[],ws=[];let k=0;
+  for(let i=0;i<n;i++){const t=tot*i/(n-1);while(k<P.length-2&&L[k+1]<=t)k++;
+    const span=L[k+1]-L[k],f=span>0?Math.min(1,(t-L[k])/span):0;Q.push([P[k][0]+f*(P[k+1][0]-P[k][0]),P[k][1]+f*(P[k+1][1]-P[k][1])]);
+    ws.push(w?Math.min(w[k],w[k+1]):1);}
+  return[Q,ws];}
+function resampleKeep(Q,w){const pins=[0];for(let i=1;i<Q.length-1;i++)if(w[i]>=1e5)pins.push(i);pins.push(Q.length-1);
+  let oQ=[],ow=[];for(let p=0;p<pins.length-1;p++){const a=pins[p],b=pins[p+1];
+    let [R,rw]=resample(Q.slice(a,b+1),1.0,w.slice(a,b+1));rw[0]=w[a];rw[rw.length-1]=w[b];
+    if(oQ.length){R=R.slice(1);rw=rw.slice(1);}oQ=oQ.concat(R);ow=ow.concat(rw);}
+  return[oQ,ow];}
+function norm2(v){return Math.hypot(v[0],v[1]);}
+function endDir(P,side,u,L,clr){L=L||arclen(P);const tot=L[L.length-1];
+  const c0=clr==null?2*u:Math.max(2*u,clr);const d1=Math.min(c0,0.4*tot),d2=Math.min(d1+7*u,0.85*tot);
+  const n=Math.max(3,Math.floor((d2-d1)/Math.max(u/2,1))+1);const ds=[],pts=[];
+  for(let i=0;i<n;i++){const d=d1+(d2-d1)*i/(n-1);ds.push(d-d1);pts.push(at(P,side===1?tot-d:d,L));}
+  const anchor=pts[0];let v;
+  if(d2-d1>3*u&&n>=5){ // quadratic fit; derivative at the anchor
+    let S0=0,S1=0,S2=0,S3=0,S4=0,Ty0=0,Ty1=0,Ty2=0,Tx0=0,Tx1=0,Tx2=0;
+    for(let i=0;i<n;i++){const x=ds[i],x2=x*x;S0++;S1+=x;S2+=x2;S3+=x2*x;S4+=x2*x2;
+      Ty0+=pts[i][0];Ty1+=x*pts[i][0];Ty2+=x2*pts[i][0];Tx0+=pts[i][1];Tx1+=x*pts[i][1];Tx2+=x2*pts[i][1];}
+    const M=[[S0,S1,S2],[S1,S2,S3],[S2,S3,S4]];const cy=solve3(M,[Ty0,Ty1,Ty2]),cx=solve3(M,[Tx0,Tx1,Tx2]);
+    v=[cy[1],cx[1]];
+    const nn=norm2(v);const dir=nn>1e-9?[v[0]/nn,v[1]/nn]:[0,0];
+    // follow the fitted curve back toward the junction (t = distance from the anchor)
+    const curve=t=>[cy[0]-cy[1]*t+cy[2]*t*t,cx[0]-cx[1]*t+cx[2]*t*t];
+    return[anchor,dir,curve];}
+  else v=[pts[n-1][0]-pts[0][0],pts[n-1][1]-pts[0][1]];
+  const nn=norm2(v);return[anchor,nn>1e-9?[v[0]/nn,v[1]/nn]:[0,0]];}
+function solve3(M,b){const A=M.map((r,i)=>[...r,b[i]]);
+  for(let c=0;c<3;c++){let p=c;for(let r=c+1;r<3;r++)if(Math.abs(A[r][c])>Math.abs(A[p][c]))p=r;[A[c],A[p]]=[A[p],A[c]];
+    const d=A[c][c]||1e-12;for(let j=c;j<4;j++)A[c][j]/=d;for(let r=0;r<3;r++)if(r!==c){const f=A[r][c];for(let j=c;j<4;j++)A[r][j]-=f*A[c][j];}}
+  return[A[0][3],A[1][3],A[2][3]];}
+function lsqPoint(anchors,dirs,c,reg){reg=reg==null?0.05:reg;let a=reg,b=0,d=reg,bx=reg*c[0],by=reg*c[1];
+  for(let i=0;i<anchors.length;i++){const p=anchors[i],q=dirs[i];const m11=1-q[0]*q[0],m12=-q[0]*q[1],m22=1-q[1]*q[1];
+    a+=m11;b+=m12;d+=m22;bx+=m11*p[0]+m12*p[1];by+=m12*p[0]+m22*p[1];}
+  const det=a*d-b*b;return[(d*bx-b*by)/det,(a*by-b*bx)/det];}
+function angDeg(p,q){return Math.acos(Math.max(-1,Math.min(1,p[0]*q[0]+p[1]*q[1])))*180/Math.PI;}
+
+// minimise sum w(z-y)^2 + lam*sum(second difference of z)^2  (pentadiagonal LDL^T solve)
+function whittaker(Y,w,lam){const n=Y.length;if(n<5)return Y.map(q=>q.slice());
+  const a0=new Float64Array(n),a1=new Float64Array(n),D=new Float64Array(n),L1=new Float64Array(n),L2=new Float64Array(n);
+  for(let i=0;i<n;i++){const d0=(i===0||i===n-1)?1:(i===1||i===n-2)?5:6;a0[i]=w[i]+lam*d0;}
+  for(let i=0;i<n-1;i++)a1[i]=lam*((i===0||i===n-2)?-2:-4);
+  for(let i=0;i<n;i++){
+    if(i>=2)L2[i]=lam/D[i-2];
+    if(i>=1)L1[i]=(a1[i-1]-(i>=2?L2[i]*L1[i-1]*D[i-2]:0))/D[i-1];
+    D[i]=a0[i]-(i>=1?L1[i]*L1[i]*D[i-1]:0)-(i>=2?L2[i]*L2[i]*D[i-2]:0);}
+  const out=Y.map(()=>[0,0]);const z=new Float64Array(n);
+  for(let c=0;c<2;c++){
+    for(let i=0;i<n;i++)z[i]=w[i]*Y[i][c]-(i>=1?L1[i]*z[i-1]:0)-(i>=2?L2[i]*z[i-2]:0);
+    for(let i=0;i<n;i++)z[i]/=D[i];
+    for(let i=n-1;i>=0;i--)z[i]=z[i]-(i+1<n?L1[i+1]*z[i+1]:0)-(i+2<n?L2[i+2]*z[i+2]:0);
+    for(let i=0;i<n;i++)out[i][c]=z[i];}
+  return out;}
+const refl=(i,n)=>{while(i<0||i>=n){if(i<0)i=-i-1;if(i>=n)i=2*n-i-1;}return i;};
+function maxFilter(a,size){const n=a.length,h=size>>1,o=new Float64Array(n);for(let i=0;i<n;i++){let m=-Infinity;for(let j=-h;j<=h;j++)m=Math.max(m,a[refl(i+j,n)]);o[i]=m;}return o;}
+function gaussFilter(a,sig){const n=a.length,r=Math.ceil(4*sig),k=[];let s=0;for(let i=-r;i<=r;i++){const v=Math.exp(-i*i/(2*sig*sig));k.push(v);s+=v;}
+  const o=new Float64Array(n);for(let i=0;i<n;i++){let t=0;for(let j=-r;j<=r;j++)t+=a[refl(i+j,n)]*k[j+r];o[i]=t/s;}return o;}
+function smoothPiece(Q,w,u,strength,closed){
+  let Qx,wx,m=0;
+  if(closed){m=Math.min(Q.length-1,Math.floor(40*u));
+    Qx=[...Q.slice(Q.length-m-1,Q.length-1),...Q,...Q.slice(1,m+1)];wx=[...w.slice(w.length-m-1,w.length-1),...w,...w.slice(1,m+1)];}
+  else{Qx=Q;wx=w.slice();}
+  const lam=Math.pow(28*u*strength/(2*Math.PI),4),tol=0.35*u;
+  const real=wx.map(v=>v>0.5&&v<1e5);let wc=wx.slice();let Z=Qx;
+  const fs=Math.max(3,Math.floor(4*u))|1;
+  for(let it=0;it<10;it++){Z=whittaker(Qx,wc,lam);
+    const over=new Float64Array(Qx.length);let mx=0;
+    for(let i=0;i<Qx.length;i++){if(!real[i])continue;const d=Math.hypot(Z[i][0]-Qx[i][0],Z[i][1]-Qx[i][1])/tol;over[i]=d;if(d>mx)mx=d;}
+    if(mx<=1)break;
+    const g=gaussFilter(maxFilter(over,fs),2*u);
+    wc=wc.map((v,i)=>real[i]?v*(1+2*Math.pow(Math.max(0,g[i]-0.7),2)):v);}
+  return closed?Z.slice(m,m+Q.length):Z;}
+
+function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,square:true};let frame=0;
+  // ---- trace graph
+  const N8=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+  const nb=i=>{const y=(i/W)|0,x=i%W,o=[];for(const[dy,dx]of N8){const yy=y+dy,xx=x+dx;if(yy>=0&&yy<H&&xx>=0&&xx<W&&sk[yy*W+xx])o.push(yy*W+xx);}return o;};
+  const cnt=new Uint8Array(W*H),node=new Uint8Array(W*H);
+  for(let i=0;i<W*H;i++)if(sk[i]){cnt[i]=nb(i).length;if(cnt[i]!==2)node[i]=1;}
+  const lab=new Int32Array(W*H);const cent=[null];const freeL=new Set();
+  {let nl=0;const st=[];for(let i=0;i<W*H;i++){if(!node[i]||lab[i])continue;nl++;let sy=0,sx=0,n=0;st.push(i);lab[i]=nl;
+    while(st.length){const k=st.pop();sy+=(k/W)|0;sx+=k%W;n++;if(cnt[k]<=1)freeL.add(nl);for(const j of nb(k))if(node[j]&&!lab[j]){lab[j]=nl;st.push(j);}}
+    cent.push([sy/n,sx/n]);}}
+  const seen=new Uint8Array(W*H);let edges=[];const links=new Set();
+  const pt=i=>[(i/W)|0,i%W];
+  for(let p=0;p<W*H;p++){if(!node[p])continue;const a=lab[p];
+    for(const q of nb(p)){
+      if(node[q]){const b=lab[q];const key=Math.min(a,b)+'-'+Math.max(a,b);if(b!==a&&!links.has(key)){links.add(key);edges.push({P:[cent[a].slice(),cent[b].slice()],a,e:b,closed:false});}continue;}
+      if(seen[q])continue;
+      const pts=[cent[a].slice()];let prev=p,cur=q,end=null;
+      while(true){seen[cur]=1;pts.push(pt(cur));const ns=nb(cur);
+        const nodes=ns.filter(n=>node[n]&&n!==prev),nxt=ns.filter(n=>n!==prev&&!seen[n]&&!node[n]);
+        if(nodes.length&&(pts.length>2||lab[nodes[0]]!==a||!nxt.length)){end=lab[nodes[0]];pts.push(cent[end].slice());break;}
+        if(!nxt.length)break;prev=cur;cur=nxt[0];}
+      edges.push({P:pts,a,e:end,closed:false});}}
+  for(let p=0;p<W*H;p++){if(!sk[p]||seen[p]||node[p])continue;const pts=[];let prev=-1,cur=p;
+    while(true){seen[cur]=1;pts.push(pt(cur));const nxt=nb(cur).filter(n=>n!==prev&&!seen[n]);if(!nxt.length)break;prev=cur;cur=nxt[0];}
+    if(pts.length>3)edges.push({P:pts,a:null,e:null,closed:true});}
+
+  say('Rebuilding junctions…');
+  const Dt=2*u,GAP=0.02,PIN=1e6;
+  const clearFrom=(P,L,side)=>{const tot=L[L.length-1];let best=-1;
+    for(let i=0;i<P.length;i++){const yy=Math.min(H-1,Math.max(0,Math.round(P[i][0]))),xx=Math.min(W-1,Math.max(0,Math.round(P[i][1])));
+      const th=2*dmap[yy*W+xx]-1,dist=side===0?L[i]:tot-L[i];if(th>1.3*med&&dist<0.4*tot&&dist>best)best=dist;}
+    return best>=0?best+u:0;};
+  for(const E of edges){E.L=arclen(E.P);E.clr=[clearFrom(E.P,E.L,0),clearFrom(E.P,E.L,1)];}
+  const isFreeLab=k=>freeL.has(k);
+  // a short branch with a free end is scan noise (a bump or speck on a line); real dead-end
+  // lines in a pattern are much longer than ~3 line widths
+  edges=edges.filter(E=>E.closed||!((isFreeLab(E.a)||isFreeLab(E.e)||E.e==null)&&E.L[E.L.length-1]<5*u));
+  const parent=new Map();cent.forEach((c,k)=>{if(k)parent.set(k,k);});
+  const find=k=>{while(parent.get(k)!==k){parent.set(k,parent.get(parent.get(k)));k=parent.get(k);}return k;};
+  const union=(a,b)=>{a=find(a);b=find(b);if(a!==b)parent.set(b,a);};
+  edges=edges.filter(E=>{if(!E.closed&&E.a!=null&&E.e!=null&&E.a!==E.e&&E.L[E.L.length-1]<2.5*u&&!isFreeLab(E.a)&&!isFreeLab(E.e)){union(E.a,E.e);return false;}return true;});
+  const incident=()=>{const inc=new Map();edges.forEach((E,i)=>{if(E.closed)return;[[0,E.a],[1,E.e]].forEach(([s,k])=>{if(k!=null){const r=find(k);if(!inc.has(r))inc.set(r,[]);inc.get(r).push([i,s]);}});});return inc;};
+  // shallow crossings
+  let changed=true;
+  while(changed){changed=false;const inc=incident();
+    for(let i=0;i<edges.length;i++){const E=edges[i];if(E.closed||E.a==null||E.e==null)continue;
+      const A=find(E.a),B=find(E.e);if(A===B||E.L[E.L.length-1]>14*u||(inc.get(A)||[]).length!==3||(inc.get(B)||[]).length!==3)continue;
+      const oa=inc.get(A).filter(([j])=>j!==i),ob=inc.get(B).filter(([j])=>j!==i);if(oa.length!==2||ob.length!==2)continue;
+      const da=oa.map(([j,s])=>endDir(edges[j].P,s,u,edges[j].L)[1]),db=ob.map(([j,s])=>endDir(edges[j].P,s,u,edges[j].L)[1]);
+      const neg=v=>[-v[0],-v[1]];
+      // the better of the two ways to pair the ends up into two through-lines
+      let best=Infinity,bp=0;for(const p of[0,1]){const v=angDeg(neg(da[0]),db[p])+angDeg(neg(da[1]),db[1-p]);if(v<best){best=v;bp=p;}}
+      const spread=angDeg(da[0],da[1]);
+      // in a real shallow crossing the short shared stretch runs along both lines; a short
+      // connector between two separate lines runs across them
+      let link=[E.P[E.P.length-1][0]-E.P[0][0],E.P[E.P.length-1][1]-E.P[0][1]];const ln=norm2(link)||1;link=[link[0]/ln,link[1]/ln];
+      if(E.a!==undefined&&find(E.a)!==A)link=[-link[0],-link[1]];
+      const along=Math.max(angDeg(neg(da[0]),link),angDeg(neg(da[1]),link),angDeg(link,db[bp]),angDeg(link,db[1-bp]));
+      // and the ink along that stretch is doubled up (two lines overlapping side by side); if it is
+      // only one line wide, the two lines run together there (shared lead) and stay two joints
+      const thk=E.P.map(q=>{const yy=Math.round(q[0]),xx=Math.round(q[1]);return(yy>=0&&xx>=0&&yy<H&&xx<W)?(2*dmap[yy*W+xx]-1)/med:0;});
+      const mid=thk.slice(Math.floor(thk.length*.2),Math.ceil(thk.length*.8)).sort((p,q)=>p-q);
+      const doubled=mid.length>0&&mid[0]>=1.2&&mid[mid.length>>1]>=1.3;
+      const pairDev=Math.max(angDeg(neg(da[0]),db[bp]),angDeg(neg(da[1]),db[1-bp]));   // both lines must run straight through
+      if(best<60&&pairDev<=20&&spread>8&&along<60&&doubled){union(A,B);edges.splice(i,1);changed=true;break;}}}
+  // a V whose tip sits on another line through a very short stub (the two sides of a petal meeting
+  // right at the line): the sides meet the line itself, at one point
+  {const inc0=incident();
+    for(let i=edges.length-1;i>=0;i--){const E=edges[i];if(E.closed||E.a==null||E.e==null)continue;const tot=E.L[E.L.length-1];if(tot>3.5*med)continue;
+      const A=find(E.a),B=find(E.e);if(A===B)continue;const la=inc0.get(A)||[],lb=inc0.get(B)||[];if(la.length!==3||lb.length!==3)continue;
+      const test=(lv,sv,lt,st)=>{const ov=lv.filter(([j])=>j!==i),ot=lt.filter(([j])=>j!==i);if(ov.length!==2||ot.length!==2)return false;
+        const dv=ov.map(([j,s])=>endDir(edges[j].P,s,u,edges[j].L)[1]),dt=ot.map(([j,s])=>endDir(edges[j].P,s,u,edges[j].L)[1]);
+        const dl=endDir(E.P,sv,u,E.L)[1];
+        return angDeg(dv[0],dv[1])<70&&dv.every(d=>angDeg(d,dl)>=110)&&angDeg(dt[0],dt[1])>=160;};
+      // only where the stub is the two sides' ink run together (wider than one line all along), not a
+      // real short line of its own
+      const thk=E.P.map(q=>{const yy=Math.round(q[0]),xx=Math.round(q[1]);return(yy>=0&&xx>=0&&yy<H&&xx<W)?(2*dmap[yy*W+xx]-1)/med:0;});
+      const midT=thk.slice(Math.floor(thk.length*.2),Math.ceil(thk.length*.8));if(!midT.length||Math.min(...midT)<1.25)continue;
+      if(test(lb,1,la,0)||test(la,0,lb,1)){union(A,B);edges.splice(i,1);}}}
+  const inc=incident();
+  const nodePos=new Map();{const acc=new Map();cent.forEach((c,k)=>{if(!k)return;const r=find(k);if(!acc.has(r))acc.set(r,[0,0,0]);const t=acc.get(r);t[0]+=c[0];t[1]+=c[1];t[2]++;});
+    acc.forEach((t,r)=>nodePos.set(r,[t[0]/t[2],t[1]/t[2]]));}
+  const isFree=new Set([...freeL].map(find));
+  // pairing, with overlap-aware directions
+  for(const E of edges)E.clr2=[2*u,2*u];
+  inc.forEach(lst=>{const d0=lst.map(([j,s])=>endDir(edges[j].P,s,u,edges[j].L)[1]);
+    lst.forEach(([j,s],x)=>{let mn=Infinity;lst.forEach((_,y)=>{if(y!==x)mn=Math.min(mn,Math.acos(Math.max(-1,Math.min(1,d0[x][0]*d0[y][0]+d0[x][1]*d0[y][1]))));});
+      if(mn<Infinity){const t=Math.max(mn,8*Math.PI/180);edges[j].clr2[s]=Math.max(2*u,Math.min(8*u,0.5*med/Math.sin(t/2)+u));}});});
+  const ends=new Map(),partner=new Map();const key=(j,s)=>j*2+s;
+  inc.forEach((lst,k)=>{const info=lst.map(([j,s])=>{const[a,d,cv]=endDir(edges[j].P,s,u,edges[j].L,edges[j].clr2[s]);ends.set(key(j,s),{node:k,anchor:a,dir:d,curve:cv,reach:edges[j].clr2[s]});return[j,s,a,d];});
+    if(lst.length===2){const ang=angDeg(info[0][3],info[1][3]);const corner=ang<145;
+      partner.set(key(info[0][0],info[0][1]),[info[1][0],info[1][1],corner]);partner.set(key(info[1][0],info[1][1]),[info[0][0],info[0][1],corner]);return;}
+    const allp=[];for(let x=0;x<info.length;x++)for(let y=x+1;y<info.length;y++)allp.push([angDeg(info[x][3],info[y][3]),x,y]);
+    allp.sort((p,q)=>q[0]-p[0]);const pairs=[];
+    allp.forEach((pp,r)=>{if(pp[0]>150)pairs.push(pp);else if(r===0&&info.length===3&&pp[0]>=115&&pp[0]-allp[1][0]>=25)pairs.push(pp);});
+    // a Y whose two arms run into each other in a rounded bottom (a U with a stem under it): the arms
+    // are one curve and the stem lands on it. Seen as the arms opening out toward each other right at
+    // the junction, compared with farther out.
+    if(!pairs.length&&info.length===3){const np_=nodePos.get(find(k))||cent[k];
+      const dirAt=([j,s],m)=>{const E=edges[j],tot=E.L[E.L.length-1];const q=at(E.P,s===0?Math.min(tot,m*med):Math.max(0,tot-m*med),E.L);const v=[q[0]-np_[0],q[1]-np_[1]],n=Math.hypot(v[0],v[1])||1;return[v[0]/n,v[1]/n];};
+      for(const[x,y,z]of[[0,1,2],[0,2,1],[1,2,0]]){const prof=[1.5,2,3,4,6].map(m=>angDeg(dirAt(lst[x],m),dirAt(lst[y],m)));
+        const steady=prof.every((v,i)=>i===0||v<=prof[i-1]+3);
+        const sym=Math.abs(angDeg(info[z][3],info[x][3])-angDeg(info[z][3],info[y][3]));
+        if(steady&&prof[0]>=125&&prof[0]-prof[4]>=25&&sym<=12){pairs.push([prof[0],x,y]);break;}}}
+    const used=new Set();pairs.sort((p,q)=>q[0]-p[0]);
+    for(const[,x,y]of pairs){if(used.has(x)||used.has(y))continue;used.add(x);used.add(y);
+      partner.set(key(info[x][0],info[x][1]),[info[y][0],info[y][1],false]);partner.set(key(info[y][0],info[y][1]),[info[x][0],info[x][1],false]);}});
+  // Two lines that run into each other at a shallow angle and then share a short stretch of ink:
+  // which of them carries on past that stretch? The one whose bend continues smoothly into the
+  // line on the far side (so a curving edge stays one even curve, without a bump where the
+  // other line joins it).
+  {const rmsCircle=P=>{const M=[[0,0,0],[0,0,0],[0,0,0]],v=[0,0,0];
+      for(const p of P){const r=[p[0],p[1],1],z=p[0]*p[0]+p[1]*p[1];for(let i=0;i<3;i++){v[i]+=r[i]*z;for(let j=0;j<3;j++)M[i][j]+=r[i]*r[j];}}
+      const[A,B,C0]=solve3(M,v);const c=[A/2,B/2],r=Math.sqrt(Math.max(0,C0+c[0]*c[0]+c[1]*c[1]));if(!isFinite(r)||r<=0)return Infinity;
+      let e=0;for(const p of P){const d=Math.hypot(p[0]-c[0],p[1]-c[1])-r;e+=d*d;}return Math.sqrt(e/P.length);};
+    const samp=(j,s,len)=>{const E=edges[j],tot=E.L[E.L.length-1],out=[];for(let t=0;t<=Math.min(len,tot);t+=2)out.push(at(E.P,s===0?t:tot-t,E.L));return out;};
+    inc.forEach((lst)=>{if(lst.length!==3)return;
+      for(const[j,s]of lst){const E=edges[j];const tot=E.L[E.L.length-1];if(tot>8*med)continue;
+        const cur=partner.get(key(j,s)),far=partner.get(key(j,1-s));if(!cur||!far||cur[2]||far[2])continue;
+        const others=lst.filter(([jj,ss])=>!(jj===j&&ss===s));if(others.some(([jj])=>jj===j))continue;
+        const dA=others.map(([jj,ss])=>ends.get(key(jj,ss)).dir),dl=ends.get(key(j,s)).dir;
+        if(angDeg(dA[0],dA[1])>35||dA.some(d=>angDeg(d,dl)<140))continue;
+        const link=samp(j,s,tot),ahead=samp(far[0],far[1],6*med);
+        const score=others.map(([jj,ss])=>rmsCircle([...samp(jj,ss,6*med).reverse(),...link,...ahead]));
+        const bi=score[0]<=score[1]?0:1,[cj,cs]=others[bi],[oj,os]=others[1-bi];
+        if(cur[0]===cj&&cur[1]===cs)continue;
+        if(score[bi]>0.7*score[1-bi])continue;                       // only when clearly the smoother one
+        partner.delete(key(oj,os));partner.set(key(j,s),[cj,cs,false]);partner.set(key(cj,cs),[j,s,false]);}});}
+  // chains
+  const visited=new Set(),chains=[];
+  const walk=(j,sIn)=>{const seq=[],joins=[];let cur=j,side=sIn;
+    while(true){visited.add(cur);const rev=side===1;seq.push([cur,rev]);const out=rev?0:1;const nx=partner.get(key(cur,out));
+      if(!nx)return{seq,joins,last:[cur,out]};const[j2,s2,corner]=nx;if(visited.has(j2))return{seq,joins,last:[cur,out]};
+      joins.push(corner);cur=j2;side=s2;}};
+  edges.forEach((E,i)=>{if(visited.has(i)||E.closed)return;const starts=[0,1].filter(s=>!partner.has(key(i,s)));if(!starts.length)return;
+    const r=walk(i,starts[0]);chains.push({seq:r.seq,joins:r.joins,start:[i,starts[0]],end:r.last,closed:false});});
+  edges.forEach((E,i)=>{if(visited.has(i))return;if(E.closed){visited.add(i);chains.push({seq:[[i,false]],joins:[],start:null,end:null,closed:true});return;}
+    const r=walk(i,0);chains.push({seq:r.seq,joins:r.joins,start:[i,0],end:r.last,closed:true});});
+  // raw geometry
+  const touches=(j,s)=>{const k=s===0?edges[j].a:edges[j].e;return k!=null&&!isFree.has(find(k));};
+  for(const C of chains){
+    if(C.seq.length===1&&edges[C.seq[0][0]].closed){const P=edges[C.seq[0][0]].P;C.raw=[...P,P[0].slice()];C.w=new Array(P.length+1).fill(1);continue;}
+    const pieces=[],weights=[];
+    C.seq.forEach(([j,rev],t)=>{let P=edges[j].P,L=edges[j].L;const tot=L[L.length-1];
+      if(rev){P=P.slice().reverse();const L2=new Float64Array(L.length);for(let i=0;i<L.length;i++)L2[i]=tot-L[L.length-1-i];L=L2;}
+      const sFirst=rev?1:0,sLast=rev?0:1;
+      const lo=touches(j,sFirst)?Math.min(Dt,0.35*tot):0,hi=touches(j,sLast)?Math.max(tot-Dt,0.65*tot):tot;
+      const Q=[at(P,lo,L)];for(let i=0;i<P.length;i++)if(L[i]>lo&&L[i]<hi)Q.push(P[i]);Q.push(at(P,hi,L));
+      const wq=new Array(Q.length).fill(1);
+      if(t>0){const lw=weights[weights.length-1];lw[lw.length-1]=Math.min(lw[lw.length-1],GAP);wq[0]=GAP;
+        if(C.joins[t-1]){const[pj,prevRev]=C.seq[t-1];const pe=ends.get(key(pj,prevRev?0:1)),ce=ends.get(key(j,sFirst));
+          const np=nodePos.get(ce.node);let cp=lsqPoint([pe.anchor,ce.anchor],[pe.dir,ce.dir],np);if(Math.hypot(cp[0]-np[0],cp[1]-np[1])>3*u)cp=np.slice();
+          pieces.push([cp]);weights.push([PIN]);}}
+      pieces.push(Q);weights.push(wq);});
+    if(C.closed){weights[weights.length-1][weights[weights.length-1].length-1]=GAP;weights[0][0]=GAP;pieces.push([pieces[0][0].slice()]);weights.push([GAP]);}
+    C.raw=[].concat(...pieces);C.w=[].concat(...weights);}
+  // corners inside traced lines
+  const K=Math.max(4,Math.round(1.8*u));
+  const findCorners=(Q,closed)=>{const n=Q.length;if(n<2*K+3)return[];const idx=[],ang=[];
+    for(let i=closed?0:K;i<(closed?n:n-K);i++){const a=Q[closed?(i-K+n)%n:i-K],b=Q[closed?(i+K)%n:i+K];
+      const v1=[Q[i][0]-a[0],Q[i][1]-a[1]],v2=[b[0]-Q[i][0],b[1]-Q[i][1]];
+      ang.push(Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(norm2(v1)*norm2(v2)+1e-9)))));idx.push(i);}
+    const out=[];for(let jj=0;jj<idx.length;jj++){if(ang[jj]<=40*Math.PI/180)continue;let mx=0;for(let t=Math.max(0,jj-K);t<=Math.min(ang.length-1,jj+K);t++)mx=Math.max(mx,ang[t]);
+      if(ang[jj]===mx&&(!out.length||idx[jj]-out[out.length-1]>K))out.push(idx[jj]);}
+    return out;};
+  const land=new Map(),landTrim=new Map(),landOn=new Map(),landAng=new Map();
+  const isFreeEnd=k2=>{const[j,s]=k2;const k=s===0?edges[j].a:edges[j].e;return k==null||isFree.has(find(k));};
+  const prepChain=C=>{let raw=C.raw.map(q=>q.slice()),w0=C.w.slice();
+    if(!C.closed){for(const[k2,pos]of[[C.start,0],[C.end,-1]]){if(!k2)continue;const kk=key(k2[0],k2[1]);if(!landTrim.has(kk))continue;
+        const L_=arclen(raw),tot=L_[L_.length-1];const keep=[];for(let i=0;i<raw.length;i++){const dist=pos===0?L_[i]:tot-L_[i];if(dist>=landTrim.get(kk))keep.push(i);}
+        if(keep.length>4){raw=keep.map(i=>raw[i]);w0=keep.map(i=>w0[i]);}}
+      for(const[k2,pos]of[[C.start,0],[C.end,-1]]){if(!k2)continue;const kk=key(k2[0],k2[1]);if(!land.has(kk))continue;
+        const L_=arclen(raw),tot=L_[L_.length-1];const z=Math.min(Math.max(0,edges[k2[0]].clr2[k2[1]]-Dt),0.12*tot);/* never let the low-trust zone eat a short line's own shape */
+        for(let i=0;i<raw.length;i++){const dist=pos===0?L_[i]:tot-L_[i];if(dist<z&&w0[i]<1e5)w0[i]=GAP;}
+        if(pos===0){w0[0]=GAP;raw.unshift(land.get(kk).slice());w0.unshift(PIN);}else{w0[w0.length-1]=GAP;raw.push(land.get(kk).slice());w0.push(PIN);}}}
+    let[Q,w]=resampleKeep(raw,w0);const pins=[];w.forEach((v,i)=>{if(v>=1e5)pins.push(i);});
+    const base=C.closed?Q.slice(0,-1):Q;
+    for(const i of (C.noCorners?[]:findCorners(base,C.closed))){
+      if(pins.some(p=>Math.abs(i-p)<3*K)||(!C.closed&&(i<3*K||i>Q.length-1-3*K)))continue;
+      const L=arclen(Q),d0=L[i];const ia=at(Q,d0-2*u,L),ib=at(Q,d0-6*u,L),ja=at(Q,d0+2*u,L),jb=at(Q,d0+6*u,L);
+      const nrm=v=>{const n=norm2(v)+1e-9;return[v[0]/n,v[1]/n];};
+      let cp=lsqPoint([ia,ja],[nrm([ib[0]-ia[0],ib[1]-ia[1]]),nrm([jb[0]-ja[0],jb[1]-ja[1]])],Q[i]);
+      if(Math.hypot(cp[0]-Q[i][0],cp[1]-Q[i][1])>3*u)cp=Q[i].slice();
+      for(let t=0;t<Q.length;t++)if(Math.abs(L[t]-d0)<2*u)w[t]=GAP;Q[i]=cp;w[i]=PIN;pins.push(i);}
+    if(C.closed&&!pins.length)return{Q:Q.slice(0,-1),w:w.slice(0,-1),loop:true};
+    if(C.closed){const r=Math.min(...pins);Q=[...Q.slice(r,-1),...Q.slice(0,r+1)];w=[...w.slice(r,-1),...w.slice(0,r+1)];}
+    const cuts=[0,Q.length-1];w.forEach((v,i)=>{if(v>=1e5)cuts.push(i);});const cs=[...new Set(cuts)].sort((a,b)=>a-b);
+    // which ends are points where this line ends on another line (fixed points for straightening)
+    let landS=false,landE=false;const shallow=k2=>{if(!k2)return false;const a=landAng.get(key(k2[0],k2[1]));return a!=null&&a<45;};if(!C.closed){landS=shallow(C.start);landE=shallow(C.end);}
+    return{Q,w,cs,loop:false,closed:C.closed,landS,landE};};
+
+  // ---------------- straight lines and circles ----------------
+  // Stretches that are straight (or circular) within a small tolerance are replaced by an exact
+  // straight line (or circular arc); stretches of the same line or circle in different chains are
+  // fitted together; corners become exact intersections. Freeform curves are left as they are.
+  const realPts=(Q,w,a,b)=>{const o=[];for(let i=a;i<=b;i++)if(w[i]>0.5&&w[i]<1e5)o.push(Q[i]);return o;};
+  const fitLine=P=>{const n=P.length;let m0=0,m1=0;for(const p of P){m0+=p[0];m1+=p[1];}m0/=n;m1/=n;
+    let s00=0,s01=0,s11=0;for(const p of P){const a=p[0]-m0,b=p[1]-m1;s00+=a*a;s01+=a*b;s11+=b*b;}
+    const th=0.5*Math.atan2(2*s01,s00-s11);const d=[Math.cos(th),Math.sin(th)],nn=[-d[1],d[0]];
+    let dev=0;for(const p of P)dev=Math.max(dev,Math.abs((p[0]-m0)*nn[0]+(p[1]-m1)*nn[1]));
+    return{type:'line',c:[m0,m1],d,n:nn,dev};};
+  const fitCircle=P=>{const n=P.length;let M=[[0,0,0],[0,0,0],[0,0,0]],v=[0,0,0];
+    for(const p of P){const r=[p[0],p[1],1],z=p[0]*p[0]+p[1]*p[1];for(let i=0;i<3;i++){v[i]+=r[i]*z;for(let j=0;j<3;j++)M[i][j]+=r[i]*r[j];}}
+    let[A,B,C0]=solve3(M,v);let c=[A/2,B/2],r=Math.sqrt(Math.max(0,C0+c[0]*c[0]+c[1]*c[1]));
+    if(!isFinite(r)||r<=0)return null;
+    for(let it=0;it<6;it++){const N=[[0,0,0],[0,0,0],[0,0,0]],g=[0,0,0];
+      for(const p of P){const dx=p[0]-c[0],dy=p[1]-c[1],dd=Math.hypot(dx,dy)||1e-9;const res=dd-r,J=[-dx/dd,-dy/dd,-1];
+        for(let i=0;i<3;i++){g[i]+=J[i]*res;for(let j=0;j<3;j++)N[i][j]+=J[i]*J[j];}}
+      const st=solve3(N,g);if(!st.every(isFinite))break;c=[c[0]-st[0],c[1]-st[1]];r=r-st[2];}
+    let dev=0;for(const p of P)dev=Math.max(dev,Math.abs(Math.hypot(p[0]-c[0],p[1]-c[1])-r));
+    let prev=Math.atan2(P[0][1]-c[1],P[0][0]-c[0]),tot=0;
+    for(const p of P){const an=Math.atan2(p[1]-c[1],p[0]-c[0]);let da=an-prev;while(da>Math.PI)da-=2*Math.PI;while(da<-Math.PI)da+=2*Math.PI;tot+=da;prev=an;}
+    return{type:'circle',c,r,dev,sweep:Math.abs(tot)*180/Math.PI};};
+  const fitLineThrough=(P,A)=>{if(!A.length)return fitLine(P);let d;
+    if(A.length>=2){d=[A[1][0]-A[0][0],A[1][1]-A[0][1]];}
+    else{let s00=0,s01=0,s11=0;for(const p of P){const a=p[0]-A[0][0],b=p[1]-A[0][1];s00+=a*a;s01+=a*b;s11+=b*b;}const th=0.5*Math.atan2(2*s01,s00-s11);d=[Math.cos(th),Math.sin(th)];}
+    const dn=norm2(d);if(dn<1e-9)return fitLine(P);d=[d[0]/dn,d[1]/dn];const nn=[-d[1],d[0]],c=A[0];
+    let dev=0;for(const p of P)dev=Math.max(dev,Math.abs((p[0]-c[0])*nn[0]+(p[1]-c[1])*nn[1]));
+    return{type:'line',c:c.slice(),d,n:nn,dev,anch:A.length};};
+  const fitCircleThrough=(P,A)=>{const base=fitCircle(P);if(!base||!A.length)return base;
+    // centre parameterised so the circle passes through the anchors exactly
+    let par,toC;
+    if(A.length>=2){const m=[(A[0][0]+A[1][0])/2,(A[0][1]+A[1][1])/2];let pd=[-(A[1][1]-A[0][1]),A[1][0]-A[0][0]];const l=norm2(pd)||1;pd=[pd[0]/l,pd[1]/l];
+      toC=t=>[m[0]+t[0]*pd[0],m[1]+t[0]*pd[1]];par=[(base.c[0]-m[0])*pd[0]+(base.c[1]-m[1])*pd[1]];}
+    else{toC=t=>[t[0],t[1]];par=base.c.slice();}
+    const cost=t=>{const c=toC(t),r=Math.hypot(A[0][0]-c[0],A[0][1]-c[1]);let s=0;for(const p of P){const e=Math.hypot(p[0]-c[0],p[1]-c[1])-r;s+=e*e;}return s;};
+    let step=Math.max(1,base.r*0.05);
+    for(let it=0;it<200&&step>1e-3;it++){let improved=false;
+      for(let k=0;k<par.length;k++)for(const sg of[1,-1]){const t=par.slice();t[k]+=sg*step;if(cost(t)<cost(par)){par=t;improved=true;}}
+      if(!improved)step/=2;}
+    const c=toC(par),r=Math.hypot(A[0][0]-c[0],A[0][1]-c[1]);
+    let dev=0;for(const p of P)dev=Math.max(dev,Math.abs(Math.hypot(p[0]-c[0],p[1]-c[1])-r));
+    return{type:'circle',c,r,dev,sweep:base.sweep,anch:A.length};};
+  // straight: bow within 0.4% of the length (hand-drawn straight lines bow ~0.3%; drawn curves far more)
+  const tolLine=L=>Math.max(2,0.2*med,0.004*L),tolCirc=L=>Math.max(2,0.2*med,0.0012*L);
+  const classify=(P,L,A)=>{A=A||[];if(P.length<10)return null;const ln=fitLineThrough(P,A),ci=fitCircleThrough(P,A);
+    const lineOk=ln.dev<=tolLine(L)&&!(ci&&ci.dev<=0.3*ln.dev&&ci.sweep>=5);
+    if(lineOk)return ln;
+    if(ci&&ci.dev<=tolCirc(L)&&ci.sweep>=20&&L>=12*med&&ci.r<3*Math.max(W,H))return ci;
+    return null;};
+  const project=(pr,p)=>{if(pr.type==='line'){const t=(p[0]-pr.c[0])*pr.d[0]+(p[1]-pr.c[1])*pr.d[1];return[pr.c[0]+t*pr.d[0],pr.c[1]+t*pr.d[1]];}
+    const dx=p[0]-pr.c[0],dy=p[1]-pr.c[1],dd=Math.hypot(dx,dy)||1e-9;return[pr.c[0]+dx/dd*pr.r,pr.c[1]+dy/dd*pr.r];};
+  const intersect=(A,B,ref)=>{let cands=[];
+    const lineAsPts=l=>l;
+    if(A.type==='line'&&B.type==='line'){const det=A.d[0]*(-B.d[1])+B.d[0]*A.d[1];if(Math.abs(det)<1e-6)return null;
+      const rx=B.c[0]-A.c[0],ry=B.c[1]-A.c[1];const t=(rx*(-B.d[1])+B.d[0]*ry)/det;cands=[[A.c[0]+t*A.d[0],A.c[1]+t*A.d[1]]];}
+    else if(A.type==='circle'&&B.type==='circle'){const dx=B.c[0]-A.c[0],dy=B.c[1]-A.c[1],D=Math.hypot(dx,dy);
+      if(D<1e-9||D>A.r+B.r||D<Math.abs(A.r-B.r))return null;const aa=(A.r*A.r-B.r*B.r+D*D)/(2*D),h=Math.sqrt(Math.max(0,A.r*A.r-aa*aa));
+      const m=[A.c[0]+aa*dx/D,A.c[1]+aa*dy/D];cands=[[m[0]+h*dy/D,m[1]-h*dx/D],[m[0]-h*dy/D,m[1]+h*dx/D]];}
+    else{const L_=A.type==='line'?A:B,Cc=A.type==='line'?B:A;const fx=L_.c[0]-Cc.c[0],fy=L_.c[1]-Cc.c[1];
+      const bq=2*(fx*L_.d[0]+fy*L_.d[1]),cq=fx*fx+fy*fy-Cc.r*Cc.r,disc=bq*bq-4*cq;if(disc<0)return null;
+      for(const sg of[-1,1]){const t=(-bq+sg*Math.sqrt(disc))/2;cands.push([L_.c[0]+t*L_.d[0],L_.c[1]+t*L_.d[1]]);}}
+    let best=null,bd=Infinity;for(const p of cands){const d=Math.hypot(p[0]-ref[0],p[1]-ref[1]);if(d<bd){bd=d;best=p;}}
+    return bd<=3*u?best:null;};
+  const sampleRun=(pr,p0,p1,ref)=>{const out=[p0];
+    if(pr.type==='line'){const L=Math.hypot(p1[0]-p0[0],p1[1]-p0[1]),n=Math.max(1,Math.ceil(L));for(let i=1;i<=n;i++){const t=i/n;out.push([p0[0]+t*(p1[0]-p0[0]),p0[1]+t*(p1[1]-p0[1])]);}return out;}
+    const a0=Math.atan2(p0[1]-pr.c[1],p0[0]-pr.c[0]),a1=Math.atan2(p1[1]-pr.c[1],p1[0]-pr.c[0]);
+    // go round the same way the original line does (decided by a point in the middle of the run)
+    const am=Math.atan2(ref[1]-pr.c[1],ref[0]-pr.c[0]);const norm=x=>{while(x<0)x+=2*Math.PI;while(x>=2*Math.PI)x-=2*Math.PI;return x;};
+    let span=norm(a1-a0);if(norm(am-a0)>span)span=span-2*Math.PI;
+    const n=Math.max(2,Math.ceil(Math.abs(span)*pr.r));for(let i=1;i<=n;i++){const an=a0+span*i/n;out.push([pr.c[0]+pr.r*Math.cos(an),pr.c[1]+pr.r*Math.sin(an)]);}
+    out[out.length-1]=p1.slice();return out;};
+  const analyze=pc=>{const{Q,w}=pc;pc.runs=[];
+    if(pc.loop){const P=realPts(Q,w,0,Q.length-1);const L=Q.length;const ci=P.length>=10?fitCircle(P):null;
+      if(ci&&ci.dev<=tolCirc(L)&&ci.r<3*Math.max(W,H)){pc.full=ci;pc.runs=[{a:0,b:Q.length-1,pr:ci,pts:P,L}];return;}
+      // not a whole circle: open the loop at a junction crossing and treat it like an open chain
+      let st=0;for(let i=0;i<Q.length;i++)if(w[i]<0.5){st=i;break;}
+      pc.Q=[...Q.slice(st),...Q.slice(0,st+1)];pc.w=[...w.slice(st),...w.slice(0,st+1)];pc.cs=[0,pc.Q.length-1];pc.loopOpened=true;}
+    const Qq=pc.Q,ww=pc.w;
+    for(let c=0;c<pc.cs.length-1;c++){const a=pc.cs[c],b=pc.cs[c+1];if(b-a<1)continue;
+      // (a bridge that runs right up to the end of the chain, where it lands on another line, is the
+      // end of this stretch, not a break in it)
+      const bounds=[a];for(let i=a+1;i<b;i++){if(ww[i]<0.5){let j=i;while(j+1<b&&ww[j+1]<0.5)j++;
+          const endBridge=(j+1===b&&b===Qq.length-1&&pc.landE)||(i===a+1&&a===0&&pc.landS);if(!endBridge)bounds.push(Math.round((i+j)/2));i=j;}}bounds.push(b);
+      let i=0;const nseg=bounds.length-1;
+      while(i<nseg){let took=false;
+        for(let j=nseg-1;j>=i;j--){const ra=bounds[i],rb=bounds[j+1];const P=realPts(Qq,ww,ra,rb);
+          const A=[];if(ra===0&&pc.landS)A.push(Qq[ra]);if(rb===Qq.length-1&&pc.landE)A.push(Qq[rb]);
+          const pr=classify(P,rb-ra,A);
+          if(pr){pc.runs.push({a:ra,b:rb,pr,pts:P,L:rb-ra,anchors:A});i=j+1;took=true;break;}}
+        if(!took){const ra=bounds[i],rb=bounds[i+1];const last=pc.runs[pc.runs.length-1];
+          if(last&&!last.pr&&last.b===ra)last.b=rb;else pc.runs.push({a:ra,b:rb,pr:null});i++;}}}
+    // keep a straight line / circle only where it is clearly intended: a whole line from end to
+    // end (or corner to corner), or a long stretch; never chop a freeform curve into pieces
+    const ends=new Set(pc.cs);
+    pc.runs.forEach(r=>{if(!r.pr)return;const whole=ends.has(r.a)&&ends.has(r.b);const p=r.pr;
+      const keep=p.type==='line'?(whole?r.L>=6*med:r.L>=25*med):(p.sweep>=30&&(whole?r.L>=15*med:r.L>=40*med));
+      if(!keep)r.pr=null;});
+    const merged=[];for(const r of pc.runs){const last=merged[merged.length-1];if(last&&!last.pr&&!r.pr&&last.b===r.a)last.b=r.b;else merged.push(r);}
+    pc.runs=merged;};
+  // fit stretches of the same straight line / circle together, across chains
+  const mergePrims=pcs=>{const runs=[];pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr)runs.push(r);}));
+    const par=runs.map((_,i)=>i);const fd=i=>par[i]===i?i:(par[i]=fd(par[i]));
+    for(let i=0;i<runs.length;i++)for(let j=i+1;j<runs.length;j++){const A=runs[i].pr,B=runs[j].pr;if(A.type!==B.type)continue;
+      if(A.type==='line'){if(Math.abs(A.d[0]*B.d[0]+A.d[1]*B.d[1])<Math.cos(Math.PI/180))continue;
+        if(Math.abs((B.c[0]-A.c[0])*A.n[0]+(B.c[1]-A.c[1])*A.n[1])>0.4*med)continue;}
+      else if(Math.hypot(A.c[0]-B.c[0],A.c[1]-B.c[1])>0.6*med||Math.abs(A.r-B.r)>0.6*med)continue;
+      par[fd(j)]=fd(i);}
+    const groups=new Map();runs.forEach((r,i)=>{const g=fd(i);if(!groups.has(g))groups.set(g,[]);groups.get(g).push(r);});
+    groups.forEach(g=>{if(g.length<2)return;const P=[].concat(...g.map(r=>r.pts));const L=g.reduce((s,r)=>s+r.L,0);
+      const anc=[].concat(...g.map(r=>r.anchors||[]));const Pw=P.slice();for(const a of anc)for(let k=0;k<200;k++)Pw.push(a);
+      const pr=g[0].pr.type==='line'?fitLine(Pw):fitCircle(Pw);if(!pr)return;
+      for(const a of anc){const q=project(pr,a);if(Math.hypot(q[0]-a[0],q[1]-a[1])>0.15*med)return;}   // joints must stay put
+      let dv=0;for(const p of P){const q=project(pr,p);dv=Math.max(dv,Math.hypot(q[0]-p[0],q[1]-p[1]));}pr.dev=dv;
+      const ok=pr.type==='line'?pr.dev<=tolLine(L):pr.dev<=tolCirc(L);if(ok)g.forEach(r=>{r.pr=pr;});});
+    // a stretch that continues straight on from a long line or circle, and lies on it, becomes
+    // part of it (so a circular border broken up by junctions is one exact circle)
+    const strong=[];const tot=new Map();pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr)tot.set(r.pr,(tot.get(r.pr)||0)+r.L);}));
+    tot.forEach((L,pr)=>{if(pr.type==='line'?L>=25*med:L>=40*med)strong.push({pr,L,tol:pr.type==='line'?tolLine(L):tolCirc(L)});});
+    const endsOf=pr=>{const o=[];pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr===pr){o.push(pc.Q[r.a],pc.Q[r.b]);}}));return o;};
+    let changed=true,guard=0;
+    while(changed&&guard++<6){changed=false;
+      for(const st of strong){const E=endsOf(st.pr);
+        for(const pc of pcs){const nr=[];
+          for(const r of pc.runs){if(r.pr||r.b-r.a<3){nr.push(r);continue;}
+            const touch=E.some(e=>Math.hypot(e[0]-pc.Q[r.a][0],e[1]-pc.Q[r.a][1])<2*u||Math.hypot(e[0]-pc.Q[r.b][0],e[1]-pc.Q[r.b][1])<2*u);
+            if(!touch){nr.push(r);continue;}
+            const P=realPts(pc.Q,pc.w,r.a,r.b);if(P.length<6){nr.push(r);continue;}
+            const d=P.map(p=>{const q=project(st.pr,p);return Math.hypot(q[0]-p[0],q[1]-p[1]);});
+            if(Math.max(...d)<=st.tol){nr.push({a:r.a,b:r.b,pr:st.pr,pts:P,L:r.b-r.a});changed=true;}else nr.push(r);}
+          pc.runs=nr;}}}};
+  const squareUp=pcs=>{const prs=new Map();pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr&&r.pr.type==='line'){if(!prs.has(r.pr))prs.set(r.pr,[]);prs.get(r.pr).push(r);}}));
+    const dev=pr=>{let a=Math.atan2(pr.d[0],pr.d[1])*180/Math.PI;a=((a%90)+90)%90;if(a>45)a-=90;return a;};   // tilt from level/upright, degrees
+    const big=Math.max(W,H);const votes=[];prs.forEach((rs,pr)=>{const L=rs.reduce((s,r)=>s+r.L,0);if(L>=0.25*big&&Math.abs(dev(pr))<=3)votes.push([dev(pr),L]);});
+    if(!votes.length)return;votes.sort((a,b)=>a[0]-b[0]);const tot=votes.reduce((s,v)=>s+v[1],0);let acc=0;for(const v of votes){acc+=v[1];if(acc>=tot/2){frame=v[0];break;}}
+    prs.forEach((rs,pr)=>{const t=dev(pr);if(Math.abs(t-frame)>1.5)return;
+      const a=(Math.atan2(pr.d[0],pr.d[1])*180/Math.PI)-(t-frame);const ar=a*Math.PI/180;const d=[Math.sin(ar),Math.cos(ar)],nn=[-d[1],d[0]];
+      const P=[].concat(...rs.map(r=>r.pts));const anc=[].concat(...rs.map(r=>r.anchors||[]));
+      let c;if(anc.length){c=anc[0];}else{let o=0;for(const p of P)o+=(p[0]*nn[0]+p[1]*nn[1]);o/=P.length;const pr0=pr.c;const t0=(pr0[0]*d[0]+pr0[1]*d[1]);c=[t0*d[0]+o*nn[0],t0*d[1]+o*nn[1]];}
+      let dv=0;for(const p of P)dv=Math.max(dv,Math.abs((p[0]-c[0])*nn[0]+(p[1]-c[1])*nn[1]));
+      const L=rs.reduce((s,r)=>s+r.L,0);if(dv>3*tolLine(L))return;        // squaring would move it too far: leave it
+      pr.c=c;pr.d=d;pr.n=nn;pr.dev=dv;});};
+  const renderPC=pc=>{if(pc.loop&&!opt.exact){const Z=smoothPiece(pc.Q,pc.w,u,strength,true);return[...Z,Z[0]];}
+    if(pc.full){const c=pc.full,a0=Math.atan2(pc.Q[0][1]-c.c[1],pc.Q[0][0]-c.c[0]);
+      const sgn=(()=>{const q=pc.Q[Math.floor(pc.Q.length/4)];const am=Math.atan2(q[1]-c.c[1],q[0]-c.c[0]);let d=am-a0;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d>=0?1:-1;})();
+      const n=Math.max(16,Math.ceil(2*Math.PI*c.r)),out=[];for(let i=0;i<=n;i++){const an=a0+sgn*2*Math.PI*i/n;out.push([c.c[0]+c.r*Math.cos(an),c.c[1]+c.r*Math.sin(an)]);}return out;}
+    const{Q,w,runs}=pc;if(!runs.length)return Q;
+    // shared point at every boundary between runs (and at chain ends / corners)
+    const bpt=new Map();
+    const boundary=(idx,L,R)=>{let p=Q[idx].slice();
+      if(L&&L.pr&&R&&R.pr&&L.pr!==R.pr){const x=intersect(L.pr,R.pr,Q[idx]);if(x)p=x;else{const a=project(L.pr,Q[idx]),b=project(R.pr,Q[idx]);p=[(a[0]+b[0])/2,(a[1]+b[1])/2];}}
+      else if(L&&L.pr)p=project(L.pr,Q[idx]);else if(R&&R.pr)p=project(R.pr,Q[idx]);
+      bpt.set(idx,p);};
+    for(let i=0;i<runs.length;i++){const R=runs[i],L=i>0?runs[i-1]:null;
+      if(i===0){const wrapL=(pc.closed||pc.loopOpened)?runs[runs.length-1]:null;boundary(R.a,wrapL,R);}
+      else boundary(R.a,L,R);}
+    {const last=runs[runs.length-1];if(pc.closed||pc.loopOpened)bpt.set(last.b,bpt.get(runs[0].a));else boundary(last.b,last,null);}
+    let out=[];
+    for(const r of runs){const p0=bpt.get(r.a),p1=bpt.get(r.b);let seg;
+      if(r.pr)seg=sampleRun(r.pr,p0,p1,Q[Math.round((r.a+r.b)/2)]);
+      else{const q=Q.slice(r.a,r.b+1).map(x=>x.slice()),ws=w.slice(r.a,r.b+1);q[0]=p0.slice();q[q.length-1]=p1.slice();ws[0]=PIN;ws[ws.length-1]=PIN;
+        seg=q.length>=2?smoothPiece(q,ws,u,strength,false):q;
+        // where a free curve carries straight on from an exact line / circle (no corner there), ease
+        // it out of that shape's own direction over a short stretch, so the joint has no kink
+        const ri=runs.indexOf(r),cset=new Set(pc.cs||[]);
+        const ext=(pr,p,toward,len)=>{let t=pr.type==='line'?pr.d.slice():[-(p[1]-pr.c[1]),p[0]-pr.c[0]];const tn=norm2(t)||1;t=[t[0]/tn,t[1]/tn];
+          if((toward[0]-p[0])*t[0]+(toward[1]-p[1])*t[1]<0)t=[-t[0],-t[1]];const o2=[];
+          if(pr.type==='line'){for(let k2=0;k2<len;k2++)o2.push([p[0]+k2*t[0],p[1]+k2*t[1]]);return o2;}
+          const a0=Math.atan2(p[1]-pr.c[1],p[0]-pr.c[0]);const sg=Math.sign((p[0]-pr.c[0])*t[1]-(p[1]-pr.c[1])*t[0])||1;
+          for(let k2=0;k2<len;k2++){const an=a0+sg*k2/pr.r;o2.push([pr.c[0]+pr.r*Math.cos(an),pr.c[1]+pr.r*Math.sin(an)]);}return o2;};
+        const blend=(S2,E2)=>{for(let k2=0;k2<E2.length;k2++){const x=k2/E2.length,sm=x*x*(3-2*x);S2[k2]=[(1-sm)*E2[k2][0]+sm*S2[k2][0],(1-sm)*E2[k2][1]+sm*S2[k2][1]];}};
+        const Lb=Math.min(Math.round(8*u),Math.floor((seg.length-1)/2));
+        if(Lb>=3){const Lr=ri>0?runs[ri-1]:null,Rr=ri<runs.length-1?runs[ri+1]:null;
+          if(Lr&&Lr.pr&&!cset.has(r.a))blend(seg,ext(Lr.pr,seg[0],seg[Lb],Lb));
+          if(Rr&&Rr.pr&&!cset.has(r.b)){const rv=seg.slice().reverse();blend(rv,ext(Rr.pr,rv[0],rv[Lb],Lb));seg=rv.reverse();}}
+        }
+      out=out.length?out.concat(seg.slice(1)):seg;}
+    return out;};
+  const fitAll=()=>{const pcs=chains.map(C=>C.dead?null:prepChain(C));
+    pcs.forEach(pc=>{if(pc){if(opt.exact)analyze(pc);else{pc.runs=[];if(pc.loop){pc.cs=[0,pc.Q.length-1];}for(let c=0;c<(pc.cs||[]).length-1;c++)pc.runs.push({a:pc.cs[c],b:pc.cs[c+1],pr:null});}}});
+    if(opt.exact){mergePrims(pcs.filter(Boolean));if(opt.square)squareUp(pcs.filter(Boolean));}
+    return pcs.map(pc=>pc?renderPC(pc):[]);};
+  // pass 1
+  const stemNodes=new Map();
+  chains.forEach((C,ci)=>{if(C.closed)return;for(const k2 of[C.start,C.end]){if(k2&&!isFreeEnd(k2)&&ends.has(key(k2[0],k2[1]))){const nd=ends.get(key(k2[0],k2[1])).node;if(!stemNodes.has(nd))stemNodes.set(nd,[]);stemNodes.get(nd).push([ci,k2]);}}});
+  const through=new Map();
+  chains.forEach((C,ci)=>{for(const[j]of C.seq)for(const s of[0,1]){const k=s===0?edges[j].a:edges[j].e;if(k!=null&&partner.has(key(j,s))){const r=find(k);if(!through.has(r))through.set(r,new Set());through.get(r).add(ci);}}});
+  stemNodes.forEach((lst,k)=>{const np=nodePos.get(k);let p=np;
+    if(lst.length>1){p=lsqPoint(lst.map(([,k2])=>ends.get(key(k2[0],k2[1])).anchor),lst.map(([,k2])=>{const d=ends.get(key(k2[0],k2[1])).dir;return[-d[0],-d[1]];}),np);
+      if(Math.hypot(p[0]-np[0],p[1]-np[1])>3*u)p=np;}
+    for(const[,k2]of lst)land.set(key(k2[0],k2[1]),p.slice());});
+  say('Smoothing curves…');
+  let fitted=fitAll();
+  // pass 2: branches land on the fitted through-curve
+  const rayHit=(p,d,F)=>{let best=null;for(let i=0;i<F.length-1;i++){const a=F[i],b=F[i+1],e=[b[0]-a[0],b[1]-a[1]];
+      const det=d[0]*(-e[1])-(-e[0])*d[1];if(Math.abs(det)<1e-9)continue;const rx=a[0]-p[0],ry=a[1]-p[1];
+      const t=(rx*(-e[1])-(-e[0])*ry)/det,s_=(d[0]*ry-d[1]*rx)/det;
+      if(s_>=0&&s_<=1&&t>=-2*u&&t<=30*u&&(best===null||Math.abs(t)<Math.abs(best[0])))best=[t,[p[0]+t*d[0],p[1]+t*d[1]]];}
+    return best?best[1]:null;};
+  const segHit=(p,q,F)=>{for(let i=0;i<F.length-1;i++){const a=F[i],b=F[i+1];
+      const d1=[q[0]-p[0],q[1]-p[1]],e=[b[0]-a[0],b[1]-a[1]];const det=d1[0]*(-e[1])+e[0]*d1[1];if(Math.abs(det)<1e-9)continue;
+      const rx=a[0]-p[0],ry=a[1]-p[1];const t=(rx*(-e[1])+e[0]*ry)/det,s_=(d1[0]*ry-d1[1]*rx)/det;
+      if(t>=0&&t<=1&&s_>=0&&s_<=1){const ne=norm2(e)||1,nd=norm2(d1)||1;
+        const ang=Math.asin(Math.min(1,Math.abs(d1[0]*e[1]-d1[1]*e[0])/(ne*nd)))*180/Math.PI;
+        return{p:[p[0]+t*d1[0],p[1]+t*d1[1]],ang};}}return null;};
+  // where a branch meets the through-curve: follow the branch's own curve when it arrives
+  // at a clear angle; when it arrives nearly tangent (< 25 degrees) the curved extension is
+  // unreliable, so extend it straight instead
+  const meet=(e,F,fallback)=>{
+    if(e.curve){let prev=e.curve(0);const lim=e.reach+4*u;
+      for(let t=1;t<=lim;t+=1){const q=e.curve(t);const h=segHit(prev,q,F);if(h){if(h.ang>=25)return h.p;break;}prev=q;}}
+    const h=rayHit(e.anchor,[-e.dir[0],-e.dir[1]],F);if(h)return h;
+    // a line closing in on the curve at a shallow angle runs into it farther ahead (or merges with it
+    // without ever crossing): land where it comes within half a line width of the curve, as long as
+    // that stays near the junction
+    {const d=[-e.dir[0],-e.dir[1]];let best=null;
+      for(const f of F){const vx=f[0]-e.anchor[0],vy=f[1]-e.anchor[1],t=vx*d[0]+vy*d[1];if(t<=0||t>10*med)continue;
+        if(Math.abs(vx*d[1]-vy*d[0])<=0.5*med&&(best===null||t<best[0]))best=[t,f.slice()];}
+      if(best&&Math.hypot(best[1][0]-fallback[0],best[1][1]-fallback[1])<=4*med)return best[1];}
+    return fallback;};
+  stemNodes.forEach((lst,k)=>{const own=new Set(lst.map(([c])=>c));const cs=[...(through.get(k)||[])].filter(c=>!own.has(c));if(!cs.length)return;
+    const F=fitted[cs[0]];const np=nodePos.get(k);
+    const nearest=q=>{let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-q[0],f[1]-q[1]);if(d<bd){bd=d;bi=i;}});return F[bi].slice();};
+    const alongside=(j,sd,c)=>{ // is some other line from this junction within ~a line width, halfway into the zone?
+      const q=at(edges[j].P,sd===0?c/2:edges[j].L[edges[j].L.length-1]-c/2,edges[j].L);
+      for(const[jj,ss]of inc.get(k)||[]){if(jj===j)continue;const E2=edges[jj];const tot2=E2.L[E2.L.length-1];
+        for(let t=0;t<=Math.min(c*1.5,tot2);t+=1){const r=at(E2.P,ss===0?t:tot2-t,E2.L);if(Math.hypot(r[0]-q[0],r[1]-q[1])<1.2*med)return true;}}
+      return false;};
+    let hits;
+    if(lst.length>1){
+      // lines that end at the same junction meet the curve at one shared point: the point on
+      // the curve that best fits all of their directions (so a V or a pair of leaves lines up)
+      const rays=lst.map(([,k2])=>ends.get(key(k2[0],k2[1])));
+      let best=null,bd=Infinity;
+      for(const f of F){if(Math.hypot(f[0]-np[0],f[1]-np[1])>8*u)continue;let s2=0;
+        for(const e of rays){const vx=f[0]-e.anchor[0],vy=f[1]-e.anchor[1];const c=vx*e.dir[1]-vy*e.dir[0];s2+=c*c;}
+        if(s2<bd){bd=s2;best=f;}}
+      const p=best?best.slice():nearest(np);
+      const own=rays.map(e=>meet(e,F,nearest(np)));
+      let spread=0;for(const a of own)for(const b of own)spread=Math.max(spread,Math.hypot(a[0]-b[0],a[1]-b[1]));
+      // within ~1.5 line widths they are meant to meet at one point; farther apart, the
+      // original really has them touching the curve at different places
+      // lines arriving from both sides of the curve that meet it at one point in the original (a pair
+      // of leaves on a stem) keep that one point, even when their own directions would part a little
+      const sides=new Set(rays.map(e=>{let bi=0,bd=Infinity;F.forEach((f,q)=>{const d=Math.hypot(f[0]-e.anchor[0],f[1]-e.anchor[1]);if(d<bd){bd=d;bi=q;}});
+        const a2=F[Math.max(0,bi-3)],b2=F[Math.min(F.length-1,bi+3)];return Math.sign((b2[0]-a2[0])*(e.anchor[1]-F[bi][1])-(b2[1]-a2[1])*(e.anchor[0]-F[bi][0]));}));
+      if(spread<=1.5*med)hits=lst.map(()=>p);
+      else if(sides.size>1&&spread<=2.5*med&&lst.length===2&&(()=>{ // a mirrored pair: both arrive at a similar, clear angle
+          let bi=0,bd=Infinity;F.forEach((f,q)=>{const d=Math.hypot(f[0]-np[0],f[1]-np[1]);if(d<bd){bd=d;bi=q;}});
+          const a2=F[Math.max(0,bi-5)],b2=F[Math.min(F.length-1,bi+5)],tt=[b2[0]-a2[0],b2[1]-a2[1]],tn=norm2(tt)||1;
+          const an=rays.map(e=>Math.asin(Math.min(1,Math.abs(e.dir[0]*tt[1]-e.dir[1]*tt[0])/tn))*180/Math.PI);
+          return an.every(v=>v>=25&&v<=65)&&Math.abs(an[0]-an[1])<=20;})()){const q=nearest(np);hits=lst.map(()=>q.slice());}
+      else hits=own;
+    }else{
+      const[,k2]=lst[0];const e=ends.get(key(k2[0],k2[1]));
+      hits=[meet(e,F,nearest(np))];
+      const[j,sd]=k2;const c=edges[j].clr[sd];
+      if(c>3*u&&edges[j].L[edges[j].L.length-1]>c+8*u&&alongside(j,sd,c)){const[a2,d2]=endDir(edges[j].P,sd,u,edges[j].L,c);const h2=rayHit(a2,[-d2[0],-d2[1]],F);
+        if(h2){hits[0]=h2;landTrim.set(key(j,sd),c);}}
+    }
+    lst.forEach(([,k2],i)=>{const kk=key(k2[0],k2[1]);land.set(kk,hits[i]);landOn.set(kk,cs[0]);
+      // angle at which this line meets the other one (shallow joints need their position held)
+      const ix=(()=>{let bi=0,bd=Infinity;F.forEach((f,q)=>{const d=Math.hypot(f[0]-hits[i][0],f[1]-hits[i][1]);if(d<bd){bd=d;bi=q;}});return bi;})();
+      const f1=F[Math.min(F.length-1,ix+3)],f0=F[Math.max(0,ix-3)];const tt=[f1[0]-f0[0],f1[1]-f0[1]],tn=norm2(tt)||1;const e=ends.get(kk);
+      landAng.set(kk,Math.asin(Math.min(1,Math.abs(e.dir[0]*tt[1]-e.dir[1]*tt[0])/tn))*180/Math.PI);});});
+  // The two sides of a V that touch a line at its tip (a petal on the top line) land at one point,
+  // even when the drawing has them meet the line a little apart
+  {const its=[];stemNodes.forEach((lst,k)=>{for(const[ci,k2]of lst){const kk=key(k2[0],k2[1]);if(!land.has(kk)||!landOn.has(kk)||landTrim.has(kk))continue;its.push({kk,ci,cF:landOn.get(kk),e:ends.get(kk)});}});
+    const done=new Set();
+    for(let x=0;x<its.length;x++)for(let y=x+1;y<its.length;y++){const a=its[x],b=its[y];if(done.has(a.kk)||done.has(b.kk))continue;
+      if(a.cF!==b.cF||a.ci===b.ci)continue;const pa=land.get(a.kk),pb=land.get(b.kk);const gap=Math.hypot(pa[0]-pb[0],pa[1]-pb[1]);
+      if(gap<1||gap>2*med)continue;if((landAng.get(a.kk)||0)<30||(landAng.get(b.kk)||0)<30)continue;
+      if(angDeg(a.e.dir,b.e.dir)>=70)continue;
+      const F=fitted[a.cF];const ni=p=>{let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});return bi;};
+      const sd=(p,q)=>{const i=ni(p);const f0=F[Math.max(0,i-3)],f1=F[Math.min(F.length-1,i+3)];return Math.sign((f1[0]-f0[0])*(q[1]-F[i][1])-(f1[1]-f0[1])*(q[0]-F[i][0]));};
+      if(sd(pa,a.e.anchor)!==sd(pb,b.e.anchor))continue;
+      const mid=[(pa[0]+pb[0])/2,(pa[1]+pb[1])/2];let best=null,bd=Infinity;
+      for(const f of F){if(Math.hypot(f[0]-mid[0],f[1]-mid[1])>gap)continue;let s2=0;for(const e of[a.e,b.e]){const vx=f[0]-e.anchor[0],vy=f[1]-e.anchor[1];const c=vx*e.dir[1]-vy*e.dir[0];s2+=c*c;}if(s2<bd){bd=s2;best=f;}}
+      if(!best)continue;land.set(a.kk,best.slice());land.set(b.kk,best.slice());done.add(a.kk);done.add(b.kk);}
+    // a line that slides into the curve at a shallow angle, from the same side as another line that
+    // leaves just ahead of it, joins the curve where that other line leaves (they meet at one point)
+    for(const a of its){if(done.has(a.kk)||(landAng.get(a.kk)??90)>=30)continue;const pa=land.get(a.kk);const fw=[-a.e.dir[0],-a.e.dir[1]];
+      const F=fitted[a.cF];const ni=p=>{let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});return bi;};
+      const sd=(p,q)=>{const i=ni(p);const f0=F[Math.max(0,i-3)],f1=F[Math.min(F.length-1,i+3)];return Math.sign((f1[0]-f0[0])*(q[1]-F[i][1])-(f1[1]-f0[1])*(q[0]-F[i][0]));};
+      let best=null;
+      for(const b of its){if(b===a||b.cF!==a.cF||b.ci===a.ci||(landAng.get(b.kk)??0)<30)continue;const pb=land.get(b.kk);
+        const ahead=(pb[0]-pa[0])*fw[0]+(pb[1]-pa[1])*fw[1],gap=Math.hypot(pb[0]-pa[0],pb[1]-pa[1]);
+        if(ahead<=0||gap>5*med||sd(pa,a.e.anchor)!==sd(pb,b.e.anchor))continue;
+        // and the two run together into one band of doubled ink along the way (they touch, not just near)
+        {let i0=ni(pa),i1=ni(pb);if(i0>i1)[i0,i1]=[i1,i0];const th=[];for(let i=i0;i<=i1;i++){const yy=Math.round(F[i][0]),xx=Math.round(F[i][1]);if(yy>=0&&xx>=0&&yy<H&&xx<W)th.push((2*dmap[yy*W+xx]-1)/med);}
+          th.sort((p,q)=>p-q);if(!th.length||th[th.length>>1]<1.3)continue;}
+        if(!best||gap<best[0])best=[gap,pb];}
+      if(best){land.set(a.kk,best[1].slice());done.add(a.kk);}}}
+  // Two lines that land close together on the same curve, from the same side, heading toward each
+  // other at a shallow angle, with nothing crossing the curve where they land: in the drawing they
+  // are the two sides of one rounded shape sitting on that curve (like the cat's cheek). Join them
+  // into one continuous curve that rounds into the curve, follows it, and rounds back out.
+  {const same=(a,b)=>a&&b&&a[0]===b[0]&&a[1]===b[1];
+    const items=[];
+    stemNodes.forEach((lst,k)=>{const own=new Set(lst.map(([c])=>c));const cs=[...(through.get(k)||[])].filter(c=>!own.has(c));if(!cs.length)return;
+      for(const[ci,k2]of lst){const kk=key(k2[0],k2[1]);if(!land.has(kk)||landTrim.has(kk))continue;items.push({ci,k2,cF:cs[0],p:land.get(kk),e:ends.get(kk)});}});
+    const nearestIdx=(F,p)=>{let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});return bi;};
+    const sideOf=(F,i,q)=>{const a=F[Math.max(0,i-3)],b=F[Math.min(F.length-1,i+3)];return Math.sign((b[0]-a[0])*(q[1]-F[i][1])-(b[1]-a[1])*(q[0]-F[i][0]));};
+    const cands=[];
+    for(let x=0;x<items.length;x++)for(let y=x+1;y<items.length;y++){let a=items[x],b=items[y];
+      if(a.cF!==b.cF||a.ci===b.ci||chains[a.ci].closed||chains[b.ci].closed)continue;
+      const F=fitted[a.cF];let ia=nearestIdx(F,a.p),ib=nearestIdx(F,b.p);if(ia===ib)continue;if(ia>ib){[a,b]=[b,a];[ia,ib]=[ib,ia];}
+      let dist=0;for(let i=ia;i<ib;i++)dist+=Math.hypot(F[i+1][0]-F[i][0],F[i+1][1]-F[i][1]);
+      if(dist<3*u||dist>12*u)continue;
+      const tt=[F[ib][0]-F[ia][0],F[ib][1]-F[ia][1]],tn=norm2(tt);const t=[tt[0]/tn,tt[1]/tn];
+      const sa=sideOf(F,ia,a.e.anchor),sb=sideOf(F,ib,b.e.anchor);
+      if(sa===0||sa!==sb)continue;                                         // same side of the curve
+      if(-(a.e.dir[0]*t[0]+a.e.dir[1]*t[1])<0.6||-(b.e.dir[0]*t[0]+b.e.dir[1]*t[1])>-0.6)continue; // shallow, toward each other
+      // nothing crosses the curve near either landing (otherwise that line is part of a crossing)
+      const crossed=items.some(o=>o!==a&&o!==b&&o.cF===a.cF&&(()=>{const io=nearestIdx(F,o.p);if(sideOf(F,io,o.e.anchor)===sa)return false;
+        return Math.hypot(F[io][0]-a.p[0],F[io][1]-a.p[1])<2.5*med||Math.hypot(F[io][0]-b.p[0],F[io][1]-b.p[1])<2.5*med;})());
+      if(crossed)continue;
+      // only where the meeting is tight: a small enclosed piece of glass sits right at it
+      {const mx=(a.p[0]+b.p[0])/2,my=(a.p[1]+b.p[1])/2,r=Math.max(dist,2*med),cap=60*med*med,seen=new Set();let small=false;
+        for(let yy=Math.max(0,Math.round(mx-r));yy<=Math.min(H-1,Math.round(mx+r))&&!small;yy+=2)for(let xx=Math.max(0,Math.round(my-r));xx<=Math.min(W-1,Math.round(my+r))&&!small;xx+=2){
+          const id0=yy*W+xx;if(dmap[id0]>0||seen.has(id0))continue;const comp=[id0];seen.add(id0);let k=0,over=false;
+          while(k<comp.length){const id=comp[k++],y=(id/W)|0,x=id-y*W;for(const[dy,dx]of[[1,0],[-1,0],[0,1],[0,-1]]){const y2=y+dy,x2=x+dx;if(y2<0||x2<0||y2>=H||x2>=W){over=true;continue;}
+              const id2=y2*W+x2;if(dmap[id2]>0||seen.has(id2))continue;seen.add(id2);comp.push(id2);}if(comp.length>cap){over=true;break;}}
+          if(!over)small=true;}
+        if(!small)continue;
+        // and the shape the two lines enclose is compact (a rounded shape sitting on the curve), not
+        // an open region that runs far away
+        const im=Math.round((ia+ib)/2),f0=F[Math.max(0,im-3)],f1=F[Math.min(F.length-1,im+3)];let nn=[-(f1[1]-f0[1]),f1[0]-f0[0]];const nl=norm2(nn)||1;nn=[nn[0]/nl,nn[1]/nl];
+        if(sideOf(F,im,[F[im][0]+nn[0],F[im][1]+nn[1]])!==sa)nn=[-nn[0],-nn[1]];
+        let seed=-1;for(let d=0.5*med;d<=3*med;d+=0.5){const yy=Math.round(F[im][0]+nn[0]*d),xx=Math.round(F[im][1]+nn[1]*d);if(yy<0||xx<0||yy>=H||xx>=W)break;if(dmap[yy*W+xx]<=0){seed=yy*W+xx;break;}}
+        if(seed<0)continue;
+        {const cap2=40*dist*dist,comp=[seed],sn=new Set([seed]);let k=0,over=false;
+          while(k<comp.length){const id=comp[k++],y=(id/W)|0,x=id-y*W;for(const[dy,dx]of[[1,0],[-1,0],[0,1],[0,-1]]){const y2=y+dy,x2=x+dx;if(y2<0||x2<0||y2>=H||x2>=W){over=true;continue;}
+              const id2=y2*W+x2;if(dmap[id2]>0||sn.has(id2))continue;sn.add(id2);comp.push(id2);}if(comp.length>cap2){over=true;break;}}
+          if(over)continue;}}
+      cands.push({a,b,ia,ib,dist});}
+    cands.sort((p,q)=>p.dist-q.dist);const used=new Set();
+    for(const c of cands){if(used.has(c.a.ci)||used.has(c.b.ci))continue;used.add(c.a.ci);used.add(c.b.ci);
+      const CA=chains[c.a.ci],CB=chains[c.b.ci],F=fitted[c.a.cF];
+      let rA=CA.raw.map(q=>q.slice()),wA=CA.w.slice();if(!same(CA.end,c.a.k2)){rA.reverse();wA.reverse();}
+      let rB=CB.raw.map(q=>q.slice()),wB=CB.w.slice();if(!same(CB.start,c.b.k2)){rB.reverse();wB.reverse();}
+      const soften=(r,w,atEnd,zone)=>{const L_=arclen(r),tot=L_[L_.length-1];for(let i=0;i<r.length;i++){const d=atEnd?tot-L_[i]:L_[i];if(d<zone&&w[i]<1e5)w[i]=GAP;}};
+      soften(rA,wA,true,Math.min(Math.max(edges[c.a.k2[0]].clr2[c.a.k2[1]],3*u),0.3*arclen(rA)[rA.length-1]));
+      soften(rB,wB,false,Math.min(Math.max(edges[c.b.k2[0]].clr2[c.b.k2[1]],3*u),0.3*arclen(rB)[rB.length-1]));
+      const seg=F.slice(c.ia,c.ib+1).map(q=>q.slice());const Ls=arclen(seg),ts=Ls[Ls.length-1];
+      const wS=seg.map((_,i)=>(Ls[i]<2*u||ts-Ls[i]<2*u)?GAP:20);
+      const startKey=same(CA.start,c.a.k2)?CA.end:CA.start,endKey=same(CB.start,c.b.k2)?CB.end:CB.start;
+      CA.dead=true;CB.dead=true;
+      chains.push({seq:[],joins:[],closed:false,noCorners:true,raw:[...rA,...seg,...rB],w:[...wA,...wS,...wB],start:startKey,end:endKey});}}
+  fitted=fitAll();
+  // a line that ends on another line ends exactly on it (after straightening, the end may sit a
+  // fraction of a pixel off): extend or trim it along its own direction to meet that line
+  chains.forEach((C,i)=>{if(C.dead||C.closed)return;let F=fitted[i];if(F.length<4)return;
+    for(const[k2,atStart]of[[C.start,true],[C.end,false]]){if(!k2)continue;const kk=key(k2[0],k2[1]);if(!landOn.has(kk))continue;
+      const T=fitted[landOn.get(kk)];if(!T||T.length<2||T===F)continue;
+      const pts=atStart?F.slice().reverse():F;const n=pts.length;const E=pts[n-1],I=pts[Math.max(0,n-1-Math.min(4,n-2))];
+      let d=[E[0]-I[0],E[1]-I[1]];const dn=norm2(d);if(dn<1e-9)continue;d=[d[0]/dn,d[1]/dn];
+      const hit=rayHit(I,d,T);if(!hit||Math.hypot(hit[0]-E[0],hit[1]-E[1])>2*u)continue;
+      const kept=pts.slice();while(kept.length>2){const p=kept[kept.length-1];if(((p[0]-hit[0])*d[0]+(p[1]-hit[1])*d[1])>=-1e-6&&Math.hypot(p[0]-hit[0],p[1]-hit[1])<=2*u)kept.pop();else break;}kept.push(hit);
+      F=atStart?kept.reverse():kept;}
+    fitted[i]=F;});
+  // closed loops: repeat the opening segment so the start point is a join, not two line ends
+  chains.forEach((C,i)=>{let F=fitted[i];if(C.closed&&F.length>2){if(Math.hypot(F[0][0]-F[F.length-1][0],F[0][1]-F[F.length-1][1])>1e-6)F=[...F,F[0]];fitted[i]=[...F,F[1]];}});
+  let out=fitted.filter(F=>F.length>1);
+  const fillets=[];
+  if(opt.exact&&opt.square&&Math.abs(frame)>0.01){const a=-frame*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),cy=H/2,cx=W/2;
+    const rot=p=>{const y=p[0]-cy,x=p[1]-cx;return[cy+x*sa+y*ca,cx+x*ca-y*sa];};
+    out=out.map(F=>F.map(rot));fillets.forEach(f=>{f.fill=f.fill.map(rot);f.curve=f.curve.map(rot);});}
+  return{strokes:out,fillets,rot:(opt.exact&&opt.square)?frame:0};}
+
+onmessage=e=>{const m=e.data;
+  if(m.type==='load'){W=m.w;H=m.h;gray=new Uint8Array(m.buf);otsuT=otsu(gray);postMessage({type:'loaded',otsu:otsuT,id:m.id});return;}
+  if(m.type==='run'){const t0=Date.now();
+    try{const r=process(m.params);postMessage({type:'done',id:m.id,pts:r.pts,offs:r.offs,hw:r.hw,stats:r.stats,rot:r.rot,fill:r.fill,fcurve:r.fcurve,ms:Date.now()-t0},[r.pts.buffer,r.offs.buffer,r.hw.buffer]);}
+    catch(err){postMessage({type:'error',id:m.id,message:String(err&&err.message||err)});}}};
+</script>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const OUT_PPI=300, MARGIN_IN=0.25, MAX_WORK=3000, PAD=6;
+const S={name:'sample-pattern',src:null,crop:null,work:null,workPPI:0,strokes:null,offs:null,stats:null,
+  view:'result',zoom:'fit',running:false,pending:false,loadId:0,runId:0,otsu:128,sample:true,dl:null,
+  resultBlob:null,resultURL:null,overlayURL:null,origURL:null,svg:null,borderFlags:null};
+
+const worker=new Worker(URL.createObjectURL(new Blob([$('worker-src').textContent],{type:'text/javascript'})));
+worker.onmessage=e=>{const m=e.data;
+  if(m.type==='progress')setStatus(m.text,true);
+  else if(m.type==='loaded'){if(m.id!==S.loadId)return;S.otsu=m.otsu;if($('threshAuto').checked)$('thresh').value=m.otsu;updateLabels();S.running=false;run();}
+  else if(m.type==='done'){S.running=false;
+    if(S.pending){S.pending=false;run();return;}
+    S.strokes=m.pts;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;S.fill=m.fill;S.fcurve=m.fcurve;markBorder();render();
+    setStatus('Done in '+(m.ms/1000).toFixed(1)+' s',false);}
+  else if(m.type==='error'){S.running=false;setStatus('Could not process this image: '+m.message,false);}};
+function setStatus(t,busy){$('statusText').textContent=t;$('status').classList.toggle('busy',!!busy);}
+
+// ---- units ----
+const UNIT={in:1,pt:1/72,mm:1/25.4};
+function toIn(v){return(+v)*UNIT[$('unit').value];}
+function fromIn(v){return v/UNIT[$('unit').value];}
+function fmtUnit(inches){const u=$('unit').value;const v=fromIn(inches);return(u==='in'?v.toFixed(4):v.toFixed(2))+' '+u;}
+function widthIn(){const v=toIn($('widthNum').value);return v>0?v:0.042;}
+function borderIn(){const v=toIn($('borderNum').value);return v>0?v:0.125;}
+function sizeIn(){const w=+$('sizeW').value,h=+$('sizeH').value;return{w:w>0?w:9,h:h>0?h:12};}
+function fit2(v){return Math.round(v*100)/100;}
+function syncSize(changed){if(!S.crop||!$('lockRatio').checked)return;const r=S.crop.h/S.crop.w;
+  if(changed==='w')$('sizeH').value=fit2(sizeIn().w*r);else $('sizeW').value=fit2(sizeIn().h/r);}
+
+// ---- load & prepare ----
+function loadImage(img,name,isSample){
+  const c=document.createElement('canvas');c.width=img.width||img.naturalWidth;c.height=img.height||img.naturalHeight;
+  const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0);
+  S.src=c;S.name=name;S.sample=isSample;
+  $('fileName').textContent=name;$('sampleTag').hidden=!isSample;$('sSize').textContent=c.width+' × '+c.height+' px';
+  if(S.origURL)URL.revokeObjectURL(S.origURL);c.toBlob(b=>{S.origURL=URL.createObjectURL(b);if(S.view==='original')showView();});
+  findCrop();if($('lockRatio').checked){const z=sizeIn(),L=Math.max(z.w,z.h);const r=S.crop.h/S.crop.w;
+    if(r>=1){$('sizeH').value=fit2(L);$('sizeW').value=fit2(L/r);}else{$('sizeW').value=fit2(L);$('sizeH').value=fit2(L*r);}}
+  prepare();}
+function findCrop(){const c=S.src,d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;const inv=$('invert').checked;
+  let x0=c.width,y0=c.height,x1=-1,y1=-1;
+  for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){const i=4*(y*c.width+x);const l=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+    if(inv?l>128:l<128){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}}
+  S.crop=x1<0?{x:0,y:0,w:c.width,h:c.height}:{x:x0,y:y0,w:x1-x0+1,h:y1-y0+1};}
+function prepare(){if(!S.src)return;
+  const cr=S.crop,z=sizeIn();
+  // work at 300 px per inch, or less for very large panels; stretching (if any) happens here,
+  // before the lines are rebuilt, so every line still comes out at one width
+  S.workPPI=Math.min(OUT_PPI,MAX_WORK/Math.max(z.w,z.h));
+  S.sx=z.w*S.workPPI/cr.w;S.sy=z.h*S.workPPI/cr.h;
+  const ww=Math.round((cr.w+2*PAD)*S.sx),wh=Math.round((cr.h+2*PAD)*S.sy);
+  const w=document.createElement('canvas');w.width=ww;w.height=wh;const g=w.getContext('2d');
+  g.fillStyle=$('invert').checked?'#000':'#fff';g.fillRect(0,0,ww,wh);g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';
+  g.drawImage(S.src,cr.x-PAD,cr.y-PAD,cr.w+2*PAD,cr.h+2*PAD,0,0,ww,wh);
+  const d=g.getImageData(0,0,ww,wh).data;const gr=new Uint8Array(ww*wh);
+  for(let i=0;i<ww*wh;i++)gr[i]=Math.round(.299*d[4*i]+.587*d[4*i+1]+.114*d[4*i+2]);
+  S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
+  worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,buf:gr.buffer},[gr.buffer]);
+  updateLabels();}
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked};}
+let timer=null;
+function schedule(fn,ms){clearTimeout(timer);timer=setTimeout(fn,ms);}
+function run(){if(!S.work)return;if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
+  worker.postMessage({type:'run',id:S.runId,params:params()});}
+
+// ---- geometry: work px -> output px on the page ----
+function pageGeom(){const cr=S.crop;const k=OUT_PPI/S.workPPI;const m=MARGIN_IN*OUT_PPI;const ox=PAD*S.sx,oy=PAD*S.sy;
+  const pw=Math.round(cr.w*S.sx*k+2*m),ph=Math.round(cr.h*S.sy*k+2*m);
+  return{k,m,pw,ph,map:(x,y)=>[(x-ox)*k+m,(y-oy)*k+m]};}
+function markBorder(){const pts=S.strokes,offs=S.offs,n=offs.length-1;const flags=new Uint8Array(n);
+  if(!n){S.borderFlags=flags;return;}
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;for(let i=0;i<pts.length;i+=2){x0=Math.min(x0,pts[i]);x1=Math.max(x1,pts[i]);y0=Math.min(y0,pts[i+1]);y1=Math.max(y1,pts[i+1]);}
+  const tol=0.015*Math.max(x1-x0,y1-y0);let any=false;
+  for(let s=0;s<n;s++){let near=0,tot=0;for(let j=offs[s];j<offs[s+1];j++){const x=pts[2*j],y=pts[2*j+1];tot++;
+      if(Math.min(x-x0,x1-x,y-y0,y1-y)<tol)near++;}
+    if(tot>1&&near/tot>0.95){flags[s]=1;any=true;}}
+  S.borderFlags=flags;S.hasBorder=any;
+  const geo=pageGeom();const c0=geo.map(x0,y0),c1=geo.map(x1,y1);S.center=[(c0[0]+c1[0])/2,(c0[1]+c1[1])/2];}
+
+// points of stroke s on the page; a border line can be shifted so that its outer (or inner) edge
+// lands where the original border's edge was, using the original line's measured half-width
+function strokePts(s,geo,wOutPx){const pts=S.strokes,a=S.offs[s],b=S.offs[s+1];const P=[];
+  for(let j=a;j<b;j++)P.push(geo.map(pts[2*j],pts[2*j+1]));
+  const mode=$('borderPos').value;if(mode==='center'||!S.hasBorder||!S.borderFlags[s]||P.length<2||!S.hw)return P;
+  const n=P.length,segN=[];for(let i=0;i<n-1;i++){const dx=P[i+1][0]-P[i][0],dy=P[i+1][1]-P[i][1],l=Math.hypot(dx,dy);segN.push(l>1e-9?[-dy/l,dx/l]:null);}
+  for(let i=0;i<segN.length;i++)if(!segN[i])segN[i]=segN[i-1]||[0,0];
+  // outward = away from the middle of the drawing
+  const c=S.center;let sg=0;for(let i=0;i<n-1;i++)sg+=segN[i][0]*(P[i][0]-c[0])+segN[i][1]*(P[i][1]-c[1]);const out=sg>=0?1:-1;
+  const sign=mode==='outer'?1:-1;
+  const hs=Array.from(S.hw.subarray(a,S.offs[s+1])).sort((p,q)=>p-q);const hwMed=hs[hs.length>>1];
+  return P.map((p,i)=>{const n1=segN[Math.max(0,i-1)],n2=segN[Math.min(segN.length-1,i)];let nx=n1[0]+n2[0],ny=n1[1]+n2[1];const nl=Math.hypot(nx,ny);
+    if(nl<1e-9){nx=n2[0];ny=n2[1];}else{nx/=nl;ny/=nl;}
+    const miter=1/Math.max(0.35,nx*n2[0]+ny*n2[1]);            // keep square corners square
+    const shift=sign*out*(hwMed*geo.k-wOutPx/2)*miter;
+    return[p[0]+nx*shift,p[1]+ny*shift];});}
+let ptsCache=null;
+function allStrokePts(geo,wIn,bIn){const useB=$('borderOn').checked&&S.hasBorder;const mode=$('borderPos').value;
+  const ck=[S.strokes,geo.pw,geo.ph,mode,wIn,bIn,useB].join('|');if(ptsCache&&ptsCache.k===ck&&ptsCache.s===S.strokes)return ptsCache.v;
+  const n=S.offs.length-1,orig=[],out=[];
+  for(let s=0;s<n;s++){const a=S.offs[s],b=S.offs[s+1];const P=[];for(let j=a;j<b;j++)P.push(geo.map(S.strokes[2*j],S.strokes[2*j+1]));orig.push(P);
+    out.push(S.offs[s+1]-S.offs[s]<1?P:strokePts(s,geo,(S.borderFlags[s]&&useB?bIn:wIn)*OUT_PPI));}
+  if(mode!=='center'&&S.hasBorder){const wpx=wIn*OUT_PPI,near=Math.max(3*wpx,30);
+    const endDir=(P,atStart)=>{const n=P.length;if(n<2)return null;const a=atStart?P[0]:P[n-1],b=atStart?P[Math.min(n-1,3)]:P[Math.max(0,n-4)];
+      const d=[a[0]-b[0],a[1]-b[1]],l=Math.hypot(d[0],d[1]);return l>1e-9?[d[0]/l,d[1]/l]:null;};
+    const lineHit=(p,d,q,e)=>{const det=d[0]*(-e[1])+e[0]*d[1];if(Math.abs(det)<1e-9)return null;const rx=q[0]-p[0],ry=q[1]-p[1];const t=(rx*(-e[1])+e[0]*ry)/det;return[p[0]+t*d[0],p[1]+t*d[1]];};
+    const polyHit=(p,d,P)=>{let best=null,bt=Infinity;for(let i=0;i<P.length-1;i++){const a=P[i],b=P[i+1],e=[b[0]-a[0],b[1]-a[1]];const det=d[0]*(-e[1])+e[0]*d[1];if(Math.abs(det)<1e-9)continue;
+        const rx=a[0]-p[0],ry=a[1]-p[1];const t=(rx*(-e[1])+e[0]*ry)/det,s_=(d[0]*ry-d[1]*rx)/det;if(s_>=-0.01&&s_<=1.01&&Math.abs(t)<near&&Math.abs(t)<Math.abs(bt)){bt=t;best=[p[0]+t*d[0],p[1]+t*d[1]];}}return best;};
+    // move an end to q: extend, or trim away any points that would now stick out past q
+    const setEnd=(P,atStart,q)=>{const d=endDir(P,atStart);
+      if(d){if(atStart){while(P.length>2&&((P[0][0]-q[0])*d[0]+(P[0][1]-q[1])*d[1])>=0&&((P[1][0]-q[0])*d[0]+(P[1][1]-q[1])*d[1])>=0)P.shift();}
+        else{while(P.length>2&&((P[P.length-1][0]-q[0])*d[0]+(P[P.length-1][1]-q[1])*d[1])>=0&&((P[P.length-2][0]-q[0])*d[0]+(P[P.length-2][1]-q[1])*d[1])>=0)P.pop();}}
+      if(atStart)P[0]=q;else P[P.length-1]=q;};
+    const B=[];for(let s=0;s<n;s++)if(S.borderFlags[s]&&out[s].length>1)B.push(s);
+    // border sides meet their neighbours exactly at the corners
+    for(let x=0;x<B.length;x++)for(const ax of[true,false]){const sx=B[x],ox=orig[sx],ex=ax?ox[0]:ox[ox.length-1];
+      for(let y=x+1;y<B.length;y++)for(const ay of[true,false]){const sy=B[y],oy=orig[sy],ey=ay?oy[0]:oy[oy.length-1];
+        if(Math.hypot(ex[0]-ey[0],ex[1]-ey[1])>near)continue;
+        const dx=endDir(out[sx],ax),dy=endDir(out[sy],ay);if(!dx||!dy)continue;
+        const px=ax?out[sx][0]:out[sx][out[sx].length-1],py=ay?out[sy][0]:out[sy][out[sy].length-1];
+        const q=lineHit(px,dx,py,dy);if(!q||Math.hypot(q[0]-px[0],q[1]-px[1])>2*near)continue;setEnd(out[sx],ax,q);setEnd(out[sy],ay,q.slice());}}
+    // lines that end on the border end exactly on the moved border
+    for(let s=0;s<n;s++){if(S.borderFlags[s]||out[s].length<2)continue;
+      for(const at0 of[true,false]){const o=orig[s],e=at0?o[0]:o[o.length-1];
+        let hit=null;for(const b of B){const ob=orig[b];let dmin=Infinity;for(const p of ob)dmin=Math.min(dmin,Math.hypot(p[0]-e[0],p[1]-e[1]));if(dmin>near)continue;
+          const d=endDir(out[s],at0);if(!d)continue;const p0=at0?out[s][0]:out[s][out[s].length-1];const h=polyHit(p0,d,out[b]);if(h)hit=h;}
+        if(hit)setEnd(out[s],at0,hit);}}}
+  ptsCache={k:ck,s:S.strokes,v:out};return out;}
+function filletPaths(geo){const out=[];if(!S.fill)return out;const F=S.fill,C=S.fcurve;
+  for(let i=0;i<F.offs.length-1;i++){const poly=[],cur=[];for(let j=F.offs[i];j<F.offs[i+1];j++)poly.push(geo.map(F.pts[2*j],F.pts[2*j+1]));
+    for(let j=C.offs[i];j<C.offs[i+1];j++)cur.push(geo.map(C.pts[2*j],C.pts[2*j+1]));out.push({poly,cur});}
+  return out;}
+function drawFillets(g,geo,color,wIn){g.fillStyle=color;g.strokeStyle=color;g.lineWidth=wIn*OUT_PPI;g.lineCap='round';g.lineJoin='round';
+  for(const f of filletPaths(geo)){if(f.poly.length<3)continue;g.beginPath();g.moveTo(f.poly[0][0],f.poly[0][1]);for(const p of f.poly.slice(1))g.lineTo(p[0],p[1]);g.closePath();g.fill();
+    g.beginPath();g.moveTo(f.cur[0][0],f.cur[0][1]);for(const p of f.cur.slice(1))g.lineTo(p[0],p[1]);g.stroke();}}
+function drawStrokes(g,geo,color,wIn,bIn){const offs=S.offs,n=offs.length-1;const useB=$('borderOn').checked&&S.hasBorder;
+  g.lineCap='round';g.lineJoin='miter';g.miterLimit=10;g.strokeStyle=color;
+  for(const pass of [0,1]){g.lineWidth=(pass&&useB?bIn:wIn)*OUT_PPI;g.beginPath();
+    for(let s=0;s<n;s++){if((useB?S.borderFlags[s]:0)!==pass)continue;if(offs[s+1]-offs[s]<1)continue;
+      const P=allStrokePts(geo,wIn,bIn)[s];
+      g.moveTo(P[0][0],P[0][1]);if(P.length===1)g.lineTo(P[0][0]+.01,P[0][1]);
+      for(let j=1;j<P.length;j++)g.lineTo(P[j][0],P[j][1]);}
+    g.stroke();}}
+
+function render(){if(!S.strokes)return;const geo=pageGeom();
+  const c=document.createElement('canvas');c.width=geo.pw;c.height=geo.ph;const g=c.getContext('2d');
+  if(!$('transparent').checked){g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);}
+  drawStrokes(g,geo,'#000',widthIn(),borderIn());drawFillets(g,geo,'#000',widthIn());
+  $('borderWarn').hidden=!($('borderOn').checked&&!S.hasBorder);
+  c.toBlob(async b=>{S.resultBlob=await withPPI(b,OUT_PPI);if(S.resultURL)URL.revokeObjectURL(S.resultURL);S.resultURL=URL.createObjectURL(S.resultBlob);
+    if(S.overlayURL){URL.revokeObjectURL(S.overlayURL);S.overlayURL=null;}
+    $('savePng').disabled=false;$('saveSvg').disabled=false;showView();},'image/png');
+  S.svg=buildSVG(geo);showStats(geo);}
+
+function makeOverlay(cb){const geo=pageGeom();const c=document.createElement('canvas');c.width=geo.pw;c.height=geo.ph;const g=c.getContext('2d');
+  g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.globalAlpha=.45;g.imageSmoothingQuality='high';
+  const cr=S.crop;g.save();if(S.rot){const c=geo.map(S.work.w/2,S.work.h/2);g.translate(c[0],c[1]);g.rotate(-S.rot*Math.PI/180);g.translate(-c[0],-c[1]);}
+  g.drawImage(S.src,cr.x,cr.y,cr.w,cr.h,geo.m,geo.m,geo.pw-2*geo.m,geo.ph-2*geo.m);g.restore();g.globalAlpha=.8;
+  drawStrokes(g,geo,'rgb(205,28,58)',widthIn(),borderIn());drawFillets(g,geo,'rgb(205,28,58)',widthIn());
+  c.toBlob(b=>{S.overlayURL=URL.createObjectURL(b);cb();});}
+
+function buildSVG(geo){const offs=S.offs,n=offs.length-1;const useB=$('borderOn').checked&&S.hasBorder;
+  const group=(pass,w)=>{let out=`<g fill="none" stroke="#000" stroke-width="${(w*OUT_PPI).toFixed(3)}" stroke-linecap="round" stroke-linejoin="miter" stroke-miterlimit="10">\n`;
+    for(let s=0;s<n;s++){if((useB?S.borderFlags[s]:0)!==pass)continue;if(offs[s+1]-offs[s]<2)continue;let d='';
+      const P=allStrokePts(geo,widthIn(),borderIn())[s];
+      P.forEach((p,j)=>{d+=(j===0?'M':'L')+p[0].toFixed(2)+','+p[1].toFixed(2);});
+      out+=`<path d="${d}"/>\n`;}return out+'</g>\n';};
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${(geo.pw/OUT_PPI).toFixed(4)}in" height="${(geo.ph/OUT_PPI).toFixed(4)}in" viewBox="0 0 ${geo.pw} ${geo.ph}">\n`+
+    ($('transparent').checked?'':'<rect width="100%" height="100%" fill="#fff"/>\n')+group(0,widthIn())+(useB?group(1,borderIn()):'')+filletSVG(geo)+'</svg>\n';}
+function filletSVG(geo){const fp=filletPaths(geo);if(!fp.length)return'';const d=P=>P.map((p,j)=>(j?'L':'M')+p[0].toFixed(2)+','+p[1].toFixed(2)).join('');
+  return '<g fill="#000" stroke="none">\n'+fp.map(f=>'<path d="'+d(f.poly)+'Z"/>').join('\n')+'\n</g>\n<g fill="none" stroke="#000" stroke-width="'+(widthIn()*OUT_PPI).toFixed(3)+'" stroke-linecap="round">\n'+fp.map(f=>'<path d="'+d(f.cur)+'"/>').join('\n')+'\n</g>\n';}
+
+// add a pHYs chunk so the PNG prints at the right size
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(b){let c=0xffffffff;for(let i=0;i<b.length;i++)c=CRC[(c^b[i])&255]^(c>>>8);return(c^0xffffffff)>>>0;}
+async function withPPI(blob,ppi){try{const buf=new Uint8Array(await blob.arrayBuffer());const ppm=Math.round(ppi/0.0254);
+  const chunk=new Uint8Array(21);const dv=new DataView(chunk.buffer);dv.setUint32(0,9);chunk.set([112,72,89,115],4);dv.setUint32(8,ppm);dv.setUint32(12,ppm);chunk[16]=1;
+  dv.setUint32(17,crc32(chunk.subarray(4,17)));const out=new Uint8Array(buf.length+21);out.set(buf.subarray(0,33));out.set(chunk,33);out.set(buf.subarray(33),54);
+  return new Blob([out],{type:'image/png'});}catch(e){return blob;}}
+
+function showView(){const img=$('view');
+  if(S.view==='original'){if(S.origURL)img.src=S.origURL;img.alt='Original pattern';}
+  else if(S.view==='overlay'){if(!S.strokes)return;if(!S.overlayURL){makeOverlay(showView);return;}img.src=S.overlayURL;img.alt='New lines in red over the original';}
+  else{if(S.resultURL)img.src=S.resultURL;img.alt='Pattern with even line width';}
+  applyZoom();}
+function applyZoom(){const mat=$('mat'),img=$('view');mat.classList.toggle('fit',S.zoom==='fit');
+  if(S.zoom==='fit'){img.style.width='';img.style.height='';}
+  else{const z=+S.zoom;img.onload=()=>{if(S.zoom!=='fit'){img.style.width=img.naturalWidth*z+'px';img.style.height=img.naturalHeight*z+'px';}};
+    if(img.complete&&img.naturalWidth){img.style.width=img.naturalWidth*z+'px';img.style.height=img.naturalHeight*z+'px';}}}
+
+function updateLabels(){const w=widthIn();
+  $('widthConv').textContent='= '+w.toFixed(4)+' in · '+(w*72).toFixed(2)+' pt · '+(w*25.4).toFixed(2)+' mm';
+  document.querySelectorAll('#presets button').forEach(b=>b.setAttribute('aria-pressed',String(Math.abs(+b.dataset.in-w)<0.0006)));
+  $('borderRow').hidden=!$('borderOn').checked;$('borderUnit').textContent=$('unit').value;
+  $('threshVal').textContent=$('threshAuto').checked?'auto ('+S.otsu+')':$('thresh').value;
+  const sm=+$('smooth').value;$('smoothVal').textContent=sm<0.8?'light':sm>1.4?'strong':'normal';
+  if(S.crop){const cr=S.crop,z=sizeIn();const stretch=(z.h/z.w)/(cr.h/cr.w);
+    const pct=Math.round((stretch-1)*100);
+    $('panelNote').textContent='Source has '+Math.round(Math.max(cr.w/z.w,cr.h/z.h))+' px per inch at this size; output is drawn at 300.'+
+      (Math.abs(pct)>=1?' Stretched '+Math.abs(pct)+'% '+(pct>0?'taller':'wider')+' than the original.':'');}}
+function showStats(geo){const s=S.stats;if(!s||!S.offs||S.offs.length<2){['sThin','sMid','sThick'].forEach(i=>$(i).textContent='no lines found');return;}
+  const f=v=>fmtUnit(Math.max(1,v)/S.workPPI);$('sThin').textContent=f(s.thin);$('sMid').textContent=f(s.mid);$('sThick').textContent=f(s.thick);
+  $('sOut').textContent=(geo.pw/OUT_PPI).toFixed(2)+' × '+(geo.ph/OUT_PPI).toFixed(2)+' in';}
+
+// ---- controls ----
+const rerender=()=>{updateLabels();schedule(render,120);};
+$('widthNum').addEventListener('input',rerender);
+let lastUnit='in';
+$('unit').addEventListener('change',()=>{const f=UNIT[lastUnit]/UNIT[$('unit').value];lastUnit=$('unit').value;
+  for(const id of ['widthNum','borderNum']){const v=+$(id).value*f;$(id).value=$('unit').value==='in'?v.toFixed(4):v.toFixed(2);}
+  updateLabels();if(S.stats)showStats(pageGeom());});
+$('presets').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const v=fromIn(+b.dataset.in);
+  $('widthNum').value=$('unit').value==='in'?(+b.dataset.in).toFixed(4):v.toFixed(2);rerender();});
+$('sizeW').addEventListener('input',()=>{syncSize('w');updateLabels();schedule(prepare,600);});
+$('sizeH').addEventListener('input',()=>{syncSize('h');updateLabels();schedule(prepare,600);});
+$('lockRatio').addEventListener('change',()=>{if($('lockRatio').checked){syncSize('w');updateLabels();schedule(prepare,0);}});
+$('borderOn').addEventListener('change',rerender);
+const posHints={center:'The new border sits on the middle of the original border.',
+  outer:'The border\'s outside edge stays where the original was, so the panel is exactly the width × height above.',
+  inner:'The border\'s inside edge stays where the original was, so the glass inside the border keeps its size.'};
+$('borderPos').addEventListener('change',()=>{$('borderPosHint').textContent=posHints[$('borderPos').value];rerender();});$('borderNum').addEventListener('input',rerender);
+$('transparent').addEventListener('change',rerender);
+$('thresh').addEventListener('input',()=>{$('threshAuto').checked=false;updateLabels();schedule(run,300);});
+$('threshAuto').addEventListener('change',()=>{if($('threshAuto').checked)$('thresh').value=S.otsu;updateLabels();schedule(run,0);});
+$('smooth').addEventListener('input',()=>{updateLabels();schedule(run,350);});
+$('invert').addEventListener('change',()=>{if(S.src){findCrop();prepare();}});
+$('exactShapes').addEventListener('change',()=>{$('squareUp').disabled=!$('exactShapes').checked;schedule(run,0);});
+$('squareUp').addEventListener('change',()=>schedule(run,0));
+document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{S.view=b.dataset.view;
+  document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));showView();}));
+document.querySelectorAll('[data-zoom]').forEach(b=>b.addEventListener('click',()=>{S.zoom=b.dataset.zoom;
+  document.querySelectorAll('[data-zoom]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));applyZoom();}));
+
+function loadFile(file){if(!file||!/^image\//.test(file.type)){setStatus('That file is not an image. Try a PNG or JPG.',false);return;}
+  const url=URL.createObjectURL(file);const img=new Image();
+  img.onload=()=>{loadImage(img,file.name.replace(/\.[^.]+$/,''),false);URL.revokeObjectURL(url);};
+  img.onerror=()=>setStatus('Could not read that image. Try exporting it as PNG or JPG.',false);img.src=url;}
+$('fileInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
+const mat=$('mat');
+['dragenter','dragover'].forEach(t=>mat.addEventListener(t,e=>{e.preventDefault();mat.classList.add('dragging');}));
+['dragleave','drop'].forEach(t=>mat.addEventListener(t,e=>{e.preventDefault();mat.classList.remove('dragging');}));
+mat.addEventListener('drop',e=>{const f=e.dataTransfer&&e.dataTransfer.files[0];if(f)loadFile(f);});
+window.addEventListener('paste',e=>{const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/'));if(it)loadFile(it.getAsFile());});
+
+function fname(ext){const w=widthIn(),z=sizeIn();return S.name+'-'+fit2(z.w)+'x'+fit2(z.h)+'in-'+w.toFixed(3).replace(/^0/,'')+'in-lines.'+ext;}
+async function save(data,ext){const note=$('note');
+  if(!S.dl&&!window.claude){const blob=data instanceof Blob?data:new Blob([data],{type:ext==='svg'?'image/svg+xml':'application/octet-stream'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname(ext);document.body.appendChild(a);a.click();
+    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);note.textContent='Saved '+fname(ext)+'.';return;}
+  if(!S.dl){note.textContent='Saving is not available in this view. Switch to Result, then right-click (or long-press) the image and choose Save image.';return;}
+  try{const name=fname(ext);await S.dl.save({filename:name,data});note.textContent='Saved '+name+'.';}
+  catch(err){const c=err&&err.code;note.textContent=c==='declined'?'Save cancelled.':c==='rate_limited'?'A save prompt is already open. Finish it, then try again.':
+    'Saving is not available here. Switch to Result, then right-click (or long-press) the image and choose Save image.';}}
+$('savePng').addEventListener('click',()=>{if(S.resultBlob)save(S.resultBlob,'png');});
+$('saveSvg').addEventListener('click',()=>{if(S.svg)save(S.svg,'svg');});
+(async()=>{try{S.dl=await (window.claude&&window.claude.use?window.claude.use('downloads'):null);}catch(e){S.dl=null;}})();
+
+// example pattern with deliberately uneven lines
+function sample(){const c=document.createElement('canvas');c.width=900;c.height=1200;const g=c.getContext('2d');
+  g.fillStyle='#fff';g.fillRect(0,0,900,1200);g.strokeStyle='#141414';g.lineCap='round';g.lineJoin='round';
+  const L=(w,f)=>{g.lineWidth=w;g.beginPath();f();g.stroke();};
+  L(16,()=>g.rect(28,28,844,1144));L(3,()=>g.arc(450,440,240,0,Math.PI*2));L(9,()=>g.arc(450,440,62,0,Math.PI*2));
+  const pw=[4,11,6,13,5,8];for(let i=0;i<6;i++){const a=i*Math.PI/3;L(pw[i],()=>g.ellipse(450+148*Math.cos(a),440+148*Math.sin(a),86,40,a,0,Math.PI*2));}
+  L(7,()=>{g.moveTo(28,28);g.lineTo(280,270);});L(3,()=>{g.moveTo(872,28);g.lineTo(620,270);});
+  L(10,()=>{g.moveTo(28,440);g.lineTo(210,440);});L(4,()=>{g.moveTo(690,440);g.lineTo(872,440);});
+  L(5,()=>{g.moveTo(28,820);g.lineTo(872,820);});L(12,()=>{g.moveTo(450,680);g.lineTo(450,820);});
+  L(6,()=>{g.moveTo(28,1010);g.bezierCurveTo(260,900,560,1110,872,960);});
+  L(4,()=>{g.moveTo(300,820);g.lineTo(300,1172);});L(13,()=>{g.moveTo(620,820);g.lineTo(620,1172);});
+  L(8,()=>{g.moveTo(300,880);g.quadraticCurveTo(170,760,28,700);});L(3,()=>{g.moveTo(620,880);g.quadraticCurveTo(760,740,872,650);});
+  g.fillStyle='#141414';[[120,150],[760,330],[400,960],[700,1100],[200,1100],[540,600],[150,560],[810,760]].forEach(([x,y],i)=>{g.beginPath();g.arc(x,y,1.5+(i%3),0,Math.PI*2);g.fill();});
+  return c;}
+window.__leadLineLeveler=()=>({w:S.work&&S.work.w,h:S.work&&S.work.h,gray:S.lastGray,strokes:S.strokes,offs:S.offs,fill:S.fill,fcurve:S.fcurve,rot:S.rot||0,status:$('statusText').textContent});
+updateLabels();
+loadImage(sample(),'sample-pattern',true);
+})();
+</script>
+</body>
+</html>
