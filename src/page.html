@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>html,body{margin:0}body{font:14px system-ui,-apple-system,"Segoe UI",sans-serif}img{max-width:100%}</style>
+<title>Lead Line Leveler</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&family=Familjen+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>/*@@styles.css@@*/</style>
+
+<div class="app">
+  <header>
+    <h1>Lead Line Leveler</h1>
+    <div class="file-name" id="fileName">sample-pattern</div>
+    <div class="actions">
+      <label class="btn" for="fileInput">Open pattern image<input id="fileInput" type="file" accept="image/*"></label>
+      <button id="saveSvg" disabled>Save SVG</button>
+      <button class="primary" id="savePng" disabled>Save PNG</button>
+    </div>
+  </header>
+
+  <aside>
+    <section class="group">
+      <div class="label">Pattern size</div>
+      <div class="size-row">
+        <label class="size-field" for="sizeW"><span class="hint">Width</span><input id="sizeW" class="inline-num" type="number" min="0.5" max="96" step="0.01" value="9"></label>
+        <span class="times" aria-hidden="true">×</span>
+        <label class="size-field" for="sizeH"><span class="hint">Height</span><input id="sizeH" class="inline-num" type="number" min="0.5" max="96" step="0.01" value="12"></label>
+        <span class="conv">in</span>
+      </div>
+      <label class="check"><input id="lockRatio" type="checkbox" checked><span>Keep the pattern's proportions</span></label>
+      <p class="hint" id="panelNote">—</p>
+    </section>
+
+    <section class="group">
+      <div class="label">Line width</div>
+      <div class="big-width">
+        <input id="widthNum" type="number" min="0.001" step="0.001" value="0.042" aria-label="Line width">
+        <select id="unit" aria-label="Line width unit"><option value="in">in</option><option value="pt">pt</option><option value="mm">mm</option></select>
+      </div>
+      <div class="conv" id="widthConv">—</div>
+      <div class="presets" id="presets">
+        <button data-in="0.041667">3 pt</button>
+        <button data-in="0.03125">1/32″</button>
+        <button data-in="0.0625">1/16″</button>
+        <button data-in="0.09375">3/32″</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <label class="check"><input id="borderOn" type="checkbox"><span>Give the outer border its own width<br><span class="hint">For a zinc or wide lead border around the panel</span></span></label>
+      <div class="row" id="borderRow" hidden>
+        <label for="borderNum">Border width</label>
+        <input id="borderNum" class="inline-num" type="number" min="0.001" step="0.001" value="0.125"><span class="conv" id="borderUnit">in</span>
+      </div>
+      <div class="field-col">
+        <label for="borderPos">Border line position</label>
+        <select id="borderPos">
+          <option value="center">Centered on the original line</option>
+          <option value="outer">Keep the original outer edge</option>
+          <option value="inner">Keep the original inner edge</option>
+        </select>
+        <p class="hint" id="borderPosHint">The new border sits on the middle of the original border.</p>
+      </div>
+      <p class="hint warn" id="borderWarn" hidden>No straight outer border found, so every line uses the main width.</p>
+    </section>
+
+    <section class="group">
+      <details>
+        <summary><span class="label">Cleanup</span></summary>
+        <div class="inner">
+          <div class="slider-row">
+            <label for="smooth">Curve smoothing</label><span class="val" id="smoothVal">normal</span>
+            <input id="smooth" type="range" min="0.4" max="2.5" step="0.1" value="1">
+          </div>
+          <div class="slider-row">
+            <label for="thresh">Dark cutoff</label><span class="val" id="threshVal">auto</span>
+            <input id="thresh" type="range" min="1" max="254" value="128">
+          </div>
+          <label class="check"><input id="threshAuto" type="checkbox" checked><span>Pick the cutoff automatically</span></label>
+          <label class="check"><input id="invert" type="checkbox"><span>Lines are light on a dark background</span></label>
+          <label class="check"><input id="exactShapes" type="checkbox" checked><span>Make straight lines and circles exact</span></label>
+          <label class="check"><input id="squareUp" type="checkbox" checked><span>Square up the panel<br><span class="hint">Lines that are nearly level or upright become exactly level or upright, so the border has true right angles and sits straight on the page</span></span></label>
+          <label class="check"><input id="transparent" type="checkbox"><span>Save PNG with a transparent background</span></label>
+        </div>
+      </details>
+    </section>
+
+    <dl class="stats">
+      <dt>Source image</dt><dd id="sSize">—</dd>
+      <dt>Original thin lines</dt><dd id="sThin">—</dd>
+      <dt>Original typical</dt><dd id="sMid">—</dd>
+      <dt>Original thick lines</dt><dd id="sThick">—</dd>
+      <dt>Output</dt><dd id="sOut">—</dd>
+    </dl>
+  </aside>
+
+  <main>
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="View">
+        <button data-view="result" aria-pressed="true">Result</button>
+        <button data-view="original" aria-pressed="false">Original</button>
+        <button data-view="overlay" aria-pressed="false">Overlay</button>
+      </div>
+      <div class="status" id="status"><span class="dot"></span><span id="statusText">Ready</span></div>
+      <div class="seg" role="group" aria-label="Zoom">
+        <button data-zoom="fit" aria-pressed="true">Fit</button>
+        <button data-zoom="0.5" aria-pressed="false">50%</button>
+        <button data-zoom="1" aria-pressed="false">100%</button>
+      </div>
+    </div>
+    <div class="mat fit" id="mat">
+      <div class="sample-tag" id="sampleTag">Example pattern · open or drop your own</div>
+      <div class="stage"><img id="view" alt="Pattern preview"></div>
+    </div>
+    <div class="drop-note" id="note">Drop an image on the mat, paste one, or use Open pattern image. Overlay shows the new lines in red over the original. 100% zoom is 300 pixels per inch.</div>
+  </main>
+</div>
+
+<script type="text/plain" id="worker-src">/*@@worker.js@@*/</script>
+
+<script>/*@@app.js@@*/</script>
+</body>
+</html>

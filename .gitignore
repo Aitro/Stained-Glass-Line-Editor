@@ -1,0 +1,5 @@
+# test patterns and their approved results are kept on your computer, not on GitHub
+tests/cases/*.gray.gz
+tests/cases/*.approved.gz
+# difference pictures written by a failing test
+tests/out/

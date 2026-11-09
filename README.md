@@ -55,17 +55,53 @@ On GitHub, open the repository's **Settings → Pages**. Under **Build and deplo
 
 ## Edit it
 
-Everything is in the single file `lead-line-leveler.html`. Open it in any text editor (VS Code, Notepad, TextEdit in plain-text mode), save, and reload the page in your browser.
+The program you download is the single file `lead-line-leveler.html`, but it is built from smaller files in `src/`. Edit those, then rebuild:
 
-Useful places to start:
+```
+python3 build.py
+```
 
-| What | Where in the file |
+| File | What's in it |
 | --- | --- |
-| Output resolution (300 ppi) and margin (0.25 in) | `const OUT_PPI=300, MARGIN_IN=0.25` |
-| Largest working image size | `MAX_WORK=3000` (raise for very large, detailed patterns; slower) |
-| Smoothing strength | in `smoothPiece`: the `28` in `Math.pow(28*u*strength/...)` |
-| How closely curves must follow the original | in `smoothPiece`: `tol=0.35*u` |
-| Line-width presets | the `#presets` buttons (`data-in` is the width in inches) |
-| Colours and fonts | the `:root` block at the top of the `<style>` section |
+| `src/page.html` | The page layout: controls, buttons, text |
+| `src/styles.css` | Colors, fonts and layout |
+| `src/app.js` | The page's behavior: opening a picture, sizing, the preview, saving PNG/SVG |
+| `src/worker/01-image.js` | Reading the picture: dark/light cutoff, speck removal, thinning lines to their centers |
+| `src/worker/02-filters.js` | Smoothing filters |
+| `src/worker/03-process.js` | One run from picture to lines |
+| `src/worker/04-geometry.js` | Small geometry helpers |
+| `src/worker/05-smooth-piece.js` | Smoothing a single stretch of line |
+| `src/worker/06-build-strokes.js` | The main logic: junctions, which lines carry on and which land, exact lines and circles, corners |
+| `src/worker/07-messages.js` | How the page talks to the background worker |
 
-The image processing runs in a background worker; its code is in the `<script type="text/plain" id="worker-src">` block. The page controls are in the last `<script>` block.
+The files in `src/worker/` are pieces of one script, joined in order (01, 02, ...). Each starts with a one-line description and a dashed line, which the build leaves out.
+
+`python3 build.py --check` tells you whether `lead-line-leveler.html` matches `src/` (use it before committing).
+
+Useful settings:
+
+| What | Where |
+| --- | --- |
+| Output resolution (300 ppi) and margin (0.25 in) | `const OUT_PPI=300, MARGIN_IN=0.25` in `src/app.js` |
+| Largest working image size | `MAX_WORK=3000` in `src/app.js` (raise for very large, detailed patterns; slower) |
+| Smoothing strength | in `smoothPiece` (`src/worker/05-smooth-piece.js`): the `28` in `Math.pow(28*u*strength/...)` |
+| How closely curves must follow the original | in `smoothPiece`: `tol=0.35*u` |
+| Line-width presets | the `#presets` buttons in `src/page.html` (`data-in` is the width in inches) |
+
+## Test it
+
+Every fix to how lines are traced can shift lines somewhere else. The regression test runs a set of saved patterns through the program and checks that every line stays where its approved result has it.
+
+```
+node tests/run.js                    # run every case (about 2 minutes)
+node tests/run.js lily-9in           # run one case
+node tests/run.js --approve lily-9in # accept the current result of a case as the new approved one
+```
+
+A case fails if any line moves more than 2.5 working pixels (about a sixth of a line width) from its approved result, or a line appears or disappears. For each failing case the test writes `tests/out/NAME-diff.png`: approved lines in gray, new lines in red, with the moved spots marked in red (new) and blue (gone). Look at it, and approve the change only if it's an improvement.
+
+The cases are listed in `tests/cases/` (one `.json` file each, with the settings). The patterns themselves (`NAME.gray.gz`, the picture exactly as the page hands it to the program) and their approved results (`NAME.approved.gz`) are kept on your computer, not on GitHub; put them in `tests/cases/` to run the test. Cases whose pattern isn't there are skipped.
+
+To add a pattern as a new test case once its result looks right, ask Claude: the case needs the exact grayscale picture the page used, which is fiddly to save by hand.
+
+You'll need Node.js (from nodejs.org) to run the test, and Python 3 to build.
