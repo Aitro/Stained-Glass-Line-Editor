@@ -10,13 +10,20 @@ Open a pattern image (a scan, a photo, a downloaded pattern, or a colored patter
 
 ## Use it
 
-1. Download `lead-line-leveler.html`.
-2. Double-click it to open it in Chrome, Edge, Firefox or Safari. It runs entirely in your browser; nothing is uploaded anywhere.
-3. Click **Open pattern image** (or drag an image onto the green mat, or paste one).
-4. Set **Width × Height** in inches. With **Keep the pattern's proportions** on, changing one updates the other. Turn it off to stretch the pattern to an exact size; the stretch happens before the lines are redrawn, so every line still comes out the same width.
-5. Set **Line width** in inches, points or millimetres (3 pt = 0.0417 in).
-6. Check the **Overlay** view, which shows the new lines in red over your original.
-7. Click **Save PNG** or **Save SVG**.
+**Open it online:** https://aitro.github.io/Stained-Glass-Line-Editor/ (this works once GitHub Pages is turned on for the repository; see below).
+
+**Or run it from your computer:**
+
+1. On the repository page, click `lead-line-leveler.html`, then click the **Download raw file** button (the down-arrow icon at the top right of the file view). Clicking the file name alone only shows its code.
+2. Double-click the downloaded file to open it in Chrome, Edge, Firefox or Safari. It runs entirely in your browser; nothing is uploaded anywhere.
+
+Then:
+
+1. Click **Open pattern image** (or drag an image onto the green mat, or paste one).
+2. Set **Width × Height** in inches. With **Keep the pattern's proportions** on, changing one updates the other. Turn it off to stretch the pattern to an exact size; the stretch happens before the lines are redrawn, so every line still comes out the same width.
+3. Set **Line width** in inches, points or millimetres (3 pt = 0.0417 in).
+4. Check the **Overlay** view, which shows the new lines in red over your original.
+5. Click **Save PNG** or **Save SVG**.
 
 Optional:
 - **Border line position**: where the new border line sits. *Centered* (the default) puts it on the middle of the original border, which is where you cut. *Outer edge* and *Inner edge* line it up with the outside or inside of the original border instead.
@@ -26,6 +33,10 @@ Optional:
 - **Cleanup → Make straight lines and circles exact** (on by default): lines drawn straight come out perfectly straight and circles perfectly circular.
 - **Cleanup → Square up the panel** (on by default): lines that are nearly level or upright become exactly level or upright, so the borders are square.
 - **Cleanup → Save PNG with a transparent background**.
+
+### Turning on GitHub Pages (once, by the repository owner)
+
+On GitHub, open the repository's **Settings → Pages**. Under **Build and deployment**, set **Source** to *Deploy from a branch*, pick the branch **main** and the folder **/ (root)**, and click **Save**. After a minute or two the program opens at the address above.
 
 ## How it works
 
