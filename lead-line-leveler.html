@@ -520,6 +520,17 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const thk=E.P.map(q=>{const yy=Math.round(q[0]),xx=Math.round(q[1]);return(yy>=0&&xx>=0&&yy<H&&xx<W)?(2*dmap[yy*W+xx]-1)/med:0;});
       const midT=thk.slice(Math.floor(thk.length*.2),Math.ceil(thk.length*.8));if(!midT.length||Math.min(...midT)<1.25)continue;
       if(test(lb,1,la,0)||test(la,0,lb,1)){union(A,B);edges.splice(i,1);}}}
+  // two loose ends that face each other across a small gap (a break in the ink, such as a scan that lost
+  // a bit of the border) are one line: join them
+  {const inc0=incident();const fr=[];inc0.forEach((lst,k)=>{if(lst.length===1&&[...freeL].some(l=>find(l)===k)){const[j,s]=lst[0];const E=edges[j];if(E.closed)return;
+      const d=endDir(E.P,s,u,E.L)[1];fr.push({k,p:s===0?E.P[0]:E.P[E.P.length-1],out:[-d[0],-d[1]],j});}});
+    const used=new Set();
+    for(let a=0;a<fr.length;a++)for(let b=a+1;b<fr.length;b++){const A=fr[a],B=fr[b];if(used.has(A.k)||used.has(B.k))continue;
+      const v=[B.p[0]-A.p[0],B.p[1]-A.p[1]],dl=Math.hypot(v[0],v[1]);if(dl<1||dl>2*med)continue;const vn=[v[0]/dl,v[1]/dl];
+      // (they run toward each other, and sit no more than a line width apart sideways)
+      if(angDeg(A.out,[-B.out[0],-B.out[1]])>30)continue;const along=v[0]*A.out[0]+v[1]*A.out[1],side=Math.abs(v[0]*A.out[1]-v[1]*A.out[0]);
+      if(along<-0.5*med||side>1.0*med)continue;
+      used.add(A.k);used.add(B.k);for(const l of[...freeL])if(find(l)===A.k||find(l)===B.k)freeL.delete(l);union(A.k,B.k);}}
   const inc=incident();
   const nodePos=new Map();{const acc=new Map();cent.forEach((c,k)=>{if(!k)return;const r=find(k);if(!acc.has(r))acc.set(r,[0,0,0]);const t=acc.get(r);t[0]+=c[0];t[1]+=c[1];t[2]++;});
     acc.forEach((t,r)=>nodePos.set(r,[t[0]/t[2],t[1]/t[2]]));}
@@ -551,7 +562,12 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     if(!pairs.length&&info.length===3){for(const[x,y,z]of[[0,1,2],[0,2,1],[1,2,0]]){const Ez=edges[info[z][0]];if(Ez.closed||Ez.a==null||Ez.e==null||find(Ez.a)===find(Ez.e))continue;
         if(Ez.L[Ez.L.length-1]>4*med)continue;const a=angDeg(info[x][3],info[y][3]);if(a>=135&&Math.min(...[x,y].map(q=>edges[info[q][0]].L[edges[info[q][0]].L.length-1]))>Ez.L[Ez.L.length-1]){pairs.push([a,x,y]);break;}}}
     const used=new Set();pairs.sort((p,q)=>q[0]-p[0]);
-    for(const[,x,y]of pairs){if(used.has(x)||used.has(y))continue;used.add(x);used.add(y);
+    // (where one line already runs straight through a crossing, a bar that starts there square to it and
+    // a line that lands there at a slant are two separate lines, unless they make a clearly straight run)
+    let thru=null;
+    for(const[pa_,x,y]of pairs){if(used.has(x)||used.has(y))continue;
+      if(thru&&pa_<160){const perp=q=>Math.abs(90-angDeg(info[q][3],info[thru][3]));const px=perp(x),py=perp(y);if(Math.min(px,py)<=8&&Math.max(px,py)>=15)continue;}
+      if(!thru)thru=x;used.add(x);used.add(y);
       partner.set(key(info[x][0],info[x][1]),[info[y][0],info[y][1],false]);partner.set(key(info[y][0],info[y][1]),[info[x][0],info[x][1],false]);}});
   // Two lines that run into each other at a shallow angle and then share a short stretch of ink:
   // which of them carries on past that stretch? The one whose bend continues smoothly into the
@@ -635,7 +651,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
             if(sh<6*med&&dc>0.4*med){const k=0.4*med/dc;cp=[np[0]+(cp[0]-np[0])*k,np[1]+(cp[1]-np[1])*k];}}
           pieces.push([cp]);weights.push([PIN]);}}
       pieces.push(Q);weights.push(wq);});
-    if(C.closed){weights[weights.length-1][weights[weights.length-1].length-1]=GAP;weights[0][0]=GAP;pieces.push([pieces[0][0].slice()]);weights.push([GAP]);}
+    if(C.closed){const GC=GAP*1.5;/* (where a closed line starts and ends: low trust, but not a junction) */weights[weights.length-1][weights[weights.length-1].length-1]=GC;weights[0][0]=GC;pieces.push([pieces[0][0].slice()]);weights.push([GC]);}
     C.raw=[].concat(...pieces);C.w=[].concat(...weights);}
   // corners inside traced lines
   const K=Math.max(4,Math.round(1.8*u));
@@ -650,7 +666,18 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const i=idx[jj],h=Math.max(2,K>>1),a=Q[closed?(i-h+n)%n:Math.max(0,i-h)],b=Q[closed?(i+h)%n:Math.min(n-1,i+h)];
       const v1=[Q[i][0]-a[0],Q[i][1]-a[1]],v2=[b[0]-Q[i][0],b[1]-Q[i][1]];
       const ah=Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(norm2(v1)*norm2(v2)+1e-9))));
-      if(ah<0.7*ang[jj])continue;
+      // (a corner between two long straight runs, such as the corner of a border, is a corner even if
+      // the scan rounded its tip a little)
+      const straightSide=dir=>{const m=10*K;if(!closed&&(dir<0?i-m<0:i+m>n-1))return false;const g=t=>Q[closed?((i+dir*t)%n+n)%n:i+dir*t];
+        const A=g(Math.round(0.5*K)),B=g(m),dx=B[0]-A[0],dy=B[1]-A[1],dl=Math.hypot(dx,dy)||1;let dv=0;
+        for(let t=Math.round(0.5*K);t<=m;t++){const q=g(t);dv=Math.max(dv,Math.abs((q[0]-A[0])*dy-(q[1]-A[1])*dx)/dl);}const ax=Math.min(Math.abs(dx),Math.abs(dy))/dl;return dv<0.6*u&&dl>8*K&&ax<0.09;};
+      if(ah<0.7*ang[jj]&&!(ah>=0.55*ang[jj]&&straightSide(-1)&&straightSide(1)))continue;
+      // (a small round cap, like the top of a teardrop, keeps turning past the tip: over twice the
+      // distance it turns far more; a real corner's sides run on straight-ish, so it turns about the same)
+      {const k2=2*K;if(closed||(i-k2>=0&&i+k2<n)){const a2=Q[closed?(i-k2+n)%n:i-k2],b2=Q[closed?(i+k2)%n:i+k2];
+        const w1=[Q[i][0]-a2[0],Q[i][1]-a2[1]],w2=[b2[0]-Q[i][0],b2[1]-Q[i][1]];
+        const a2g=Math.acos(Math.max(-1,Math.min(1,(w1[0]*w2[0]+w1[1]*w2[1])/(norm2(w1)*norm2(w2)+1e-9))));
+        if(ah<0.8*ang[jj]&&a2g>1.3*ang[jj])continue;}}
       out.push(i);}
     return out;};
   const land=new Map(),landTrim=new Map(),landOn=new Map(),landAng=new Map();
@@ -667,6 +694,11 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     const base=C.closed?Q.slice(0,-1):Q;
     for(const i of (C.noCorners?[]:findCorners(base,C.closed))){
       if(pins.some(p=>Math.abs(i-p)<3*K)||(!C.closed&&(i<3*K||i>Q.length-1-3*K)))continue;
+      // a bend inside a solid dot on the line (a bird's eye drawn as a filled spot) is not a corner: the
+      // ink there is far thicker than a line, and the line just runs through the spot
+      {const dAt=q=>{const yy=Math.round(q[0]),xx=Math.round(q[1]);return(yy>=0&&xx>=0&&yy<H&&xx<W)?dmap[yy*W+xx]:0;};
+        const n2=Q.length,off=Math.round(3*K),nb=[];for(const o of[-off,-off+2,off-2,off]){const t=C.closed?(i+o+n2)%n2:i+o;if(t>=0&&t<n2)nb.push(dAt(Q[t]));}
+        nb.sort((p,q)=>p-q);const ref=nb.length?nb[nb.length>>1]:0.5*med;if(dAt(Q[i])>Math.max(1.0*med,2.2*ref))continue;}
       // a junction this line was found to pass smoothly through is not a corner of it
       {let soft=false;for(let t=Math.max(0,i-K);t<=Math.min(w.length-1,i+K);t++)if(w[t]<=GAP*1.01){soft=true;break;}if(soft)continue;}
       const L=arclen(Q),d0=L[i];const ia=at(Q,d0-2*u,L),ib=at(Q,d0-6*u,L),ja=at(Q,d0+2*u,L),jb=at(Q,d0+6*u,L);
@@ -872,6 +904,18 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
           if(Rr&&Rr.pr&&!cset.has(r.b)){const rv=seg.slice().reverse();const E2=ext(Rr.pr,rv[0],rv[Lb],Lb);if(agree(rv,E2)){blend(rv,E2);seg=rv.reverse();}}}
         }
       out=out.length?out.concat(seg.slice(1)):seg;}
+    // two exact straight stretches of one line that meet where the line passes through a junction (not a
+    // corner of the design, such as the eye of a bird sitting on a line) meet in a short round bend
+    {const cset=new Set(pc.cs||[]);
+      for(let i=1;i<runs.length;i++){const L=runs[i-1],R=runs[i];if(!L.pr||!R.pr||L.pr.type!=='line'||R.pr.type!=='line'||cset.has(R.a))continue;
+        const p=bpt.get(R.a);if(!p||out.length<5)continue;
+        let ip=0,bd=Infinity;out.forEach((q,k)=>{const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd){bd=d;ip=k;}});if(bd>1)continue;
+        const La=arclen(out),t=Math.min(1.5*med,0.35*(R.a-L.a),0.35*(R.b-R.a));if(t<2)continue;
+        let ia=ip,ib=ip;while(ia>0&&La[ip]-La[ia]<t)ia--;while(ib<out.length-1&&La[ib]-La[ip]<t)ib++;
+        const A=out[ia],B=out[ib];const v1=[p[0]-A[0],p[1]-A[1]],v2=[B[0]-p[0],B[1]-p[1]];
+        const turn=Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/((norm2(v1)*norm2(v2))||1))))*180/Math.PI;if(turn<4||turn>70)continue;
+        const n=Math.max(4,ib-ia),arc=[];for(let k=0;k<=n;k++){const x=k/n,a=(1-x)*(1-x),b=2*x*(1-x),c=x*x;arc.push([a*A[0]+b*p[0]+c*B[0],a*A[1]+b*p[1]+c*B[1]]);}
+        out=[...out.slice(0,ia),...arc,...out.slice(ib+1)];}}
     return out;};
   const fitAll=()=>{const pcs=chains.map(C=>C.dead?null:prepChain(C));
     pcs.forEach(pc=>{if(pc){if(opt.exact)analyze(pc);else{pc.runs=[];if(pc.loop){pc.cs=[0,pc.Q.length-1];}for(let c=0;c<(pc.cs||[]).length-1;c++)pc.runs.push({a:pc.cs[c],b:pc.cs[c+1],pr:null});}}});
@@ -998,7 +1042,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       if(!best)continue;land.set(a.kk,best.slice());land.set(b.kk,best.slice());done.add(a.kk);done.add(b.kk);}
     // a line that slides into the curve at a shallow angle, from the same side as another line that
     // leaves just ahead of it, joins the curve where that other line leaves (they meet at one point)
-    for(const a of its){if(done.has(a.kk)||(landAng.get(a.kk)??90)>=30)continue;const pa=land.get(a.kk);const fw=[-a.e.dir[0],-a.e.dir[1]];
+    for(const a of its){if(done.has(a.kk)||(landAng.get(a.kk)??90)>=34)continue;const pa=land.get(a.kk);const fw=[-a.e.dir[0],-a.e.dir[1]];
       const F=fitted[a.cF];const ni=p=>{let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});return bi;};
       const sd=(p,q)=>{const i=ni(p);const f0=F[Math.max(0,i-3)],f1=F[Math.min(F.length-1,i+3)];return Math.sign((f1[0]-f0[0])*(q[1]-F[i][1])-(f1[1]-f0[1])*(q[0]-F[i][0]));};
       let best=null;
@@ -1006,10 +1050,24 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         const ahead=(pb[0]-pa[0])*fw[0]+(pb[1]-pa[1])*fw[1],gap=Math.hypot(pb[0]-pa[0],pb[1]-pa[1]);
         if(ahead<=0||gap>5*med||sd(pa,a.e.anchor)!==sd(pb,b.e.anchor))continue;
         // and the two run together into one band of doubled ink along the way (they touch, not just near)
-        {let i0=ni(pa),i1=ni(pb);if(i0>i1)[i0,i1]=[i1,i0];const th=[];for(let i=i0;i<=i1;i++){const yy=Math.round(F[i][0]),xx=Math.round(F[i][1]);if(yy>=0&&xx>=0&&yy<H&&xx<W)th.push((2*dmap[yy*W+xx]-1)/med);}
+        // (or they come from one junction in the drawing, or the shallow line is aimed right at where the other lands)
+        const oneNode=a.e.node!=null&&a.e.node===b.e.node,aimed=gap<=3.5*med&&ahead>=0.8*gap;
+        if(!oneNode&&!aimed){let i0=ni(pa),i1=ni(pb);if(i0>i1)[i0,i1]=[i1,i0];const th=[];for(let i=i0;i<=i1;i++){const yy=Math.round(F[i][0]),xx=Math.round(F[i][1]);if(yy>=0&&xx>=0&&yy<H&&xx<W)th.push((2*dmap[yy*W+xx]-1)/med);}
           th.sort((p,q)=>p-q);if(!th.length||th[th.length>>1]<1.3)continue;}
         if(!best||gap<best[0])best=[gap,pb];}
-      if(best){land.set(a.kk,best[1].slice());done.add(a.kk);}}}
+      if(best){land.set(a.kk,best[1].slice());done.add(a.kk);}}
+    // lines that land on a curve from the same side at two points barely a line width apart (a cluster
+    // of lines meeting the curve in one blob of ink) meet it at one point, midway
+    {const grp=new Map();for(const a of its){const p=land.get(a.kk);if(!p)continue;const g=grp.get(a.cF)||[];g.push({a,p});grp.set(a.cF,g);}
+      grp.forEach((g,cF)=>{const F=fitted[cF];if(!F||g.length<3)return;
+        const ni=p=>{let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});return bi;};
+        const sd=(i,q)=>{const f0=F[Math.max(0,i-3)],f1=F[Math.min(F.length-1,i+3)];return Math.sign((f1[0]-f0[0])*(q[1]-F[i][1])-(f1[1]-f0[1])*(q[0]-F[i][0]));};
+        // points where two or more lines already land together
+        const pts=[];for(const x of g){let P=pts.find(q=>Math.hypot(q.p[0]-x.p[0],q.p[1]-x.p[1])<1);if(!P){P={p:x.p,m:[]};pts.push(P);}P.m.push(x);}
+        for(let i=0;i<pts.length;i++)for(let j=i+1;j<pts.length;j++){const A=pts[i],B=pts[j];if(A.m.length<2||B.m.length<2)continue;
+          const gap=Math.hypot(A.p[0]-B.p[0],A.p[1]-B.p[1]);if(gap<1||gap>1.3*med)continue;
+          const ia=ni(A.p),ib=ni(B.p),sides=new Set([...A.m.map(x=>sd(ia,x.a.e.anchor)),...B.m.map(x=>sd(ib,x.a.e.anchor))]);if(sides.size!==1)continue;
+          const mid=F[Math.round((ia+ib)/2)].slice();for(const x of[...A.m,...B.m]){land.set(x.a.kk,mid.slice());x.p=mid;}A.p=mid;B.p=mid;}});}}
   // Two lines that land close together on the same curve, from the same side, heading toward each
   // other at a shallow angle, with nothing crossing the curve where they land: in the drawing they
   // are the two sides of one rounded shape sitting on that curve (like the cat's cheek). Join them
@@ -1116,6 +1174,19 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const tgt=endPt(straight[0]).slice();
       for(const o of list){if(o===straight[0])continue;const p=endPt(o);const dy=tgt[0]-p[0],dx=tgt[1]-p[1],dd=Math.hypot(dy,dx);if(dd<0.05||dd>1.2*med)continue;
         let F=fitted[o.i].map(q=>q.slice());if(o.atStart)F.reverse();const L=arclen(F),tot=L[L.length-1],span=isStraightEnd(fitted[o.i],o.atStart)?0.6*tot:Math.min(4*u,0.4*tot);
+        for(let t=0;t<F.length;t++){const back=tot-L[t];if(back>span)continue;const x=1-back/span,wgt=x*x*(3-2*x);F[t][0]+=dy*wgt;F[t][1]+=dx*wgt;}
+        if(o.atStart)F.reverse();fitted[o.i]=F;}});}
+  // lines that were set to land at one point on a line (the two edges of a leaf meeting at its tip) end
+  // at exactly one point, even if later straightening or smoothing nudged them a little apart
+  {const grp=new Map();
+    chains.forEach((C,i)=>{if(C.dead||C.closed)return;const F=fitted[i];if(!F||F.length<4)return;
+      for(const[k2,atStart]of[[C.start,true],[C.end,false]]){if(!k2)continue;const kk=key(k2[0],k2[1]);if(!landOn.has(kk)||!land.has(kk))continue;
+        const p=land.get(kk),g=landOn.get(kk)+':'+Math.round(p[0])+','+Math.round(p[1]);if(!grp.has(g))grp.set(g,[]);grp.get(g).push({i,atStart});}});
+    grp.forEach(list=>{if(list.length<2)return;const pts=list.map(o=>{const F=fitted[o.i];return o.atStart?F[0]:F[F.length-1];});
+      let spread=0;for(const a of pts)for(const b of pts)spread=Math.max(spread,Math.hypot(a[0]-b[0],a[1]-b[1]));if(spread<0.05||spread>0.6*med)return;
+      const tgt=[pts.reduce((t,q)=>t+q[0],0)/pts.length,pts.reduce((t,q)=>t+q[1],0)/pts.length];
+      for(const o of list){const p=o.atStart?fitted[o.i][0]:fitted[o.i][fitted[o.i].length-1];const dy=tgt[0]-p[0],dx=tgt[1]-p[1];
+        let F=fitted[o.i].map(q=>q.slice());if(o.atStart)F.reverse();const L=arclen(F),tot=L[L.length-1],span=Math.min(6*med,0.45*tot);
         for(let t=0;t<F.length;t++){const back=tot-L[t];if(back>span)continue;const x=1-back/span,wgt=x*x*(3-2*x);F[t][0]+=dy*wgt;F[t][1]+=dx*wgt;}
         if(o.atStart)F.reverse();fitted[o.i]=F;}});}
   // a loose end that stops right up against a line (another line, or farther along its own, as where
