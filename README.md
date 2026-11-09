@@ -6,7 +6,7 @@ The program is **Lead Line Leveler** (`lead-line-leveler.html`).
 
 Make every line in a stained glass pattern the same width, without changing the design.
 
-Open a pattern image (a scan, a photo or a downloaded pattern), set the size you'll print it at and the line width you want, and save a print-ready PNG (300 pixels per inch, with the print size stored in the file) or a vector SVG sized in inches.
+Open a pattern image (a scan, a photo, a downloaded pattern, or a colored pattern with the glass filled in), set the size you'll print it at and the line width you want, and save a print-ready PNG (300 pixels per inch, with the print size stored in the file) or a vector SVG sized in inches.
 
 ## Use it
 
@@ -30,7 +30,7 @@ Optional:
 ## How it works
 
 1. The drawing is cropped and enlarged to print resolution.
-2. Dark pixels become lines. Small gaps inside a line (a hollow or skipping marker stroke) are closed, and specks are dropped.
+2. Dark pixels become lines. On a colored pattern, only pixels that are dark in every color count, so dark blue or green glass is not mistaken for lead lines. On black-and-white drawings, small gaps inside a line (a hollow or skipping marker stroke) are closed; specks are dropped.
 3. The centre of every line is traced and turned into a network of lines and junctions.
 4. Junctions are rebuilt the way a pattern is drawn:
    - a line that runs through a junction stays one continuous curve;

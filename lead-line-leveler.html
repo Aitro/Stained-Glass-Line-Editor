@@ -230,7 +230,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 
 <script type="text/plain" id="worker-src">
 const INF=1e20;
-let W=0,H=0,gray=null,otsuT=128;
+let W=0,H=0,gray=null,otsuT=128,colorIn=false;
 
 function otsu(g){const h=new Float64Array(256);for(let i=0;i<g.length;i++)h[g[i]]++;
   const n=g.length;let sum=0;for(let t=0;t<256;t++)sum+=t*h[t];
@@ -306,7 +306,8 @@ function process(p){
   const u=Math.max(1.5,med/1.75); // working unit ≈ one source-pixel line width
   // close gaps narrower than ~2/3 of a line width (hollow or skipping marker strokes),
   // using distance maps: grow the lines by r, then shrink them back by r
-  {const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
+  // (not for colored patterns: they are clean drawings where every gap, however thin, is glass)
+  if(!colorIn){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
     for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
     // pixels outside the image count as paper so the outer border is not pulled inward
@@ -370,12 +371,16 @@ function resampleKeep(Q,w){const pins=[0];for(let i=1;i<Q.length-1;i++)if(w[i]>=
     if(oQ.length){R=R.slice(1);rw=rw.slice(1);}oQ=oQ.concat(R);ow=ow.concat(rw);}
   return[oQ,ow];}
 function norm2(v){return Math.hypot(v[0],v[1]);}
-function endDir(P,side,u,L,clr){L=L||arclen(P);const tot=L[L.length-1];
+function endDir(P,side,u,L,clr,bend){L=L||arclen(P);const tot=L[L.length-1];
   const c0=clr==null?2*u:Math.max(2*u,clr);const d1=Math.min(c0,0.4*tot),d2=Math.min(d1+7*u,0.85*tot);
   const n=Math.max(3,Math.floor((d2-d1)/Math.max(u/2,1))+1);const ds=[],pts=[];
   for(let i=0;i<n;i++){const d=d1+(d2-d1)*i/(n-1);ds.push(d-d1);pts.push(at(P,side===1?tot-d:d,L));}
   const anchor=pts[0];let v;
-  if(d2-d1>3*u&&n>=5){ // quadratic fit; derivative at the anchor
+  // quadratic fit; derivative at the anchor (also on short pieces, whose ends may already be curving:
+  // the top of a small rounded shape)
+  let bent=false;if(bend&&!(d2-d1>3*u)&&d2-d1>1.5*u&&tot<5*u*1.75){const a=pts[0],b=pts[pts.length-1],ab=[b[0]-a[0],b[1]-a[1]],l=Math.hypot(ab[0],ab[1])||1;
+    for(const q of pts)if(Math.abs((q[0]-a[0])*ab[1]-(q[1]-a[1])*ab[0])/l>0.12*u*1.75)bent=true;}
+  if((d2-d1>3*u||bent)&&n>=5){
     let S0=0,S1=0,S2=0,S3=0,S4=0,Ty0=0,Ty1=0,Ty2=0,Tx0=0,Tx1=0,Tx2=0;
     for(let i=0;i<n;i++){const x=ds[i],x2=x*x;S0++;S1+=x;S2+=x2;S3+=x2*x;S4+=x2*x2;
       Ty0+=pts[i][0];Ty1+=x*pts[i][0];Ty2+=x2*pts[i][0];Tx0+=pts[i][1];Tx1+=x*pts[i][1];Tx2+=x2*pts[i][1];}
@@ -417,12 +422,15 @@ const refl=(i,n)=>{while(i<0||i>=n){if(i<0)i=-i-1;if(i>=n)i=2*n-i-1;}return i;};
 function maxFilter(a,size){const n=a.length,h=size>>1,o=new Float64Array(n);for(let i=0;i<n;i++){let m=-Infinity;for(let j=-h;j<=h;j++)m=Math.max(m,a[refl(i+j,n)]);o[i]=m;}return o;}
 function gaussFilter(a,sig){const n=a.length,r=Math.ceil(4*sig),k=[];let s=0;for(let i=-r;i<=r;i++){const v=Math.exp(-i*i/(2*sig*sig));k.push(v);s+=v;}
   const o=new Float64Array(n);for(let i=0;i<n;i++){let t=0;for(let j=-r;j<=r;j++)t+=a[refl(i+j,n)]*k[j+r];o[i]=t/s;}return o;}
-function smoothPiece(Q,w,u,strength,closed){
+function smoothPiece(Q,w,u,strength,closed,own){
   let Qx,wx,m=0;
   if(closed){m=Math.min(Q.length-1,Math.floor(40*u));
     Qx=[...Q.slice(Q.length-m-1,Q.length-1),...Q,...Q.slice(1,m+1)];wx=[...w.slice(w.length-m-1,w.length-1),...w,...w.slice(1,m+1)];}
   else{Qx=Q;wx=w.slice();}
-  const lam=Math.pow(28*u*strength/(2*Math.PI),4),tol=0.35*u;
+  // (a very short open piece, like the top of a small rounded shape, is smoothed over a third of its
+  // own length at most, so its curve is not flattened into a straight chord)
+  let sl=28*u*strength/(2*Math.PI),tol=0.35*u;if(!closed&&own&&Q.length<7*u){sl=Math.min(sl,Q.length/3.5);tol=Math.min(tol,Math.max(1,Q.length/28));}
+  const lam=Math.pow(sl,4);
   const real=wx.map(v=>v>0.5&&v<1e5);let wc=wx.slice();let Z=Qx;
   const fs=Math.max(3,Math.floor(4*u))|1;
   for(let it=0;it<10;it++){Z=whittaker(Qx,wc,lam);
@@ -522,7 +530,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     lst.forEach(([j,s],x)=>{let mn=Infinity;lst.forEach((_,y)=>{if(y!==x)mn=Math.min(mn,Math.acos(Math.max(-1,Math.min(1,d0[x][0]*d0[y][0]+d0[x][1]*d0[y][1]))));});
       if(mn<Infinity){const t=Math.max(mn,8*Math.PI/180);edges[j].clr2[s]=Math.max(2*u,Math.min(8*u,0.5*med/Math.sin(t/2)+u));}});});
   const ends=new Map(),partner=new Map();const key=(j,s)=>j*2+s;
-  inc.forEach((lst,k)=>{const info=lst.map(([j,s])=>{const[a,d,cv]=endDir(edges[j].P,s,u,edges[j].L,edges[j].clr2[s]);ends.set(key(j,s),{node:k,anchor:a,dir:d,curve:cv,reach:edges[j].clr2[s]});return[j,s,a,d];});
+  inc.forEach((lst,k)=>{const info=lst.map(([j,s])=>{const[a,d,cv]=endDir(edges[j].P,s,u,edges[j].L,edges[j].clr2[s]);const db=endDir(edges[j].P,s,u,edges[j].L,edges[j].clr2[s],true)[1];ends.set(key(j,s),{node:k,anchor:a,dir:d,dirBent:(db[0]!==d[0]||db[1]!==d[1])?db:null,curve:cv,reach:edges[j].clr2[s],len:edges[j].L[edges[j].L.length-1]});return[j,s,a,d];});
     if(lst.length===2){const ang=angDeg(info[0][3],info[1][3]);const corner=ang<145;
       partner.set(key(info[0][0],info[0][1]),[info[1][0],info[1][1],corner]);partner.set(key(info[1][0],info[1][1]),[info[0][0],info[0][1],corner]);return;}
     const allp=[];for(let x=0;x<info.length;x++)for(let y=x+1;y<info.length;y++)allp.push([angDeg(info[x][3],info[y][3]),x,y]);
@@ -537,6 +545,11 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         const steady=prof.every((v,i)=>i===0||v<=prof[i-1]+3);
         const sym=Math.abs(angDeg(info[z][3],info[x][3])-angDeg(info[z][3],info[y][3]));
         if(steady&&prof[0]>=125&&prof[0]-prof[4]>=25&&sym<=12){pairs.push([prof[0],x,y]);break;}}}
+    // a junction where a short connecting piece (the top of a small rounded shape, running between two
+    // junctions close together) meets a line that bends there a little: that line carries on through
+    // and the short piece lands on it
+    if(!pairs.length&&info.length===3){for(const[x,y,z]of[[0,1,2],[0,2,1],[1,2,0]]){const Ez=edges[info[z][0]];if(Ez.closed||Ez.a==null||Ez.e==null||find(Ez.a)===find(Ez.e))continue;
+        if(Ez.L[Ez.L.length-1]>4*med)continue;const a=angDeg(info[x][3],info[y][3]);if(a>=135&&Math.min(...[x,y].map(q=>edges[info[q][0]].L[edges[info[q][0]].L.length-1]))>Ez.L[Ez.L.length-1]){pairs.push([a,x,y]);break;}}}
     const used=new Set();pairs.sort((p,q)=>q[0]-p[0]);
     for(const[,x,y]of pairs){if(used.has(x)||used.has(y))continue;used.add(x);used.add(y);
       partner.set(key(info[x][0],info[x][1]),[info[y][0],info[y][1],false]);partner.set(key(info[y][0],info[y][1]),[info[x][0],info[x][1],false]);}});
@@ -560,7 +573,39 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         const bi=score[0]<=score[1]?0:1,[cj,cs]=others[bi],[oj,os]=others[1-bi];
         if(cur[0]===cj&&cur[1]===cs)continue;
         if(score[bi]>0.7*score[1-bi])continue;                       // only when clearly the smoother one
-        partner.delete(key(oj,os));partner.set(key(j,s),[cj,cs,false]);partner.set(key(cj,cs),[j,s,false]);}});}
+        partner.delete(key(oj,os));partner.set(key(j,s),[cj,cs,false]);partner.set(key(cj,cs),[j,s,false]);}});
+    // A short piece of line between two junctions (the rounded bottom of a petal, split by the lines
+    // that land on it) that carries on through at one end but not the other: it carries on into
+    // whichever line there makes one smooth curve with it, when one clearly does.
+    edges.forEach((E,j)=>{if(E.closed||E.a==null||E.e==null)return;const tot=E.L[E.L.length-1];if(tot>3*med)return;
+      const A=find(E.a),B=find(E.e);if(A===B)return;
+      for(const[s0,N]of[[0,A],[1,B]]){if(partner.has(key(j,s0)))continue;const far=partner.get(key(j,1-s0));if(!far||far[2])continue;
+        const cand=(inc.get(N)||[]).filter(([jj])=>jj!==j);if(cand.length!==2)continue;
+        // (the two other lines there may have been joined to each other at a wide bend; that gives way
+        // if one of them makes a clearly smoother curve with this piece)
+        const pc0=partner.get(key(cand[0][0],cand[0][1])),pc1=partner.get(key(cand[1][0],cand[1][1]));
+        const joinedEach=pc0&&pc1&&pc0[0]===cand[1][0]&&pc0[1]===cand[1][1]&&!pc0[2];
+        if((pc0||pc1)&&!joinedEach)continue;
+        const link=samp(j,s0,tot);
+        const sc=cand.map(([jj,ss])=>rmsCircle([...samp(jj,ss,2.5*med).reverse(),...link,...samp(far[0],far[1],2.5*med)]));
+        const bi=sc[0]<=sc[1]?0:1;if(sc[bi]>0.15*med||sc[1-bi]<2*sc[bi])continue;
+        const[cj,cs]=cand[bi];if(joinedEach){partner.delete(key(cand[0][0],cand[0][1]));partner.delete(key(cand[1][0],cand[1][1]));}
+        partner.set(key(j,s0),[cj,cs,false]);partner.set(key(cj,cs),[j,s0,false]);}});
+    // ...and one that carries on at neither end: if one route through it (a line at one end, the
+    // piece, a line at the other end) is a clearly smoother curve than any other, that is the line it
+    // belongs to, and the lines it took over from now end on it instead.
+    edges.forEach((E,j)=>{if(E.closed||E.a==null||E.e==null)return;const tot=E.L[E.L.length-1];if(tot>3*med)return;
+      const A=find(E.a),B=find(E.e);if(A===B||partner.has(key(j,0))||partner.has(key(j,1)))return;
+      const la=(inc.get(A)||[]).filter(([jj])=>jj!==j),lb=(inc.get(B)||[]).filter(([jj])=>jj!==j);if(la.length!==2||lb.length!==2)return;
+      const link=samp(j,0,tot);const opts=[];
+      for(const a of la)for(const b of lb)opts.push([rmsCircle([...samp(a[0],a[1],2.5*med).reverse(),...link,...samp(b[0],b[1],2.5*med)]),a,b]);
+      opts.sort((p,q)=>p[0]-q[0]);if(opts[0][0]>0.12*med||opts[0][0]>0.4*opts[1][0])return;
+      const[,a,b]=opts[0];for(const[x,y]of[a,b]){const pp=partner.get(key(x,y));if(pp&&pp[2])return;}
+      for(const[x,y]of[a,b]){const pp=partner.get(key(x,y));if(pp){partner.delete(key(pp[0],pp[1]));partner.delete(key(x,y));}}
+      partner.set(key(j,0),[a[0],a[1],false]);partner.set(key(a[0],a[1]),[j,0,false]);
+      partner.set(key(j,1),[b[0],b[1],false]);partner.set(key(b[0],b[1]),[j,1,false]);});}
+  // (a piece that carries on into nothing at either end is a line of its own)
+  edges.forEach((E,j)=>{if(E.closed||partner.has(key(j,0))||partner.has(key(j,1)))return;for(const s_ of[0,1]){const e=ends.get(key(j,s_));if(e)e.own=true;}});
   // chains
   const visited=new Set(),chains=[];
   const walk=(j,sIn)=>{const seq=[],joins=[];let cur=j,side=sIn;
@@ -579,12 +624,15 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     C.seq.forEach(([j,rev],t)=>{let P=edges[j].P,L=edges[j].L;const tot=L[L.length-1];
       if(rev){P=P.slice().reverse();const L2=new Float64Array(L.length);for(let i=0;i<L.length;i++)L2[i]=tot-L[L.length-1-i];L=L2;}
       const sFirst=rev?1:0,sLast=rev?0:1;
-      const lo=touches(j,sFirst)?Math.min(Dt,0.35*tot):0,hi=touches(j,sLast)?Math.max(tot-Dt,0.65*tot):tot;
+      const fr=tot<4*med&&C.seq.length===1?0.15:0.35;const lo=touches(j,sFirst)?Math.min(Dt,fr*tot):0,hi=touches(j,sLast)?Math.max(tot-Dt,(1-fr)*tot):tot;
       const Q=[at(P,lo,L)];for(let i=0;i<P.length;i++)if(L[i]>lo&&L[i]<hi)Q.push(P[i]);Q.push(at(P,hi,L));
       const wq=new Array(Q.length).fill(1);
       if(t>0){const lw=weights[weights.length-1];lw[lw.length-1]=Math.min(lw[lw.length-1],GAP);wq[0]=GAP;
         if(C.joins[t-1]){const[pj,prevRev]=C.seq[t-1];const pe=ends.get(key(pj,prevRev?0:1)),ce=ends.get(key(j,sFirst));
           const np=nodePos.get(ce.node);let cp=lsqPoint([pe.anchor,ce.anchor],[pe.dir,ce.dir],np);if(Math.hypot(cp[0]-np[0],cp[1]-np[1])>3*u)cp=np.slice();
+          // (a corner between two short pieces, whose directions can't be read well, stays near the junction)
+          {const sh=Math.min(edges[pj].L[edges[pj].L.length-1],edges[j].L[edges[j].L.length-1]);const dc=Math.hypot(cp[0]-np[0],cp[1]-np[1]);
+            if(sh<6*med&&dc>0.4*med){const k=0.4*med/dc;cp=[np[0]+(cp[0]-np[0])*k,np[1]+(cp[1]-np[1])*k];}}
           pieces.push([cp]);weights.push([PIN]);}}
       pieces.push(Q);weights.push(wq);});
     if(C.closed){weights[weights.length-1][weights[weights.length-1].length-1]=GAP;weights[0][0]=GAP;pieces.push([pieces[0][0].slice()]);weights.push([GAP]);}
@@ -596,7 +644,14 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const v1=[Q[i][0]-a[0],Q[i][1]-a[1]],v2=[b[0]-Q[i][0],b[1]-Q[i][1]];
       ang.push(Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(norm2(v1)*norm2(v2)+1e-9)))));idx.push(i);}
     const out=[];for(let jj=0;jj<idx.length;jj++){if(ang[jj]<=40*Math.PI/180)continue;let mx=0;for(let t=Math.max(0,jj-K);t<=Math.min(ang.length-1,jj+K);t++)mx=Math.max(mx,ang[t]);
-      if(ang[jj]===mx&&(!out.length||idx[jj]-out[out.length-1]>K))out.push(idx[jj]);}
+      if(ang[jj]!==mx||(out.length&&idx[jj]-out[out.length-1]<=K))continue;
+      // a real corner turns all at once: over half the distance the turn is nearly as big. A tight
+      // round (the end of a small teardrop, with lines thick next to it) turns gradually, half as much.
+      const i=idx[jj],h=Math.max(2,K>>1),a=Q[closed?(i-h+n)%n:Math.max(0,i-h)],b=Q[closed?(i+h)%n:Math.min(n-1,i+h)];
+      const v1=[Q[i][0]-a[0],Q[i][1]-a[1]],v2=[b[0]-Q[i][0],b[1]-Q[i][1]];
+      const ah=Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(norm2(v1)*norm2(v2)+1e-9))));
+      if(ah<0.7*ang[jj])continue;
+      out.push(i);}
     return out;};
   const land=new Map(),landTrim=new Map(),landOn=new Map(),landAng=new Map();
   const isFreeEnd=k2=>{const[j,s]=k2;const k=s===0?edges[j].a:edges[j].e;return k==null||isFree.has(find(k));};
@@ -612,6 +667,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     const base=C.closed?Q.slice(0,-1):Q;
     for(const i of (C.noCorners?[]:findCorners(base,C.closed))){
       if(pins.some(p=>Math.abs(i-p)<3*K)||(!C.closed&&(i<3*K||i>Q.length-1-3*K)))continue;
+      // a junction this line was found to pass smoothly through is not a corner of it
+      {let soft=false;for(let t=Math.max(0,i-K);t<=Math.min(w.length-1,i+K);t++)if(w[t]<=GAP*1.01){soft=true;break;}if(soft)continue;}
       const L=arclen(Q),d0=L[i];const ia=at(Q,d0-2*u,L),ib=at(Q,d0-6*u,L),ja=at(Q,d0+2*u,L),jb=at(Q,d0+6*u,L);
       const nrm=v=>{const n=norm2(v)+1e-9;return[v[0]/n,v[1]/n];};
       let cp=lsqPoint([ia,ja],[nrm([ib[0]-ia[0],ib[1]-ia[1]]),nrm([jb[0]-ja[0],jb[1]-ja[1]])],Q[i]);
@@ -622,7 +679,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     const cuts=[0,Q.length-1];w.forEach((v,i)=>{if(v>=1e5)cuts.push(i);});const cs=[...new Set(cuts)].sort((a,b)=>a-b);
     // which ends are points where this line ends on another line (fixed points for straightening)
     let landS=false,landE=false;const shallow=k2=>{if(!k2)return false;const a=landAng.get(key(k2[0],k2[1]));return a!=null&&a<45;};if(!C.closed){landS=shallow(C.start);landE=shallow(C.end);}
-    return{Q,w,cs,loop:false,closed:C.closed,landS,landE};};
+    const landed=k2=>!!k2&&land.has(key(k2[0],k2[1]));
+    return{Q,w,cs,loop:false,closed:C.closed,landS,landE,ownShort:!C.closed&&C.seq.length===1&&arclen(Q)[Q.length-1]<4*med,onS:!C.closed&&landed(C.start),onE:!C.closed&&landed(C.end)};};
 
   // ---------------- straight lines and circles ----------------
   // Stretches that are straight (or circular) within a small tolerance are replaced by an exact
@@ -719,7 +777,14 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     // end (or corner to corner), or a long stretch; never chop a freeform curve into pieces
     const ends=new Set(pc.cs);
     pc.runs.forEach(r=>{if(!r.pr)return;const whole=ends.has(r.a)&&ends.has(r.b);const p=r.pr;
-      const keep=p.type==='line'?(whole?r.L>=6*med:r.L>=25*med):(p.sweep>=30&&(whole?r.L>=15*med:r.L>=40*med));
+      // (a short whole piece also counts when it is plainly straight and nearly level or upright, like a
+      // short bar across a border strip, so squaring up makes it exactly level or upright too)
+      const nearAxis=p.type==='line'&&Math.min(Math.abs(p.d[0]),Math.abs(p.d[1]))<Math.sin(5*Math.PI/180);
+      const keep=p.type==='line'?(whole?(r.L>=6*med||(nearAxis&&r.L>=2*med&&p.dev<=0.15*med)):r.L>=25*med):(p.sweep>=30&&(whole?r.L>=15*med:r.L>=40*med));
+      // and where this line ends on another line, the exact shape has to reach that point; otherwise
+      // its end would land somewhere else (past a leaf tip, say)
+      if(keep){for(const[at_,on]of[[r.a,r.a===0&&pc.onS],[r.b,r.b===Qq.length-1&&pc.onE]]){if(!on)continue;
+          const q=Qq[at_],pp=project(p,q);if(Math.hypot(q[0]-pp[0],q[1]-pp[1])>0.5*med){r.pr=null;return;}}}
       if(!keep)r.pr=null;});
     const merged=[];for(const r of pc.runs){const last=merged[merged.length-1];if(last&&!last.pr&&!r.pr&&last.b===r.a)last.b=r.b;else merged.push(r);}
     pc.runs=merged;};
@@ -752,7 +817,10 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
             if(!touch){nr.push(r);continue;}
             const P=realPts(pc.Q,pc.w,r.a,r.b);if(P.length<6){nr.push(r);continue;}
             const d=P.map(p=>{const q=project(st.pr,p);return Math.hypot(q[0]-p[0],q[1]-p[1]);});
-            if(Math.max(...d)<=st.tol){nr.push({a:r.a,b:r.b,pr:st.pr,pts:P,L:r.b-r.a});changed=true;}else nr.push(r);}
+            // (and runs the same way: a line converging on it at a narrow angle, like the two sides of
+            // a slim V meeting a stem, is not part of it however close it stays)
+            let sameWay=true;if(st.pr.type==='line'){const fl=fitLine(P);if(fl){const c=Math.abs(fl.d[0]*st.pr.d[0]+fl.d[1]*st.pr.d[1]);sameWay=c>=Math.cos(4*Math.PI/180);}}
+            if(sameWay&&Math.max(...d)<=st.tol){nr.push({a:r.a,b:r.b,pr:st.pr,pts:P,L:r.b-r.a});changed=true;}else nr.push(r);}
           pc.runs=nr;}}}};
   const squareUp=pcs=>{const prs=new Map();pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr&&r.pr.type==='line'){if(!prs.has(r.pr))prs.set(r.pr,[]);prs.get(r.pr).push(r);}}));
     const dev=pr=>{let a=Math.atan2(pr.d[0],pr.d[1])*180/Math.PI;a=((a%90)+90)%90;if(a>45)a-=90;return a;};   // tilt from level/upright, degrees
@@ -784,7 +852,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     for(const r of runs){const p0=bpt.get(r.a),p1=bpt.get(r.b);let seg;
       if(r.pr)seg=sampleRun(r.pr,p0,p1,Q[Math.round((r.a+r.b)/2)]);
       else{const q=Q.slice(r.a,r.b+1).map(x=>x.slice()),ws=w.slice(r.a,r.b+1);q[0]=p0.slice();q[q.length-1]=p1.slice();ws[0]=PIN;ws[ws.length-1]=PIN;
-        seg=q.length>=2?smoothPiece(q,ws,u,strength,false):q;
+        seg=q.length>=2?smoothPiece(q,ws,u,strength,false,pc.ownShort&&runs.length===1):q;
         // where a free curve carries straight on from an exact line / circle (no corner there), ease
         // it out of that shape's own direction over a short stretch, so the joint has no kink
         const ri=runs.indexOf(r),cset=new Set(pc.cs||[]);
@@ -796,8 +864,12 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         const blend=(S2,E2)=>{for(let k2=0;k2<E2.length;k2++){const x=k2/E2.length,sm=x*x*(3-2*x);S2[k2]=[(1-sm)*E2[k2][0]+sm*S2[k2][0],(1-sm)*E2[k2][1]+sm*S2[k2][1]];}};
         const Lb=Math.min(Math.round(8*u),Math.floor((seg.length-1)/2));
         if(Lb>=3){const Lr=ri>0?runs[ri-1]:null,Rr=ri<runs.length-1?runs[ri+1]:null;
-          if(Lr&&Lr.pr&&!cset.has(r.a))blend(seg,ext(Lr.pr,seg[0],seg[Lb],Lb));
-          if(Rr&&Rr.pr&&!cset.has(r.b)){const rv=seg.slice().reverse();blend(rv,ext(Rr.pr,rv[0],rv[Lb],Lb));seg=rv.reverse();}}
+          // (only where the two already nearly agree in direction; a line that meets the shape at a real
+          // angle, like one side of a slim V reaching its stem, keeps its own direction)
+          const agree=(S2,E2)=>{const k2=Math.min(S2.length-1,E2.length-1);const a=[S2[k2][0]-S2[0][0],S2[k2][1]-S2[0][1]],b=[E2[k2][0]-E2[0][0],E2[k2][1]-E2[0][1]];
+            return(a[0]*b[0]+a[1]*b[1])/((norm2(a)*norm2(b))||1)>=Math.cos(10*Math.PI/180);};
+          if(Lr&&Lr.pr&&!cset.has(r.a)){const E2=ext(Lr.pr,seg[0],seg[Lb],Lb);if(agree(seg,E2))blend(seg,E2);}
+          if(Rr&&Rr.pr&&!cset.has(r.b)){const rv=seg.slice().reverse();const E2=ext(Rr.pr,rv[0],rv[Lb],Lb);if(agree(rv,E2)){blend(rv,E2);seg=rv.reverse();}}}
         }
       out=out.length?out.concat(seg.slice(1)):seg;}
     return out;};
@@ -831,9 +903,31 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   // where a branch meets the through-curve: follow the branch's own curve when it arrives
   // at a clear angle; when it arrives nearly tangent (< 25 degrees) the curved extension is
   // unreliable, so extend it straight instead
-  const meet=(e,F,fallback)=>{
-    if(e.curve){let prev=e.curve(0);const lim=e.reach+4*u;
-      for(let t=1;t<=lim;t+=1){const q=e.curve(t);const h=segHit(prev,q,F);if(h){if(h.ang>=25)return h.p;break;}prev=q;}}
+  // a line closing in on another almost parallel (under 25 degrees) whose own aim would carry it more
+  // than two and a half line widths along that line from their junction lands at the junction itself,
+  // instead of running alongside it (the tip of a petal where a background line meets it)
+  const meet=(e,F,fallback)=>{const h=meet0(e,F,fallback);if(!fallback||!h||Math.hypot(h[0]-fallback[0],h[1]-fallback[1])<=2.5*med)return h;
+    let bi=0,bd=Infinity;F.forEach((f,q)=>{const d=Math.hypot(f[0]-h[0],f[1]-h[1]);if(d<bd){bd=d;bi=q;}});
+    const a=F[Math.max(0,bi-4)],b=F[Math.min(F.length-1,bi+4)],t=[b[0]-a[0],b[1]-a[1]],tn=Math.hypot(t[0],t[1])||1;
+    const ang=Math.asin(Math.min(1,Math.abs(e.dir[0]*t[1]-e.dir[1]*t[0])/tn))*180/Math.PI;if(ang>=25)return h;
+    // (where the two really do run together to a far meeting point, the ink between is doubled: keep it)
+    let i0=0,d0=Infinity;F.forEach((f,q)=>{const d=Math.hypot(f[0]-fallback[0],f[1]-fallback[1]);if(d<d0){d0=d;i0=q;}});
+    const lo=Math.min(i0,bi),hi=Math.max(i0,bi),th=[];for(let i=lo;i<=hi;i++){const yy=Math.round(F[i][0]),xx=Math.round(F[i][1]);if(yy>=0&&xx>=0&&yy<H&&xx<W)th.push((2*dmap[yy*W+xx]-1)/med);}
+    th.sort((p,q)=>p-q);return th.length&&th[th.length>>1]<0.9?fallback:h;};
+  const meet0=(e,F,fallback)=>{
+    let hc=null;if(e.curve){let prev=e.curve(0);const lim=e.reach+4*u;
+      for(let t=1;t<=lim;t+=1){const q=e.curve(t);const h=segHit(prev,q,F);if(h){if(h.ang>=25)hc=h.p;break;}prev=q;}}
+    // a short bent piece: aim it both curved and straight, and keep the landing nearer the junction
+    // a short curved piece standing on its own (the rounded top of a small shape) meets each line where
+    // its traced centre does: it is too short and too curved to aim along an end direction
+    if(fallback&&e.dirBent&&e.len<4*med&&e.own)return fallback;
+    if(fallback&&(e.dirBent||e.len<4*med)){const usual=hc||rayHit(e.anchor,[-e.dir[0],-e.dir[1]],F);
+      const dd=p=>Math.hypot(p[0]-fallback[0],p[1]-fallback[1]);
+      if(!usual||dd(usual)>0.7*med){const hb=e.dirBent?rayHit(e.anchor,[-e.dirBent[0],-e.dirBent[1]],F):null;
+        if(hb&&(!usual||dd(hb)<0.5*dd(usual)))return hb;
+        // too short to aim at all: it meets the other line where its traced centre does
+        if(e.len<4*med&&usual)return fallback;}}
+    if(hc)return hc;
     const h=rayHit(e.anchor,[-e.dir[0],-e.dir[1]],F);if(h)return h;
     // a line closing in on the curve at a shallow angle runs into it farther ahead (or merges with it
     // without ever crossing): land where it comes within half a line width of the curve, as long as
@@ -984,6 +1078,58 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const kept=pts.slice();while(kept.length>2){const p=kept[kept.length-1];if(((p[0]-hit[0])*d[0]+(p[1]-hit[1])*d[1])>=-1e-6&&Math.hypot(p[0]-hit[0],p[1]-hit[1])<=2*u)kept.pop();else break;}kept.push(hit);
       F=atStart?kept.reverse():kept;}
     fitted[i]=F;});
+  // a straight line that lands right next to a sharp point of the line it meets (a vertical bar on
+  // the tip of a petal): that point moves sideways onto the straight line's path, eased in, and the
+  // straight line ends exactly on it
+  chains.forEach((C,i)=>{if(C.dead||C.closed)return;const F=fitted[i];if(!F||F.length<6)return;
+    for(const[k2,atStart]of[[C.start,true],[C.end,false]]){if(!k2)continue;const kk=key(k2[0],k2[1]);if(!landOn.has(kk))continue;
+      const ti=landOn.get(kk);let T=fitted[ti];if(!T||T.length<8||ti===i)continue;
+      const n=Math.min(F.length,Math.max(6,Math.round(3*u)));const P=atStart?F.slice(0,n):F.slice(F.length-n);
+      const a=P[P.length-1],b=P[0];let ab=[b[0]-a[0],b[1]-a[1]];const l=Math.hypot(ab[0],ab[1]);if(l<2*u)continue;
+      if(!P.every(q=>Math.abs((q[0]-a[0])*ab[1]-(q[1]-a[1])*ab[0])/l<0.05))continue;ab=[ab[0]/l,ab[1]/l];   // only exact straight ends
+      const E=atStart?F[0]:F[F.length-1];const K=Math.max(3,Math.round(1.5*u));let best=-1,bang=0;
+      for(let t=K;t<T.length-K;t++){if(Math.hypot(T[t][0]-E[0],T[t][1]-E[1])>1.2*med)continue;
+        const v1=[T[t][0]-T[t-K][0],T[t][1]-T[t-K][1]],v2=[T[t+K][0]-T[t][0],T[t+K][1]-T[t][1]];
+        const ang=Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(norm2(v1)*norm2(v2)+1e-9))))*180/Math.PI;if(ang>bang){bang=ang;best=t;}}
+      if(best<0||bang<35)continue;
+      const c=T[best];const s_=(c[0]-a[0])*ab[0]+(c[1]-a[1])*ab[1];const foot=[a[0]+s_*ab[0],a[1]+s_*ab[1]];
+      const dy=foot[0]-c[0],dx=foot[1]-c[1];if(Math.hypot(dy,dx)>0.6*med)continue;
+      T=T.map(q=>q.slice());const L=arclen(T),span=4*u;
+      for(let t=0;t<T.length;t++){const dist=Math.abs(L[t]-L[best]);if(dist>span)continue;const x=1-dist/span,wgt=x*x*(3-2*x);T[t][0]+=dy*wgt;T[t][1]+=dx*wgt;}
+      fitted[ti]=T;const G=F.map(q=>q.slice());if(atStart)G[0]=foot.slice();else G[G.length-1]=foot.slice();fitted[i]=G;}});
+  // lines that simply end together at a junction end at exactly the same point. If one of them is an
+  // exact straight line (which straightening may have moved by a few pixels), the others come to its
+  // end, easing over a short stretch, so the joint closes up
+  {const byNode=new Map();
+    chains.forEach((C,i)=>{if(C.dead||C.closed)return;const F=fitted[i];if(!F||F.length<4)return;
+      for(const[k2,atStart]of[[C.start,true],[C.end,false]]){if(!k2)continue;const kk=key(k2[0],k2[1]);if(landOn.has(kk))continue;const e=ends.get(kk);if(!e)continue;
+        const nd=find(e.node);if(!byNode.has(nd))byNode.set(nd,[]);byNode.get(nd).push({i,atStart});}});
+    const isStraightEnd=(F,atStart)=>{const n=Math.min(F.length,Math.max(6,Math.round(3*u)));const P=atStart?F.slice(0,n):F.slice(F.length-n);
+      const a=P[0],b=P[P.length-1],ab=[b[0]-a[0],b[1]-a[1]],l=Math.hypot(ab[0],ab[1]);if(l<2*u)return false;
+      return P.every(q=>Math.abs((q[0]-a[0])*ab[1]-(q[1]-a[1])*ab[0])/l<0.05);};
+    byNode.forEach(list=>{if(list.length<2)return;const endPt=o=>{const F=fitted[o.i];return o.atStart?F[0]:F[F.length-1];};
+      let straight=list.filter(o=>isStraightEnd(fitted[o.i],o.atStart));
+      // (several straight ones: the one squared to exactly level or upright stays put)
+      if(straight.length>1)straight=straight.filter(o=>{const F=fitted[o.i],n=Math.min(F.length,Math.round(3*u)),a=o.atStart?F[0]:F[F.length-1],b=o.atStart?F[n-1]:F[F.length-n];
+        return Math.abs(a[0]-b[0])<0.01||Math.abs(a[1]-b[1])<0.01;});
+      if(straight.length!==1)return;
+      const tgt=endPt(straight[0]).slice();
+      for(const o of list){if(o===straight[0])continue;const p=endPt(o);const dy=tgt[0]-p[0],dx=tgt[1]-p[1],dd=Math.hypot(dy,dx);if(dd<0.05||dd>1.2*med)continue;
+        let F=fitted[o.i].map(q=>q.slice());if(o.atStart)F.reverse();const L=arclen(F),tot=L[L.length-1],span=isStraightEnd(fitted[o.i],o.atStart)?0.6*tot:Math.min(4*u,0.4*tot);
+        for(let t=0;t<F.length;t++){const back=tot-L[t];if(back>span)continue;const x=1-back/span,wgt=x*x*(3-2*x);F[t][0]+=dy*wgt;F[t][1]+=dx*wgt;}
+        if(o.atStart)F.reverse();fitted[o.i]=F;}});}
+  // a loose end that stops right up against a line (another line, or farther along its own, as where
+  // the two sides of a pistil run together into its stem) lands exactly on that line
+  chains.forEach((C,i)=>{if(C.dead||C.closed)return;let F=fitted[i];if(!F||F.length<6)return;
+    for(const atStart of[true,false]){const k2=atStart?C.start:C.end;if(k2&&(landOn.has(key(k2[0],k2[1]))||!isFreeEnd(k2)))continue;
+      const E=atStart?F[0]:F[F.length-1];let best=null,bd=0.6*med;
+      fitted.forEach((T,ti)=>{if(!T||T.length<2)return;const L=ti===i?arclen(T):null;const tot=L?L[L.length-1]:0;
+        for(let t=0;t<T.length;t++){if(ti===i){const along=atStart?L[t]:tot-L[t];if(along<6*med)continue;}
+          const d=Math.hypot(T[t][0]-E[0],T[t][1]-E[1]);if(d<bd){bd=d;best=T[t];}}});
+      if(!best||bd<0.05)continue;const dy=best[0]-E[0],dx=best[1]-E[1];
+      F=F.map(q=>q.slice());if(atStart)F.reverse();const L=arclen(F),tot=L[L.length-1],span=Math.min(4*u,0.3*tot);
+      for(let t=0;t<F.length;t++){const back=tot-L[t];if(back>span)continue;const x=1-back/span,wgt=x*x*(3-2*x);F[t][0]+=dy*wgt;F[t][1]+=dx*wgt;}
+      if(atStart)F.reverse();fitted[i]=F;}});
   // closed loops: repeat the opening segment so the start point is a join, not two line ends
   chains.forEach((C,i)=>{let F=fitted[i];if(C.closed&&F.length>2){if(Math.hypot(F[0][0]-F[F.length-1][0],F[0][1]-F[F.length-1][1])>1e-6)F=[...F,F[0]];fitted[i]=[...F,F[1]];}});
   let out=fitted.filter(F=>F.length>1);
@@ -994,7 +1140,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   return{strokes:out,fillets,rot:(opt.exact&&opt.square)?frame:0};}
 
 onmessage=e=>{const m=e.data;
-  if(m.type==='load'){W=m.w;H=m.h;gray=new Uint8Array(m.buf);otsuT=otsu(gray);postMessage({type:'loaded',otsu:otsuT,id:m.id});return;}
+  if(m.type==='load'){W=m.w;H=m.h;gray=new Uint8Array(m.buf);otsuT=otsu(gray);colorIn=!!m.colored;
+    // colored glass: the lines are the darkest group of all; split them from the darkest glass color
+    if(m.colored){const lo=gray.filter(v=>v<otsuT);if(lo.length)otsuT=Math.min(otsuT,otsu(lo)+1);}postMessage({type:'loaded',otsu:otsuT,id:m.id});return;}
   if(m.type==='run'){const t0=Date.now();
     try{const r=process(m.params);postMessage({type:'done',id:m.id,pts:r.pts,offs:r.offs,hw:r.hw,stats:r.stats,rot:r.rot,fill:r.fill,fcurve:r.fcurve,ms:Date.now()-t0},[r.pts.buffer,r.offs.buffer,r.hw.buffer]);}
     catch(err){postMessage({type:'error',id:m.id,message:String(err&&err.message||err)});}}};
@@ -1043,7 +1191,7 @@ function loadImage(img,name,isSample){
   prepare();}
 function findCrop(){const c=S.src,d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;const inv=$('invert').checked;
   let x0=c.width,y0=c.height,x1=-1,y1=-1;
-  for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){const i=4*(y*c.width+x);const l=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+  for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){const i=4*(y*c.width+x);const l=d[i+3]<128?(inv?0:255):Math.min(.299*d[i]+.587*d[i+1]+.114*d[i+2],Math.max(d[i],d[i+1],d[i+2])+40);
     if(inv?l>128:l<128){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}}
   S.crop=x1<0?{x:0,y:0,w:c.width,h:c.height}:{x:x0,y:y0,w:x1-x0+1,h:y1-y0+1};}
 function prepare(){if(!S.src)return;
@@ -1057,9 +1205,15 @@ function prepare(){if(!S.src)return;
   g.fillStyle=$('invert').checked?'#000':'#fff';g.fillRect(0,0,ww,wh);g.imageSmoothingEnabled=true;g.imageSmoothingQuality='high';
   g.drawImage(S.src,cr.x-PAD,cr.y-PAD,cr.w+2*PAD,cr.h+2*PAD,0,0,ww,wh);
   const d=g.getImageData(0,0,ww,wh).data;const gr=new Uint8Array(ww*wh);
-  for(let i=0;i<ww*wh;i++)gr[i]=Math.round(.299*d[4*i]+.587*d[4*i+1]+.114*d[4*i+2]);
+  // A colored pattern (glass filled in with color) has dark colors, like deep blue or green, that are
+  // as dark as a gray line once the color is dropped. Lead lines are dark in every color, glass is not,
+  // so for those patterns each pixel counts as dark only as far as its brightest color is dark.
+  // (Line drawings done in colored ink keep the usual brightness, so their lines still show.)
+  let colored=0,seen=0;for(let i=0;i<ww*wh;i+=7){const r=d[4*i],gg=d[4*i+1],b=d[4*i+2],mx=Math.max(r,gg,b),mn=Math.min(r,gg,b);seen++;if(mx-mn>60&&mx>70)colored++;}
+  S.colorFill=colored>0.15*seen;
+  for(let i=0;i<ww*wh;i++)gr[i]=S.colorFill?Math.max(d[4*i],d[4*i+1],d[4*i+2]):Math.round(.299*d[4*i]+.587*d[4*i+1]+.114*d[4*i+2]);
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
-  worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,buf:gr.buffer},[gr.buffer]);
+  worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
 function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked};}
 let timer=null;
