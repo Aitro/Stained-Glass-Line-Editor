@@ -621,6 +621,21 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         if(cur[0]===cj&&cur[1]===cs)continue;
         if(score[bi]>0.7*score[1-bi])continue;                       // only when clearly the smoother one
         partner.delete(key(oj,os));partner.set(key(j,s),[cj,cs,false]);partner.set(key(cj,cs),[j,s,false]);}});
+    // Where two long lines arrive side by side at a junction (a narrow wedge between them) and a third leaves
+    // on the other side, the one of the two that makes a clearly smoother curve with the third is the one
+    // that carries on; the other ends on it at the tip of the wedge
+    inc.forEach(lst=>{if(lst.length!==3)return;
+      for(const[j,s]of lst){const cur=partner.get(key(j,s));if(!cur||cur[2])continue;const others=lst.filter(([jj,ss])=>!(jj===j&&ss===s));
+        if(others.some(([jj])=>jj===j))continue;const dA=others.map(([jj,ss])=>ends.get(key(jj,ss)).dir),dl=ends.get(key(j,s)).dir;
+        if(angDeg(dA[0],dA[1])>35||dA.some(d=>angDeg(d,dl)<140))continue;
+        if(others.some(([jj])=>edges[jj].L[edges[jj].L.length-1]<40*med)||edges[j].L[edges[j].L.length-1]<6*med)continue;
+        const link=samp(j,s,15*med);const score=others.map(([jj,ss])=>rmsCircle([...samp(jj,ss,15*med).reverse(),...link]));
+        const bi=score[0]<=score[1]?0:1,[cj,cs]=others[bi],[oj,os]=others[1-bi];if(cur[0]===cj&&cur[1]===cs)continue;
+        if(score[bi]>0.7*score[1-bi])continue;
+        // (and it must also line up better with the third line overall, end to end)
+        {const ch=(jj,ss,L)=>{const p=samp(jj,ss,L);const a=p[0],b=p[p.length-1],v=[b[0]-a[0],b[1]-a[1]],n=Math.hypot(v[0],v[1])||1;return[v[0]/n,v[1]/n];};
+          const c3=ch(j,s,15*med),dev=([jj,ss])=>angDeg(ch(jj,ss,15*med),[-c3[0],-c3[1]]);if(dev(others[bi])>=dev(others[1-bi]))continue;}
+        partner.delete(key(oj,os));partner.set(key(j,s),[cj,cs,false]);partner.set(key(cj,cs),[j,s,false]);}});
     // A short piece of line between two junctions (the rounded bottom of a petal, split by the lines
     // that land on it) that carries on through at one end but not the other: it carries on into
     // whichever line there makes one smooth curve with it, when one clearly does.
@@ -1073,6 +1088,10 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       if(a.cF!==b.cF||a.ci===b.ci)continue;const pa=land.get(a.kk),pb=land.get(b.kk);const gap=Math.hypot(pa[0]-pb[0],pa[1]-pb[1]);
       if(gap<1||gap>2*med)continue;if((landAng.get(a.kk)||0)<30||(landAng.get(b.kk)||0)<30)continue;
       if(angDeg(a.e.dir,b.e.dir)>=70)continue;
+      // (a V's sides spread apart going back from the tip; two lines that run on side by side at the same
+      // distance, like a pair of stems, are not a V and each keep their own landing)
+      {const back=(kk,t)=>{const j=kk>>1,sd=kk&1,E=edges[j],tot=E.L[E.L.length-1];return at(E.P,sd===0?Math.min(t,tot):Math.max(0,tot-t),E.L);};
+        const t=6*med,qa=back(a.kk,t),qb=back(b.kk,t);if(Math.hypot(qa[0]-qb[0],qa[1]-qb[1])<gap+0.8*med)continue;}
       const F=fitted[a.cF];const ni=p=>{let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});return bi;};
       const sd=(p,q)=>{const i=ni(p);const f0=F[Math.max(0,i-3)],f1=F[Math.min(F.length-1,i+3)];return Math.sign((f1[0]-f0[0])*(q[1]-F[i][1])-(f1[1]-f0[1])*(q[0]-F[i][0]));};
       if(sd(pa,a.e.anchor)!==sd(pb,b.e.anchor))continue;
@@ -1228,6 +1247,30 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         let F=fitted[o.i].map(q=>q.slice());if(o.atStart)F.reverse();const L=arclen(F),tot=L[L.length-1],span=Math.min(6*med,0.45*tot);
         for(let t=0;t<F.length;t++){const back=tot-L[t];if(back>span)continue;const x=1-back/span,wgt=x*x*(3-2*x);F[t][0]+=dy*wgt;F[t][1]+=dx*wgt;}
         if(o.atStart)F.reverse();fitted[o.i]=F;}});}
+  // a line that ends right beside the sharp tip of another line (a stem coming down onto the point of a
+  // petal) ends exactly on that tip
+  chains.forEach((C,i)=>{if(C.dead||C.closed)return;const F0=fitted[i];if(!F0||F0.length<4)return;
+    for(const atStart of[true,false]){const E=atStart?fitted[i][0]:fitted[i][fitted[i].length-1];let best=null,bd=0.8*med;
+      fitted.forEach((T,ti)=>{if(ti===i||!T||T.length<7)return;const K=Math.max(3,Math.round(1.5*u));
+        for(let t=K;t<T.length-K;t++){const d=Math.hypot(T[t][0]-E[0],T[t][1]-E[1]);if(d>=bd||d<0.05)continue;
+          const v1=[T[t][0]-T[t-K][0],T[t][1]-T[t-K][1]],v2=[T[t+K][0]-T[t][0],T[t+K][1]-T[t][1]];
+          const ang=Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(norm2(v1)*norm2(v2)+1e-9))))*180/Math.PI;
+          // (the sharpest point nearby, not just any point on the line)
+          let mx=true;for(const q of[t-1,t+1]){const w1=[T[q][0]-T[q-K>=0?q-K:0][0],T[q][1]-T[q-K>=0?q-K:0][1]],w2=[T[Math.min(T.length-1,q+K)][0]-T[q][0],T[Math.min(T.length-1,q+K)][1]-T[q][1]];
+            const a2=Math.acos(Math.max(-1,Math.min(1,(w1[0]*w2[0]+w1[1]*w2[1])/(norm2(w1)*norm2(w2)+1e-9))))*180/Math.PI;if(a2>ang)mx=false;}
+          if(ang>=45&&mx){bd=d;best=T[t].slice();}}});
+      // (or the point where two other lines end together, such as the two sides of a petal meeting at its tip)
+      fitted.forEach((T,ti)=>{if(ti===i||!T||T.length<2)return;for(const P of[T[0],T[T.length-1]]){const d=Math.hypot(P[0]-E[0],P[1]-E[1]);if(d>=bd||d<0.05)continue;
+        const others=fitted.filter((U,ui)=>ui!==i&&ui!==ti&&U&&U.length>1&&[U[0],U[U.length-1]].some(Q=>Math.hypot(Q[0]-P[0],Q[1]-P[1])<0.5)).length;
+        if(others>=1){bd=d;best=P.slice();}}});
+      if(!best)continue;const p=E,dy=best[0]-p[0],dx=best[1]-p[1];
+      let F=fitted[i].map(q=>q.slice());if(atStart)F.reverse();const L=arclen(F),tot=L[L.length-1],span=Math.min(6*med,0.45*tot);
+      // (a straight line stays straight: it swings about its far end instead of bending near this one)
+      const a0=F[0],b0=F[F.length-1],ab=[b0[0]-a0[0],b0[1]-a0[1]],lab=Math.hypot(ab[0],ab[1])||1;
+      const straight=F.every(q=>Math.abs((q[0]-a0[0])*ab[1]-(q[1]-a0[1])*ab[0])/lab<0.15*med);
+      if(straight){for(let t=0;t<F.length;t++){const x=L[t]/tot;F[t]=[a0[0]+ab[0]*x+dy*x,a0[1]+ab[1]*x+dx*x];}}
+      else for(let t=0;t<F.length;t++){const back=tot-L[t];if(back>span)continue;const x=1-back/span,wgt=x*x*(3-2*x);F[t][0]+=dy*wgt;F[t][1]+=dx*wgt;}
+      if(atStart)F.reverse();fitted[i]=F;}});
   // a loose end that stops right up against a line (another line, or farther along its own, as where
   // the two sides of a pistil run together into its stem) lands exactly on that line
   chains.forEach((C,i)=>{if(C.dead||C.closed)return;let F=fitted[i];if(!F||F.length<6)return;
