@@ -56,7 +56,8 @@ function process(p){
       for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const y=yy+dy,x=xx+dx;if(y>=0&&x>=0&&y<H&&x<W)mx=Math.max(mx,dmap[y*W+x]);}return Math.max(0.5,mx-0.5);});
     const hw=raw.map((_,i)=>{const a=raw.slice(Math.max(0,i-75),Math.min(raw.length,i+76)).sort((p,q)=>p-q);return a[Math.floor(a.length*0.4)];});
     S.forEach((q,i)=>{flat.push(q[1]+0.5,q[0]+0.5);hwf.push(hw[i]);});offs.push(flat.length/2);}
-  return{pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
+  const junctions=(built.junctions||[]).map(J=>({x:J.p[1]+0.5,y:J.p[0]+0.5,wx:J.q[1],wy:J.q[0],arms:J.arms,pairs:J.pairs,fixed:J.fixed}));
+  return{junctions,pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
 
 // ===================================================================== curve stage
 // Trace the centerline into a graph of lines and junctions, rebuild junctions the way a

@@ -25,6 +25,13 @@ Then:
 4. Check the **Overlay** view, which shows the new lines in red over your original.
 5. Click **Save PNG** or **Save SVG**.
 
+Fixing a spot by hand:
+- Click **Fix lines** above the preview. Every junction gets a dot.
+- Click a dot to choose which two lines run straight through it (the colored spokes on the picture match the colored buttons), to have no line run through, or to make it a sharp corner or a smooth curve.
+- Click anywhere else on a line to put a sharp corner there, or to make a corner smooth.
+- Fixed spots turn green. **Automatic** on a spot removes its fix; **Undo** and **Clear all fixes** are under the preview.
+- Fixes are remembered in your browser for that picture, and stay put when you change the size or line width.
+
 Optional:
 - **Border line position**: where the new border line sits. *Centered* (the default) puts it on the middle of the original border, which is where you cut. *Outer edge* and *Inner edge* line it up with the outside or inside of the original border instead.
 - **Give the outer border its own width** for a zinc or wide lead border.
@@ -73,6 +80,8 @@ python3 build.py
 | `src/worker/05-smooth-piece.js` | Smoothing a single stretch of line |
 | `src/worker/06-build-strokes.js` | The main logic: junctions, which lines carry on and which land, exact lines and circles, corners |
 | `src/worker/07-messages.js` | How the page talks to the background worker |
+
+Hand fixes reach the worker as `fixes` in the run settings (`[{x, y, mode, arms}]` in working pixels); `06-build-strokes.js` applies them at the junctions (`the user's fixes at junctions`) and when corners are chosen (`prepChain`).
 
 The files in `src/worker/` are pieces of one script, joined in order (01, 02, ...). Each starts with a one-line description and a dashed line, which the build leaves out.
 

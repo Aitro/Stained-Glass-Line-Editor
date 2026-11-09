@@ -1,0 +1,19 @@
+{
+ "w": 2918,
+ "h": 3023,
+ "colored": false,
+ "params": {
+  "fixes": [
+   {
+    "x": 1752,
+    "y": 2193,
+    "mode": "pair",
+    "arms": [
+     -93.6958522682365,
+     103.3247508306389
+    ]
+   }
+  ]
+ },
+ "note": "Same pattern with a hand fix: the right stem runs straight through the junction where the sweeping line meets it."
+}

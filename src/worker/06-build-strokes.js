@@ -2,7 +2,9 @@
 // through each junction and which land on another line, fit exact straight lines and circles, and
 // draw every line as a smooth stroke. Sections inside are marked with comments.
 // ------------------------------------------------------------------------------------------------
-function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,square:true};let frame=0;
+function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,square:true};
+  // the user's own fixes: [{y,x,mode,arms}] in working pixels; mode is 'corner', 'round', 'pair' or 'apart'
+  const FIX=Array.isArray(opt.fixes)?opt.fixes.filter(f=>f&&isFinite(f.y)&&isFinite(f.x)):[];let frame=0;
   // ---- trace graph
   const N8=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
   const nb=i=>{const y=(i/W)|0,x=i%W,o=[];for(const[dy,dx]of N8){const yy=y+dy,xx=x+dx;if(yy>=0&&yy<H&&xx>=0&&xx<W&&sk[yy*W+xx])o.push(yy*W+xx);}return o;};
@@ -249,6 +251,26 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       for(const[x,y]of[a,b]){const pp=partner.get(key(x,y));if(pp){partner.delete(key(pp[0],pp[1]));partner.delete(key(x,y));}}
       partner.set(key(j,0),[a[0],a[1],false]);partner.set(key(a[0],a[1]),[j,0,false]);
       partner.set(key(j,1),[b[0],b[1],false]);partner.set(key(b[0],b[1]),[j,1,false]);});}
+  // ---------------- the user's fixes at junctions ----------------
+  // Each arm of a junction is named by its direction (degrees, measured a few line widths out), so a fix
+  // still finds the right lines when the pattern is re-run at another size.
+  const armAng=(k,j,s_)=>{const E=edges[j],tot=E.L[E.L.length-1],np_=nodePos.get(k)||cent[k];const q=at(E.P,s_===0?Math.min(tot,3*med):Math.max(0,tot-3*med),E.L);
+    return Math.atan2(q[0]-np_[0],q[1]-np_[1])*180/Math.PI;};
+  const angGap=(a,b)=>{let d=Math.abs(a-b)%360;return d>180?360-d:d;};
+  const fixNode=f=>{let best=null,bd=3*med;inc.forEach((lst,k)=>{if(lst.length<2)return;const p=nodePos.get(k)||cent[k];if(!p)return;const d=Math.hypot(p[0]-f.y,p[1]-f.x);if(d<bd){bd=d;best=k;}});return best;};
+  const fixedNodes=new Map(),cornerAt=[];
+  for(const f of FIX){const k=fixNode(f);if(k==null)continue;const lst=inc.get(k);fixedNodes.set(k,f.mode);
+    const unpair=([j,s_])=>{const p=partner.get(key(j,s_));if(p){partner.delete(key(p[0],p[1]));partner.delete(key(j,s_));}};
+    if(f.mode==='apart'){lst.forEach(unpair);continue;}
+    if(f.mode==='pair'&&Array.isArray(f.arms)&&f.arms.length===2){
+      const pick=a=>{let b=null,bd=40;for(const e of lst){const g=angGap(armAng(k,e[0],e[1]),a);if(g<bd){bd=g;b=e;}}return b;};
+      const A=pick(f.arms[0]),B=pick(f.arms[1]);if(!A||!B||(A[0]===B[0]&&A[1]===B[1]))continue;
+      unpair(A);unpair(B);const corner=angGap(armAng(k,A[0],A[1]),armAng(k,B[0],B[1]))<145&&lst.length===2;
+      partner.set(key(A[0],A[1]),[B[0],B[1],!!f.sharp||corner]);partner.set(key(B[0],B[1]),[A[0],A[1],!!f.sharp||corner]);continue;}
+    // (at a junction of two lines, a corner or a smooth bend is set right here; where more lines meet, the
+    // line running through gets its corner, or loses one, when its shape is fitted)
+    if(f.mode==='corner'&&lst.length>2)cornerAt.push({k,f});
+    if((f.mode==='corner'||f.mode==='round')&&lst.length===2){for(const[j,s_]of lst){const p=partner.get(key(j,s_));if(p){p[2]=f.mode==='corner';}}}}
   // (a piece that carries on into nothing at either end is a line of its own)
   edges.forEach((E,j)=>{if(E.closed||partner.has(key(j,0))||partner.has(key(j,1)))return;for(const s_ of[0,1]){const e=ends.get(key(j,s_));if(e)e.own=true;}});
   // chains
@@ -323,15 +345,21 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         if(pos===0){w0[0]=GAP;raw.unshift(land.get(kk).slice());w0.unshift(PIN);}else{w0[w0.length-1]=GAP;raw.push(land.get(kk).slice());w0.push(PIN);}}}
     let[Q,w]=resampleKeep(raw,w0);const pins=[];w.forEach((v,i)=>{if(v>=1e5)pins.push(i);});
     const base=C.closed?Q.slice(0,-1):Q;
-    for(const i of (C.noCorners?[]:findCorners(base,C.closed))){
-      if(pins.some(p=>Math.abs(i-p)<3*K)||(!C.closed&&(i<3*K||i>Q.length-1-3*K)))continue;
+    // (the user's fixes: no corner where they asked for a rounded line, a corner where they asked for one)
+    let cands=C.noCorners?[]:findCorners(base,C.closed);const forced=new Set();
+    if(FIX.length){cands=cands.filter(i=>!FIX.some(f=>f.mode==='round'&&Math.hypot(base[i][0]-f.y,base[i][1]-f.x)<2.5*med));
+      for(const f of FIX){if(f.mode!=='corner')continue;let bi=-1,bd=1.5*med;base.forEach((q,i)=>{const d=Math.hypot(q[0]-f.y,q[1]-f.x);if(d<bd){bd=d;bi=i;}});
+        if(bi>=0){cands=cands.filter(i=>Math.abs(i-bi)>2*K);cands.push(bi);forced.add(bi);}}
+      cands.sort((a,b)=>a-b);}
+    for(const i of cands){const frc=forced.has(i);
+      if(pins.some(p=>Math.abs(i-p)<(frc?2:3*K))||(!C.closed&&(i<(frc?2:3*K)||i>Q.length-1-(frc?2:3*K))))continue;
       // a bend inside a solid dot on the line (a bird's eye drawn as a filled spot) is not a corner: the
       // ink there is far thicker than a line, and the line just runs through the spot
       {const dAt=q=>{const yy=Math.round(q[0]),xx=Math.round(q[1]);return(yy>=0&&xx>=0&&yy<H&&xx<W)?dmap[yy*W+xx]:0;};
         const n2=Q.length,off=Math.round(3*K),nb=[];for(const o of[-off,-off+2,off-2,off]){const t=C.closed?(i+o+n2)%n2:i+o;if(t>=0&&t<n2)nb.push(dAt(Q[t]));}
-        nb.sort((p,q)=>p-q);const ref=nb.length?nb[nb.length>>1]:0.5*med;if(dAt(Q[i])>Math.max(1.0*med,2.2*ref))continue;}
+        nb.sort((p,q)=>p-q);const ref=nb.length?nb[nb.length>>1]:0.5*med;if(!frc&&dAt(Q[i])>Math.max(1.0*med,2.2*ref))continue;}
       // a junction this line was found to pass smoothly through is not a corner of it
-      {let soft=false;for(let t=Math.max(0,i-K);t<=Math.min(w.length-1,i+K);t++)if(w[t]<=GAP*1.01){soft=true;break;}if(soft)continue;}
+      {let soft=false;for(let t=Math.max(0,i-K);t<=Math.min(w.length-1,i+K);t++)if(w[t]<=GAP*1.01){soft=true;break;}if(soft&&!frc)continue;}
       const L=arclen(Q),d0=L[i];const ia=at(Q,d0-2*u,L),ib=at(Q,d0-6*u,L),ja=at(Q,d0+2*u,L),jb=at(Q,d0+6*u,L);
       const nrm=v=>{const n=norm2(v)+1e-9;return[v[0]/n,v[1]/n];};
       let cp=lsqPoint([ia,ja],[nrm([ib[0]-ia[0],ib[1]-ia[1]]),nrm([jb[0]-ja[0],jb[1]-ja[1]])],Q[i]);
@@ -808,6 +836,11 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const startKey=same(CA.start,c.a.k2)?CA.end:CA.start,endKey=same(CB.start,c.b.k2)?CB.end:CB.start;
       CA.dead=true;CB.dead=true;
       chains.push({seq:[],joins:[],closed:false,noCorners:true,raw:[...rA,...seg,...rB],w:[...wA,...wS,...wB],start:startKey,end:endKey});}}
+  // (a corner the user asked for where lines land on a line: the lines that land there meet it at one point,
+  // and the line it bends at is exactly that point)
+  for(const{k,f}of cornerAt){const P=[];for(const[j,s_]of inc.get(k)||[]){const kk=key(j,s_);if(land.has(kk))P.push(kk);}
+    if(!P.length)continue;const m=[0,0];for(const kk of P){const q=land.get(kk);m[0]+=q[0]/P.length;m[1]+=q[1]/P.length;}
+    for(const kk of P)land.set(kk,m.slice());f.y=m[0];f.x=m[1];}
   fitted=fitAll();
   // a line that ends on another line ends exactly on it (after straightening, the end may sit a
   // fraction of a pixel off): extend or trim it along its own direction to meet that line
@@ -945,8 +978,14 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   chains.forEach((C,i)=>{let F=fitted[i];if(C.closed&&F.length>2){if(Math.hypot(F[0][0]-F[F.length-1][0],F[0][1]-F[F.length-1][1])>1e-6)F=[...F,F[0]];fitted[i]=[...F,F[1]];}});
   let out=fitted.filter(F=>F.length>1);
   const fillets=[];
+  // junctions, for the page to show and let the user fix: where each is, the direction of each arm, and
+  // which arms carry on into each other
+  const junctions=[];inc.forEach((lst,k)=>{if(lst.length<3||isFree.has(k))return;const p=nodePos.get(k)||cent[k];if(!p)return;
+    const arms=lst.map(([j,s_])=>armAng(k,j,s_)),pairs=[];
+    lst.forEach(([j,s_],a)=>{const pr=partner.get(key(j,s_));if(!pr)return;const b=lst.findIndex(([j2,s2])=>j2===pr[0]&&s2===pr[1]);if(b>a)pairs.push([a,b,pr[2]?1:0]);});
+    junctions.push({p:[p[0],p[1]],q:[p[0],p[1]],arms,pairs,fixed:fixedNodes.get(k)||null});});
   if(opt.exact&&opt.square&&Math.abs(frame)>0.01){const a=-frame*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),cy=H/2,cx=W/2;
     const rot=p=>{const y=p[0]-cy,x=p[1]-cx;return[cy+x*sa+y*ca,cx+x*ca-y*sa];};
-    out=out.map(F=>F.map(rot));fillets.forEach(f=>{f.fill=f.fill.map(rot);f.curve=f.curve.map(rot);});}
-  return{strokes:out,fillets,rot:(opt.exact&&opt.square)?frame:0};}
+    out=out.map(F=>F.map(rot));fillets.forEach(f=>{f.fill=f.fill.map(rot);f.curve=f.curve.map(rot);});junctions.forEach(J=>{J.p=rot(J.p);});}
+  return{strokes:out,fillets,junctions,rot:(opt.exact&&opt.square)?frame:0};}
 

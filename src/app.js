@@ -4,7 +4,8 @@ const $=id=>document.getElementById(id);
 const OUT_PPI=300, MARGIN_IN=0.25, MAX_WORK=3000, PAD=6;
 const S={name:'sample-pattern',src:null,crop:null,work:null,workPPI:0,strokes:null,offs:null,stats:null,
   view:'result',zoom:'fit',running:false,pending:false,loadId:0,runId:0,otsu:128,sample:true,dl:null,
-  resultBlob:null,resultURL:null,overlayURL:null,origURL:null,svg:null,borderFlags:null};
+  resultBlob:null,resultURL:null,overlayURL:null,origURL:null,svg:null,borderFlags:null,
+  fixes:[],fixKey:null,junctions:[],fixMode:false,fixSel:null};
 
 const worker=new Worker(URL.createObjectURL(new Blob([$('worker-src').textContent],{type:'text/javascript'})));
 worker.onmessage=e=>{const m=e.data;
@@ -12,7 +13,7 @@ worker.onmessage=e=>{const m=e.data;
   else if(m.type==='loaded'){if(m.id!==S.loadId)return;S.otsu=m.otsu;if($('threshAuto').checked)$('thresh').value=m.otsu;updateLabels();S.running=false;run();}
   else if(m.type==='done'){S.running=false;
     if(S.pending){S.pending=false;run();return;}
-    S.strokes=m.pts;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;S.fill=m.fill;S.fcurve=m.fcurve;markBorder();render();
+    S.strokes=m.pts;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];markBorder();render();drawFixLayer();
     setStatus('Done in '+(m.ms/1000).toFixed(1)+' s',false);}
   else if(m.type==='error'){S.running=false;setStatus('Could not process this image: '+m.message,false);}};
 function setStatus(t,busy){$('statusText').textContent=t;$('status').classList.toggle('busy',!!busy);}
@@ -34,6 +35,7 @@ function loadImage(img,name,isSample){
   const c=document.createElement('canvas');c.width=img.width||img.naturalWidth;c.height=img.height||img.naturalHeight;
   const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0);
   S.src=c;S.name=name;S.sample=isSample;
+  loadFixes(name,c.width,c.height);
   $('fileName').textContent=name;$('sampleTag').hidden=!isSample;$('sSize').textContent=c.width+' × '+c.height+' px';
   if(S.origURL)URL.revokeObjectURL(S.origURL);c.toBlob(b=>{S.origURL=URL.createObjectURL(b);if(S.view==='original')showView();});
   findCrop();if($('lockRatio').checked){const z=sizeIn(),L=Math.max(z.w,z.h);const r=S.crop.h/S.crop.w;
@@ -65,7 +67,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked};}
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker()};}
 let timer=null;
 function schedule(fn,ms){clearTimeout(timer);timer=setTimeout(fn,ms);}
 function run(){if(!S.work)return;if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
@@ -186,11 +188,12 @@ async function withPPI(blob,ppi){try{const buf=new Uint8Array(await blob.arrayBu
   return new Blob([out],{type:'image/png'});}catch(e){return blob;}}
 
 function showView(){const img=$('view');
+  if(!S.fixMode||S.view==='original')$('fixLayer').setAttribute('hidden','');
   if(S.view==='original'){if(S.origURL)img.src=S.origURL;img.alt='Original pattern';}
   else if(S.view==='overlay'){if(!S.strokes)return;if(!S.overlayURL){makeOverlay(showView);return;}img.src=S.overlayURL;img.alt='New lines in red over the original';}
   else{if(S.resultURL)img.src=S.resultURL;img.alt='Pattern with even line width';}
   applyZoom();}
-function applyZoom(){const mat=$('mat'),img=$('view');mat.classList.toggle('fit',S.zoom==='fit');
+function applyZoom(){requestAnimationFrame(placeFixLayer);const mat=$('mat'),img=$('view');mat.classList.toggle('fit',S.zoom==='fit');
   if(S.zoom==='fit'){img.style.width='';img.style.height='';}
   else{const z=+S.zoom;img.onload=()=>{if(S.zoom!=='fit'){img.style.width=img.naturalWidth*z+'px';img.style.height=img.naturalHeight*z+'px';}};
     if(img.complete&&img.naturalWidth){img.style.width=img.naturalWidth*z+'px';img.style.height=img.naturalHeight*z+'px';}}}
@@ -208,6 +211,111 @@ function updateLabels(){const w=widthIn();
 function showStats(geo){const s=S.stats;if(!s||!S.offs||S.offs.length<2){['sThin','sMid','sThick'].forEach(i=>$(i).textContent='no lines found');return;}
   const f=v=>fmtUnit(Math.max(1,v)/S.workPPI);$('sThin').textContent=f(s.thin);$('sMid').textContent=f(s.mid);$('sThick').textContent=f(s.thick);
   $('sOut').textContent=(geo.pw/OUT_PPI).toFixed(2)+' × '+(geo.ph/OUT_PPI).toFixed(2)+' in';}
+
+
+// ---- fix lines: the user's own choices at junctions and along lines ----
+// A fix is kept in the source picture's own pixels, so it stays put when the size or line width changes,
+// and it is remembered in this browser for the same picture.
+const FIXCOL=['#d2392c','#1f6fd1','#e08a00','#7b3fbf','#13917b','#c2185b','#5d6b70'];
+function srcToWork(sx,sy){const cr=S.crop;return[(sx-cr.x+PAD)*S.sx-0.5,(sy-cr.y+PAD)*S.sy-0.5];}   // -> worker's own x,y
+function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)/S.sy+cr.y-PAD];}
+function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
+function saveFixes(){try{if(S.fixKey)localStorage.setItem(S.fixKey,JSON.stringify(S.fixes));}catch(e){}updateFixBar();}
+function loadFixes(name,w,h){S.fixKey='lll-fixes:'+name+':'+w+'x'+h;S.fixes=[];S.fixSel=null;S.undo=[];
+  try{const v=JSON.parse(localStorage.getItem(S.fixKey)||'[]');if(Array.isArray(v))S.fixes=v.filter(f=>f&&isFinite(f.sx)&&isFinite(f.sy)&&f.mode);}catch(e){}
+  closeFixPop();updateFixBar();}
+function updateFixBar(){const n=S.fixes.length;$('fixCount').textContent=n?n+(n===1?' fix':' fixes'):'';
+  $('fixClear').disabled=!n;$('fixUndo').disabled=!(S.undo&&S.undo.length);}
+function changeFixes(fn){S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();fn();saveFixes();closeFixPop();setStatus('Applying your fix…',true);schedule(run,0);}
+
+// where things are on the preview: page px of the result picture
+function jPage(J){return pageGeom().map(J.x,J.y);}
+function pageToWorkInternal(px,py){const geo=pageGeom();const ox=PAD*S.sx,oy=PAD*S.sy;
+  let x=(px-geo.m)/geo.k+ox-0.5,y=(py-geo.m)/geo.k+oy-0.5;          // output position, worker coords
+  if(S.rot){const a=-S.rot*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),cy=S.work.h/2,cx=S.work.w/2;   // undo the squaring-up turn
+    const Y=y-cy,X=x-cx;x=cx+X*ca+Y*sa;y=cy-X*sa+Y*ca;}
+  return[x,y];}
+function placeFixLayer(){const L=$('fixLayer'),img=$('view');if(L.hasAttribute('hidden')||!img.naturalWidth)return;
+  L.style.left=img.offsetLeft+'px';L.style.top=img.offsetTop+'px';L.style.width=img.offsetWidth+'px';L.style.height=img.offsetHeight+'px';
+  L.setAttribute('viewBox','0 0 '+img.naturalWidth+' '+img.naturalHeight);L.setAttribute('preserveAspectRatio','xMidYMid meet');}
+function layerScale(){const img=$('view');return img.naturalWidth?Math.min(img.offsetWidth/img.naturalWidth,img.offsetHeight/img.naturalHeight):1;}
+function fixAtJunction(J){return S.fixes.filter(f=>{const[x,y]=srcToWork(f.sx,f.sy);return Math.hypot(x-J.wx,y-J.wy)<8;});}
+function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view==='original'){L.setAttribute('hidden','');return;}
+  L.removeAttribute('hidden');placeFixLayer();const k=1/layerScale(),r=7*k;let h='';
+  for(let i=0;i<S.junctions.length;i++){const J=S.junctions[i],p=jPage(J),fx=fixAtJunction(J).length>0;
+    h+=`<circle class="jn${fx?' fixed':''}${S.fixSel&&S.fixSel.j===i?' sel':''}" cx="${p[0]}" cy="${p[1]}" r="${r}" style="stroke-width:${(fx?2:2.5)*k}"/>`;}
+  // fixes that sit on a line rather than at a junction
+  const geo=pageGeom();
+  for(const f of S.fixes){if(f.mode!=='corner'&&f.mode!=='round')continue;const[x,y]=srcToWork(f.sx,f.sy);
+    if(S.junctions.some(J=>Math.hypot(J.wx-x,J.wy-y)<12))continue;const q=outPos(x,y);const p=geo.map(q[0],q[1]);
+    h+=`<rect class="pt" x="${p[0]-r*.8}" y="${p[1]-r*.8}" width="${r*1.6}" height="${r*1.6}" transform="rotate(45 ${p[0]} ${p[1]})" style="stroke-width:${2*k}"/>`;}
+  if(S.fixSel&&S.fixSel.j!=null){const J=S.junctions[S.fixSel.j];if(J){const p=jPage(J),len=46*k;
+    J.arms.forEach((a,i)=>{const t=a*Math.PI/180;h+=`<line class="spoke" x1="${p[0]}" y1="${p[1]}" x2="${p[0]+Math.cos(t)*len}" y2="${p[1]+Math.sin(t)*len}" stroke="${FIXCOL[i%FIXCOL.length]}" style="stroke-width:${7*k}"/>`;});}}
+  if(S.fixSel&&S.fixSel.pt){const q=S.fixSel.pt;h+=`<circle cx="${q[0]}" cy="${q[1]}" r="${r}" fill="none" stroke="var(--fix)" style="stroke-width:${3*k}"/>`;}
+  L.innerHTML=h;}
+// worker x,y (before squaring up) -> output x,y
+function outPos(x,y){if(!S.rot)return[x+0.5,y+0.5];const a=-S.rot*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),cy=S.work.h/2,cx=S.work.w/2;
+  const Y=y-cy,X=x-cx;return[cx+X*ca-Y*sa+0.5,cy+X*sa+Y*ca+0.5];}
+function nearestStroke(px,py,lim){let best=null,bd=lim;const pts=S.strokes,geo=pageGeom();
+  for(let j=0;j<pts.length/2;j++){const p=geo.map(pts[2*j],pts[2*j+1]);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;best=p;}}return best;}
+
+function closeFixPop(){$('fixPop').hidden=true;S.fixSel=null;if(S.fixMode)drawFixLayer();}
+function openFixPop(html,px,py){const pop=$('fixPop'),img=$('view'),mat=$('mat'),sc=layerScale();
+  // (the picture may be letterboxed inside its box; the layer sits exactly on that box)
+  const L={offsetLeft:img.offsetLeft+(img.offsetWidth-img.naturalWidth*sc)/2,offsetTop:img.offsetTop+(img.offsetHeight-img.naturalHeight*sc)/2};
+  pop.innerHTML='<button class="close" aria-label="Close">×</button>'+html;pop.hidden=false;
+  let x=L.offsetLeft+px*sc+18,y=L.offsetTop+py*sc-20;const mw=mat.scrollLeft+mat.clientWidth,mh=mat.scrollTop+mat.clientHeight;
+  if(x+pop.offsetWidth>mw-8)x=L.offsetLeft+px*sc-pop.offsetWidth-18;if(x<mat.scrollLeft+8)x=mat.scrollLeft+8;
+  if(y+pop.offsetHeight>mh-8)y=mh-pop.offsetHeight-8;if(y<mat.scrollTop+8)y=mat.scrollTop+8;
+  pop.style.left=x+'px';pop.style.top=y+'px';pop.querySelector('.close').onclick=closeFixPop;
+  const first=pop.querySelector('button:not(.close)');if(first)first.focus({preventScroll:true});}
+const sw=i=>`<span class="sw" style="background:${FIXCOL[i%FIXCOL.length]}"></span>`;
+function junctionMenu(i){const J=S.junctions[i];if(!J)return;S.fixSel={j:i};drawFixLayer();
+  const here=fixAtJunction(J),has=m=>here.some(f=>f.mode===m),pairFix=(a,b)=>here.some(f=>f.mode==='pair'&&f.arms&&[f.arms[0],f.arms[1]].every(v=>[J.arms[a],J.arms[b]].some(w=>Math.abs(((v-w+540)%360)-180)<15)));
+  const cur=new Set(J.pairs.map(p=>p[0]+'-'+p[1]));
+  let h=`<h3>Junction of ${J.arms.length} lines</h3><p>Pick which two lines are one line running straight through. The colors match the spokes on the picture.</p><div class="row">`;
+  for(let a=0;a<J.arms.length;a++)for(let b=a+1;b<J.arms.length;b++){const on=cur.has(a+'-'+b);
+    h+=`<button data-pair="${a},${b}" aria-pressed="${on}">${sw(a)}${sw(b)} ${on?'run through (now)':'run through'}</button>`;}
+  h+=`</div><button data-act="apart" aria-pressed="${has('apart')}">No line runs through: they all just meet here</button>`;
+  h+=`<button data-act="corner" aria-pressed="${has('corner')}">Make it a sharp corner</button>`;
+  h+=`<button data-act="round" aria-pressed="${has('round')}">Make it a smooth curve</button>`;
+  h+=`<button data-act="auto" aria-pressed="${!here.length}">Automatic${here.length?' (remove my fix)':''}</button>`;
+  const p=jPage(J);openFixPop(h,p[0],p[1]);
+  const [sx,sy]=workToSrc(J.wx,J.wy);
+  $('fixPop').querySelectorAll('[data-pair]').forEach(bt=>bt.onclick=()=>{const[a,b]=bt.dataset.pair.split(',').map(Number);
+    changeFixes(()=>{// a line can only run through one way: drop my other pairings that use either of these two lines
+      S.fixes=S.fixes.filter(f=>!(here.includes(f)&&(f.mode==='pair'?f.arms.some(v=>[J.arms[a],J.arms[b]].some(w=>Math.abs(((v-w+540)%360)-180)<15)):f.mode==='apart')));
+      S.fixes.push({sx,sy,mode:'pair',arms:[J.arms[a],J.arms[b]]});});});
+  $('fixPop').querySelectorAll('[data-act]').forEach(bt=>bt.onclick=()=>{const act=bt.dataset.act;
+    changeFixes(()=>{if(act==='auto'){S.fixes=S.fixes.filter(f=>!here.includes(f));return;}
+      if(act==='apart')S.fixes=S.fixes.filter(f=>!here.includes(f));
+      else S.fixes=S.fixes.filter(f=>!(here.includes(f)&&(f.mode==='corner'||f.mode==='round')));
+      S.fixes.push({sx,sy,mode:act});});});}
+function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=workToSrc(wx,wy);
+  const near=S.fixes.filter(f=>(f.mode==='corner'||f.mode==='round')&&(()=>{const[x,y]=srcToWork(f.sx,f.sy);return Math.hypot(x-wx,y-wy)<20;})());
+  S.fixSel={pt:[px,py]};drawFixLayer();
+  let h=`<h3>This spot on the line</h3><p>Choose how the line should look here.</p>`;
+  h+=`<button data-act="corner" aria-pressed="${near.some(f=>f.mode==='corner')}">Sharp corner here</button>`;
+  h+=`<button data-act="round" aria-pressed="${near.some(f=>f.mode==='round')}">Smooth curve here (no corner)</button>`;
+  h+=`<button data-act="auto" aria-pressed="${!near.length}">Automatic${near.length?' (remove my fix)':''}</button>`;
+  openFixPop(h,px,py);
+  $('fixPop').querySelectorAll('[data-act]').forEach(bt=>bt.onclick=()=>{const act=bt.dataset.act;
+    changeFixes(()=>{S.fixes=S.fixes.filter(f=>!near.includes(f));if(act!=='auto')S.fixes.push({sx,sy,mode:act});});});}
+$('fixLayer').addEventListener('click',e=>{const L=$('fixLayer'),r=L.getBoundingClientRect(),sc=layerScale();
+  const img=$('view'),offx=(r.width-img.naturalWidth*sc)/2,offy=(r.height-img.naturalHeight*sc)/2;
+  const px=(e.clientX-r.left-offx)/sc,py=(e.clientY-r.top-offy)/sc,lim=16/sc;
+  let bi=-1,bd=lim;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;bi=i;}});
+  if(bi>=0){junctionMenu(bi);return;}
+  const q=nearestStroke(px,py,12/sc);if(q){pointMenu(q[0],q[1]);return;}
+  closeFixPop();});
+$('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
+  if(S.fixMode&&S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));showView();}
+  closeFixPop();drawFixLayer();updateFixBar();});
+$('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();schedule(run,0);});
+$('fixClear').addEventListener('click',()=>{if(!S.fixes.length)return;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();schedule(run,0);});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('fixPop').hidden)closeFixPop();});
+$('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
+window.addEventListener('resize',()=>{placeFixLayer();});
 
 // ---- controls ----
 const rerender=()=>{updateLabels();schedule(render,120);};

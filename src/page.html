@@ -104,6 +104,7 @@
         <button data-view="original" aria-pressed="false">Original</button>
         <button data-view="overlay" aria-pressed="false">Overlay</button>
       </div>
+      <button id="fixBtn" class="fix-btn" aria-pressed="false" title="Click a junction or a spot on a line to choose how it should look">Fix lines</button>
       <div class="status" id="status"><span class="dot"></span><span id="statusText">Ready</span></div>
       <div class="seg" role="group" aria-label="Zoom">
         <button data-zoom="fit" aria-pressed="true">Fit</button>
@@ -114,6 +115,14 @@
     <div class="mat fit" id="mat">
       <div class="sample-tag" id="sampleTag">Example pattern · open or drop your own</div>
       <div class="stage"><img id="view" alt="Pattern preview"></div>
+      <svg id="fixLayer" class="fix-layer" hidden aria-label="Junctions you can fix"></svg>
+      <div id="fixPop" class="fix-pop" role="dialog" aria-label="Fix this spot" hidden></div>
+    </div>
+    <div class="fix-bar" id="fixBar" hidden>
+      <span id="fixHelp">Click a dot (a junction) or anywhere on a line to choose how it should look.</span>
+      <span class="fix-count" id="fixCount"></span>
+      <button id="fixUndo" disabled>Undo</button>
+      <button id="fixClear" disabled>Clear all fixes</button>
     </div>
     <div class="drop-note" id="note">Drop an image on the mat, paste one, or use Open pattern image. Overlay shows the new lines in red over the original. 100% zoom is 300 pixels per inch.</div>
   </main>

@@ -117,6 +117,30 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
   aside{overflow:visible}
   .mat{min-height:62vh}
 }
+
+/* Fix lines: junction markers over the preview, and the little menu that opens on a click */
+:root{--fix:#d2392c;--fix-done:#1f8a4c}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--fix:#ff6b5e;--fix-done:#4fd18a}}
+:root[data-theme="dark"]{--fix:#ff6b5e;--fix-done:#4fd18a}
+.fix-btn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.fix-layer{position:absolute;left:0;top:0;cursor:crosshair;z-index:2;overflow:visible}
+.fix-layer .jn{fill:rgba(255,255,255,.85);stroke:var(--fix);stroke-width:2.5}
+.fix-layer .jn.fixed{fill:var(--fix-done);stroke:#fff}
+.fix-layer .jn.sel{stroke-width:4}
+.fix-layer .pt{fill:var(--fix-done);stroke:#fff;stroke-width:2}
+.fix-layer .spoke{stroke-width:7;stroke-linecap:round;opacity:.9}
+.fix-pop{position:absolute;z-index:3;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 6px 24px rgba(0,0,0,.3);padding:10px;display:flex;flex-direction:column;gap:6px;width:min(280px,calc(100% - 24px));font-size:.88rem}
+.fix-pop h3{margin:0 0 2px;font-size:.9rem;font-weight:600}
+.fix-pop p{margin:0;color:var(--muted);font-size:.8rem}
+.fix-pop button{justify-content:flex-start;padding:6px 10px;font-size:.86rem;text-align:left}
+.fix-pop button[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);font-weight:600}
+.fix-pop .sw{display:inline-block;width:12px;height:12px;border-radius:50%;flex:none}
+.fix-pop .row{display:flex;gap:6px;flex-wrap:wrap}
+.fix-pop .close{position:absolute;top:6px;right:6px;padding:2px 8px;border:0;background:transparent;font-size:1.1rem}
+.fix-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:.84rem;color:var(--muted)}
+.fix-bar button{padding:4px 10px;font-size:.84rem}
+.fix-count{font-family:var(--f-mono);color:var(--ink)}
 </style>
 
 <div class="app">
@@ -213,6 +237,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
         <button data-view="original" aria-pressed="false">Original</button>
         <button data-view="overlay" aria-pressed="false">Overlay</button>
       </div>
+      <button id="fixBtn" class="fix-btn" aria-pressed="false" title="Click a junction or a spot on a line to choose how it should look">Fix lines</button>
       <div class="status" id="status"><span class="dot"></span><span id="statusText">Ready</span></div>
       <div class="seg" role="group" aria-label="Zoom">
         <button data-zoom="fit" aria-pressed="true">Fit</button>
@@ -223,6 +248,14 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
     <div class="mat fit" id="mat">
       <div class="sample-tag" id="sampleTag">Example pattern · open or drop your own</div>
       <div class="stage"><img id="view" alt="Pattern preview"></div>
+      <svg id="fixLayer" class="fix-layer" hidden aria-label="Junctions you can fix"></svg>
+      <div id="fixPop" class="fix-pop" role="dialog" aria-label="Fix this spot" hidden></div>
+    </div>
+    <div class="fix-bar" id="fixBar" hidden>
+      <span id="fixHelp">Click a dot (a junction) or anywhere on a line to choose how it should look.</span>
+      <span class="fix-count" id="fixCount"></span>
+      <button id="fixUndo" disabled>Undo</button>
+      <button id="fixClear" disabled>Clear all fixes</button>
     </div>
     <div class="drop-note" id="note">Drop an image on the mat, paste one, or use Open pattern image. Overlay shows the new lines in red over the original. 100% zoom is 300 pixels per inch.</div>
   </main>
@@ -348,7 +381,8 @@ function process(p){
       for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const y=yy+dy,x=xx+dx;if(y>=0&&x>=0&&y<H&&x<W)mx=Math.max(mx,dmap[y*W+x]);}return Math.max(0.5,mx-0.5);});
     const hw=raw.map((_,i)=>{const a=raw.slice(Math.max(0,i-75),Math.min(raw.length,i+76)).sort((p,q)=>p-q);return a[Math.floor(a.length*0.4)];});
     S.forEach((q,i)=>{flat.push(q[1]+0.5,q[0]+0.5);hwf.push(hw[i]);});offs.push(flat.length/2);}
-  return{pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
+  const junctions=(built.junctions||[]).map(J=>({x:J.p[1]+0.5,y:J.p[0]+0.5,wx:J.q[1],wy:J.q[0],arms:J.arms,pairs:J.pairs,fixed:J.fixed}));
+  return{junctions,pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
 
 // ===================================================================== curve stage
 // Trace the centerline into a graph of lines and junctions, rebuild junctions the way a
@@ -441,7 +475,9 @@ function smoothPiece(Q,w,u,strength,closed,own){
     wc=wc.map((v,i)=>real[i]?v*(1+2*Math.pow(Math.max(0,g[i]-0.7),2)):v);}
   return closed?Z.slice(m,m+Q.length):Z;}
 
-function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,square:true};let frame=0;
+function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,square:true};
+  // the user's own fixes: [{y,x,mode,arms}] in working pixels; mode is 'corner', 'round', 'pair' or 'apart'
+  const FIX=Array.isArray(opt.fixes)?opt.fixes.filter(f=>f&&isFinite(f.y)&&isFinite(f.x)):[];let frame=0;
   // ---- trace graph
   const N8=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
   const nb=i=>{const y=(i/W)|0,x=i%W,o=[];for(const[dy,dx]of N8){const yy=y+dy,xx=x+dx;if(yy>=0&&yy<H&&xx>=0&&xx<W&&sk[yy*W+xx])o.push(yy*W+xx);}return o;};
@@ -688,6 +724,26 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       for(const[x,y]of[a,b]){const pp=partner.get(key(x,y));if(pp){partner.delete(key(pp[0],pp[1]));partner.delete(key(x,y));}}
       partner.set(key(j,0),[a[0],a[1],false]);partner.set(key(a[0],a[1]),[j,0,false]);
       partner.set(key(j,1),[b[0],b[1],false]);partner.set(key(b[0],b[1]),[j,1,false]);});}
+  // ---------------- the user's fixes at junctions ----------------
+  // Each arm of a junction is named by its direction (degrees, measured a few line widths out), so a fix
+  // still finds the right lines when the pattern is re-run at another size.
+  const armAng=(k,j,s_)=>{const E=edges[j],tot=E.L[E.L.length-1],np_=nodePos.get(k)||cent[k];const q=at(E.P,s_===0?Math.min(tot,3*med):Math.max(0,tot-3*med),E.L);
+    return Math.atan2(q[0]-np_[0],q[1]-np_[1])*180/Math.PI;};
+  const angGap=(a,b)=>{let d=Math.abs(a-b)%360;return d>180?360-d:d;};
+  const fixNode=f=>{let best=null,bd=3*med;inc.forEach((lst,k)=>{if(lst.length<2)return;const p=nodePos.get(k)||cent[k];if(!p)return;const d=Math.hypot(p[0]-f.y,p[1]-f.x);if(d<bd){bd=d;best=k;}});return best;};
+  const fixedNodes=new Map(),cornerAt=[];
+  for(const f of FIX){const k=fixNode(f);if(k==null)continue;const lst=inc.get(k);fixedNodes.set(k,f.mode);
+    const unpair=([j,s_])=>{const p=partner.get(key(j,s_));if(p){partner.delete(key(p[0],p[1]));partner.delete(key(j,s_));}};
+    if(f.mode==='apart'){lst.forEach(unpair);continue;}
+    if(f.mode==='pair'&&Array.isArray(f.arms)&&f.arms.length===2){
+      const pick=a=>{let b=null,bd=40;for(const e of lst){const g=angGap(armAng(k,e[0],e[1]),a);if(g<bd){bd=g;b=e;}}return b;};
+      const A=pick(f.arms[0]),B=pick(f.arms[1]);if(!A||!B||(A[0]===B[0]&&A[1]===B[1]))continue;
+      unpair(A);unpair(B);const corner=angGap(armAng(k,A[0],A[1]),armAng(k,B[0],B[1]))<145&&lst.length===2;
+      partner.set(key(A[0],A[1]),[B[0],B[1],!!f.sharp||corner]);partner.set(key(B[0],B[1]),[A[0],A[1],!!f.sharp||corner]);continue;}
+    // (at a junction of two lines, a corner or a smooth bend is set right here; where more lines meet, the
+    // line running through gets its corner, or loses one, when its shape is fitted)
+    if(f.mode==='corner'&&lst.length>2)cornerAt.push({k,f});
+    if((f.mode==='corner'||f.mode==='round')&&lst.length===2){for(const[j,s_]of lst){const p=partner.get(key(j,s_));if(p){p[2]=f.mode==='corner';}}}}
   // (a piece that carries on into nothing at either end is a line of its own)
   edges.forEach((E,j)=>{if(E.closed||partner.has(key(j,0))||partner.has(key(j,1)))return;for(const s_ of[0,1]){const e=ends.get(key(j,s_));if(e)e.own=true;}});
   // chains
@@ -762,15 +818,21 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         if(pos===0){w0[0]=GAP;raw.unshift(land.get(kk).slice());w0.unshift(PIN);}else{w0[w0.length-1]=GAP;raw.push(land.get(kk).slice());w0.push(PIN);}}}
     let[Q,w]=resampleKeep(raw,w0);const pins=[];w.forEach((v,i)=>{if(v>=1e5)pins.push(i);});
     const base=C.closed?Q.slice(0,-1):Q;
-    for(const i of (C.noCorners?[]:findCorners(base,C.closed))){
-      if(pins.some(p=>Math.abs(i-p)<3*K)||(!C.closed&&(i<3*K||i>Q.length-1-3*K)))continue;
+    // (the user's fixes: no corner where they asked for a rounded line, a corner where they asked for one)
+    let cands=C.noCorners?[]:findCorners(base,C.closed);const forced=new Set();
+    if(FIX.length){cands=cands.filter(i=>!FIX.some(f=>f.mode==='round'&&Math.hypot(base[i][0]-f.y,base[i][1]-f.x)<2.5*med));
+      for(const f of FIX){if(f.mode!=='corner')continue;let bi=-1,bd=1.5*med;base.forEach((q,i)=>{const d=Math.hypot(q[0]-f.y,q[1]-f.x);if(d<bd){bd=d;bi=i;}});
+        if(bi>=0){cands=cands.filter(i=>Math.abs(i-bi)>2*K);cands.push(bi);forced.add(bi);}}
+      cands.sort((a,b)=>a-b);}
+    for(const i of cands){const frc=forced.has(i);
+      if(pins.some(p=>Math.abs(i-p)<(frc?2:3*K))||(!C.closed&&(i<(frc?2:3*K)||i>Q.length-1-(frc?2:3*K))))continue;
       // a bend inside a solid dot on the line (a bird's eye drawn as a filled spot) is not a corner: the
       // ink there is far thicker than a line, and the line just runs through the spot
       {const dAt=q=>{const yy=Math.round(q[0]),xx=Math.round(q[1]);return(yy>=0&&xx>=0&&yy<H&&xx<W)?dmap[yy*W+xx]:0;};
         const n2=Q.length,off=Math.round(3*K),nb=[];for(const o of[-off,-off+2,off-2,off]){const t=C.closed?(i+o+n2)%n2:i+o;if(t>=0&&t<n2)nb.push(dAt(Q[t]));}
-        nb.sort((p,q)=>p-q);const ref=nb.length?nb[nb.length>>1]:0.5*med;if(dAt(Q[i])>Math.max(1.0*med,2.2*ref))continue;}
+        nb.sort((p,q)=>p-q);const ref=nb.length?nb[nb.length>>1]:0.5*med;if(!frc&&dAt(Q[i])>Math.max(1.0*med,2.2*ref))continue;}
       // a junction this line was found to pass smoothly through is not a corner of it
-      {let soft=false;for(let t=Math.max(0,i-K);t<=Math.min(w.length-1,i+K);t++)if(w[t]<=GAP*1.01){soft=true;break;}if(soft)continue;}
+      {let soft=false;for(let t=Math.max(0,i-K);t<=Math.min(w.length-1,i+K);t++)if(w[t]<=GAP*1.01){soft=true;break;}if(soft&&!frc)continue;}
       const L=arclen(Q),d0=L[i];const ia=at(Q,d0-2*u,L),ib=at(Q,d0-6*u,L),ja=at(Q,d0+2*u,L),jb=at(Q,d0+6*u,L);
       const nrm=v=>{const n=norm2(v)+1e-9;return[v[0]/n,v[1]/n];};
       let cp=lsqPoint([ia,ja],[nrm([ib[0]-ia[0],ib[1]-ia[1]]),nrm([jb[0]-ja[0],jb[1]-ja[1]])],Q[i]);
@@ -1247,6 +1309,11 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const startKey=same(CA.start,c.a.k2)?CA.end:CA.start,endKey=same(CB.start,c.b.k2)?CB.end:CB.start;
       CA.dead=true;CB.dead=true;
       chains.push({seq:[],joins:[],closed:false,noCorners:true,raw:[...rA,...seg,...rB],w:[...wA,...wS,...wB],start:startKey,end:endKey});}}
+  // (a corner the user asked for where lines land on a line: the lines that land there meet it at one point,
+  // and the line it bends at is exactly that point)
+  for(const{k,f}of cornerAt){const P=[];for(const[j,s_]of inc.get(k)||[]){const kk=key(j,s_);if(land.has(kk))P.push(kk);}
+    if(!P.length)continue;const m=[0,0];for(const kk of P){const q=land.get(kk);m[0]+=q[0]/P.length;m[1]+=q[1]/P.length;}
+    for(const kk of P)land.set(kk,m.slice());f.y=m[0];f.x=m[1];}
   fitted=fitAll();
   // a line that ends on another line ends exactly on it (after straightening, the end may sit a
   // fraction of a pixel off): extend or trim it along its own direction to meet that line
@@ -1384,17 +1451,23 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   chains.forEach((C,i)=>{let F=fitted[i];if(C.closed&&F.length>2){if(Math.hypot(F[0][0]-F[F.length-1][0],F[0][1]-F[F.length-1][1])>1e-6)F=[...F,F[0]];fitted[i]=[...F,F[1]];}});
   let out=fitted.filter(F=>F.length>1);
   const fillets=[];
+  // junctions, for the page to show and let the user fix: where each is, the direction of each arm, and
+  // which arms carry on into each other
+  const junctions=[];inc.forEach((lst,k)=>{if(lst.length<3||isFree.has(k))return;const p=nodePos.get(k)||cent[k];if(!p)return;
+    const arms=lst.map(([j,s_])=>armAng(k,j,s_)),pairs=[];
+    lst.forEach(([j,s_],a)=>{const pr=partner.get(key(j,s_));if(!pr)return;const b=lst.findIndex(([j2,s2])=>j2===pr[0]&&s2===pr[1]);if(b>a)pairs.push([a,b,pr[2]?1:0]);});
+    junctions.push({p:[p[0],p[1]],q:[p[0],p[1]],arms,pairs,fixed:fixedNodes.get(k)||null});});
   if(opt.exact&&opt.square&&Math.abs(frame)>0.01){const a=-frame*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),cy=H/2,cx=W/2;
     const rot=p=>{const y=p[0]-cy,x=p[1]-cx;return[cy+x*sa+y*ca,cx+x*ca-y*sa];};
-    out=out.map(F=>F.map(rot));fillets.forEach(f=>{f.fill=f.fill.map(rot);f.curve=f.curve.map(rot);});}
-  return{strokes:out,fillets,rot:(opt.exact&&opt.square)?frame:0};}
+    out=out.map(F=>F.map(rot));fillets.forEach(f=>{f.fill=f.fill.map(rot);f.curve=f.curve.map(rot);});junctions.forEach(J=>{J.p=rot(J.p);});}
+  return{strokes:out,fillets,junctions,rot:(opt.exact&&opt.square)?frame:0};}
 
 onmessage=e=>{const m=e.data;
   if(m.type==='load'){W=m.w;H=m.h;gray=new Uint8Array(m.buf);otsuT=otsu(gray);colorIn=!!m.colored;
     // colored glass: the lines are the darkest group of all; split them from the darkest glass color
     if(m.colored){const lo=gray.filter(v=>v<otsuT);if(lo.length)otsuT=Math.min(otsuT,otsu(lo)+1);}postMessage({type:'loaded',otsu:otsuT,id:m.id});return;}
   if(m.type==='run'){const t0=Date.now();
-    try{const r=process(m.params);postMessage({type:'done',id:m.id,pts:r.pts,offs:r.offs,hw:r.hw,stats:r.stats,rot:r.rot,fill:r.fill,fcurve:r.fcurve,ms:Date.now()-t0},[r.pts.buffer,r.offs.buffer,r.hw.buffer]);}
+    try{const r=process(m.params);postMessage({type:'done',id:m.id,junctions:r.junctions,pts:r.pts,offs:r.offs,hw:r.hw,stats:r.stats,rot:r.rot,fill:r.fill,fcurve:r.fcurve,ms:Date.now()-t0},[r.pts.buffer,r.offs.buffer,r.hw.buffer]);}
     catch(err){postMessage({type:'error',id:m.id,message:String(err&&err.message||err)});}}};
 </script>
 
@@ -1404,7 +1477,8 @@ const $=id=>document.getElementById(id);
 const OUT_PPI=300, MARGIN_IN=0.25, MAX_WORK=3000, PAD=6;
 const S={name:'sample-pattern',src:null,crop:null,work:null,workPPI:0,strokes:null,offs:null,stats:null,
   view:'result',zoom:'fit',running:false,pending:false,loadId:0,runId:0,otsu:128,sample:true,dl:null,
-  resultBlob:null,resultURL:null,overlayURL:null,origURL:null,svg:null,borderFlags:null};
+  resultBlob:null,resultURL:null,overlayURL:null,origURL:null,svg:null,borderFlags:null,
+  fixes:[],fixKey:null,junctions:[],fixMode:false,fixSel:null};
 
 const worker=new Worker(URL.createObjectURL(new Blob([$('worker-src').textContent],{type:'text/javascript'})));
 worker.onmessage=e=>{const m=e.data;
@@ -1412,7 +1486,7 @@ worker.onmessage=e=>{const m=e.data;
   else if(m.type==='loaded'){if(m.id!==S.loadId)return;S.otsu=m.otsu;if($('threshAuto').checked)$('thresh').value=m.otsu;updateLabels();S.running=false;run();}
   else if(m.type==='done'){S.running=false;
     if(S.pending){S.pending=false;run();return;}
-    S.strokes=m.pts;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;S.fill=m.fill;S.fcurve=m.fcurve;markBorder();render();
+    S.strokes=m.pts;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];markBorder();render();drawFixLayer();
     setStatus('Done in '+(m.ms/1000).toFixed(1)+' s',false);}
   else if(m.type==='error'){S.running=false;setStatus('Could not process this image: '+m.message,false);}};
 function setStatus(t,busy){$('statusText').textContent=t;$('status').classList.toggle('busy',!!busy);}
@@ -1434,6 +1508,7 @@ function loadImage(img,name,isSample){
   const c=document.createElement('canvas');c.width=img.width||img.naturalWidth;c.height=img.height||img.naturalHeight;
   const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0);
   S.src=c;S.name=name;S.sample=isSample;
+  loadFixes(name,c.width,c.height);
   $('fileName').textContent=name;$('sampleTag').hidden=!isSample;$('sSize').textContent=c.width+' × '+c.height+' px';
   if(S.origURL)URL.revokeObjectURL(S.origURL);c.toBlob(b=>{S.origURL=URL.createObjectURL(b);if(S.view==='original')showView();});
   findCrop();if($('lockRatio').checked){const z=sizeIn(),L=Math.max(z.w,z.h);const r=S.crop.h/S.crop.w;
@@ -1465,7 +1540,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked};}
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker()};}
 let timer=null;
 function schedule(fn,ms){clearTimeout(timer);timer=setTimeout(fn,ms);}
 function run(){if(!S.work)return;if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
@@ -1586,11 +1661,12 @@ async function withPPI(blob,ppi){try{const buf=new Uint8Array(await blob.arrayBu
   return new Blob([out],{type:'image/png'});}catch(e){return blob;}}
 
 function showView(){const img=$('view');
+  if(!S.fixMode||S.view==='original')$('fixLayer').setAttribute('hidden','');
   if(S.view==='original'){if(S.origURL)img.src=S.origURL;img.alt='Original pattern';}
   else if(S.view==='overlay'){if(!S.strokes)return;if(!S.overlayURL){makeOverlay(showView);return;}img.src=S.overlayURL;img.alt='New lines in red over the original';}
   else{if(S.resultURL)img.src=S.resultURL;img.alt='Pattern with even line width';}
   applyZoom();}
-function applyZoom(){const mat=$('mat'),img=$('view');mat.classList.toggle('fit',S.zoom==='fit');
+function applyZoom(){requestAnimationFrame(placeFixLayer);const mat=$('mat'),img=$('view');mat.classList.toggle('fit',S.zoom==='fit');
   if(S.zoom==='fit'){img.style.width='';img.style.height='';}
   else{const z=+S.zoom;img.onload=()=>{if(S.zoom!=='fit'){img.style.width=img.naturalWidth*z+'px';img.style.height=img.naturalHeight*z+'px';}};
     if(img.complete&&img.naturalWidth){img.style.width=img.naturalWidth*z+'px';img.style.height=img.naturalHeight*z+'px';}}}
@@ -1608,6 +1684,111 @@ function updateLabels(){const w=widthIn();
 function showStats(geo){const s=S.stats;if(!s||!S.offs||S.offs.length<2){['sThin','sMid','sThick'].forEach(i=>$(i).textContent='no lines found');return;}
   const f=v=>fmtUnit(Math.max(1,v)/S.workPPI);$('sThin').textContent=f(s.thin);$('sMid').textContent=f(s.mid);$('sThick').textContent=f(s.thick);
   $('sOut').textContent=(geo.pw/OUT_PPI).toFixed(2)+' × '+(geo.ph/OUT_PPI).toFixed(2)+' in';}
+
+
+// ---- fix lines: the user's own choices at junctions and along lines ----
+// A fix is kept in the source picture's own pixels, so it stays put when the size or line width changes,
+// and it is remembered in this browser for the same picture.
+const FIXCOL=['#d2392c','#1f6fd1','#e08a00','#7b3fbf','#13917b','#c2185b','#5d6b70'];
+function srcToWork(sx,sy){const cr=S.crop;return[(sx-cr.x+PAD)*S.sx-0.5,(sy-cr.y+PAD)*S.sy-0.5];}   // -> worker's own x,y
+function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)/S.sy+cr.y-PAD];}
+function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
+function saveFixes(){try{if(S.fixKey)localStorage.setItem(S.fixKey,JSON.stringify(S.fixes));}catch(e){}updateFixBar();}
+function loadFixes(name,w,h){S.fixKey='lll-fixes:'+name+':'+w+'x'+h;S.fixes=[];S.fixSel=null;S.undo=[];
+  try{const v=JSON.parse(localStorage.getItem(S.fixKey)||'[]');if(Array.isArray(v))S.fixes=v.filter(f=>f&&isFinite(f.sx)&&isFinite(f.sy)&&f.mode);}catch(e){}
+  closeFixPop();updateFixBar();}
+function updateFixBar(){const n=S.fixes.length;$('fixCount').textContent=n?n+(n===1?' fix':' fixes'):'';
+  $('fixClear').disabled=!n;$('fixUndo').disabled=!(S.undo&&S.undo.length);}
+function changeFixes(fn){S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();fn();saveFixes();closeFixPop();setStatus('Applying your fix…',true);schedule(run,0);}
+
+// where things are on the preview: page px of the result picture
+function jPage(J){return pageGeom().map(J.x,J.y);}
+function pageToWorkInternal(px,py){const geo=pageGeom();const ox=PAD*S.sx,oy=PAD*S.sy;
+  let x=(px-geo.m)/geo.k+ox-0.5,y=(py-geo.m)/geo.k+oy-0.5;          // output position, worker coords
+  if(S.rot){const a=-S.rot*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),cy=S.work.h/2,cx=S.work.w/2;   // undo the squaring-up turn
+    const Y=y-cy,X=x-cx;x=cx+X*ca+Y*sa;y=cy-X*sa+Y*ca;}
+  return[x,y];}
+function placeFixLayer(){const L=$('fixLayer'),img=$('view');if(L.hasAttribute('hidden')||!img.naturalWidth)return;
+  L.style.left=img.offsetLeft+'px';L.style.top=img.offsetTop+'px';L.style.width=img.offsetWidth+'px';L.style.height=img.offsetHeight+'px';
+  L.setAttribute('viewBox','0 0 '+img.naturalWidth+' '+img.naturalHeight);L.setAttribute('preserveAspectRatio','xMidYMid meet');}
+function layerScale(){const img=$('view');return img.naturalWidth?Math.min(img.offsetWidth/img.naturalWidth,img.offsetHeight/img.naturalHeight):1;}
+function fixAtJunction(J){return S.fixes.filter(f=>{const[x,y]=srcToWork(f.sx,f.sy);return Math.hypot(x-J.wx,y-J.wy)<8;});}
+function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view==='original'){L.setAttribute('hidden','');return;}
+  L.removeAttribute('hidden');placeFixLayer();const k=1/layerScale(),r=7*k;let h='';
+  for(let i=0;i<S.junctions.length;i++){const J=S.junctions[i],p=jPage(J),fx=fixAtJunction(J).length>0;
+    h+=`<circle class="jn${fx?' fixed':''}${S.fixSel&&S.fixSel.j===i?' sel':''}" cx="${p[0]}" cy="${p[1]}" r="${r}" style="stroke-width:${(fx?2:2.5)*k}"/>`;}
+  // fixes that sit on a line rather than at a junction
+  const geo=pageGeom();
+  for(const f of S.fixes){if(f.mode!=='corner'&&f.mode!=='round')continue;const[x,y]=srcToWork(f.sx,f.sy);
+    if(S.junctions.some(J=>Math.hypot(J.wx-x,J.wy-y)<12))continue;const q=outPos(x,y);const p=geo.map(q[0],q[1]);
+    h+=`<rect class="pt" x="${p[0]-r*.8}" y="${p[1]-r*.8}" width="${r*1.6}" height="${r*1.6}" transform="rotate(45 ${p[0]} ${p[1]})" style="stroke-width:${2*k}"/>`;}
+  if(S.fixSel&&S.fixSel.j!=null){const J=S.junctions[S.fixSel.j];if(J){const p=jPage(J),len=46*k;
+    J.arms.forEach((a,i)=>{const t=a*Math.PI/180;h+=`<line class="spoke" x1="${p[0]}" y1="${p[1]}" x2="${p[0]+Math.cos(t)*len}" y2="${p[1]+Math.sin(t)*len}" stroke="${FIXCOL[i%FIXCOL.length]}" style="stroke-width:${7*k}"/>`;});}}
+  if(S.fixSel&&S.fixSel.pt){const q=S.fixSel.pt;h+=`<circle cx="${q[0]}" cy="${q[1]}" r="${r}" fill="none" stroke="var(--fix)" style="stroke-width:${3*k}"/>`;}
+  L.innerHTML=h;}
+// worker x,y (before squaring up) -> output x,y
+function outPos(x,y){if(!S.rot)return[x+0.5,y+0.5];const a=-S.rot*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),cy=S.work.h/2,cx=S.work.w/2;
+  const Y=y-cy,X=x-cx;return[cx+X*ca-Y*sa+0.5,cy+X*sa+Y*ca+0.5];}
+function nearestStroke(px,py,lim){let best=null,bd=lim;const pts=S.strokes,geo=pageGeom();
+  for(let j=0;j<pts.length/2;j++){const p=geo.map(pts[2*j],pts[2*j+1]);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;best=p;}}return best;}
+
+function closeFixPop(){$('fixPop').hidden=true;S.fixSel=null;if(S.fixMode)drawFixLayer();}
+function openFixPop(html,px,py){const pop=$('fixPop'),img=$('view'),mat=$('mat'),sc=layerScale();
+  // (the picture may be letterboxed inside its box; the layer sits exactly on that box)
+  const L={offsetLeft:img.offsetLeft+(img.offsetWidth-img.naturalWidth*sc)/2,offsetTop:img.offsetTop+(img.offsetHeight-img.naturalHeight*sc)/2};
+  pop.innerHTML='<button class="close" aria-label="Close">×</button>'+html;pop.hidden=false;
+  let x=L.offsetLeft+px*sc+18,y=L.offsetTop+py*sc-20;const mw=mat.scrollLeft+mat.clientWidth,mh=mat.scrollTop+mat.clientHeight;
+  if(x+pop.offsetWidth>mw-8)x=L.offsetLeft+px*sc-pop.offsetWidth-18;if(x<mat.scrollLeft+8)x=mat.scrollLeft+8;
+  if(y+pop.offsetHeight>mh-8)y=mh-pop.offsetHeight-8;if(y<mat.scrollTop+8)y=mat.scrollTop+8;
+  pop.style.left=x+'px';pop.style.top=y+'px';pop.querySelector('.close').onclick=closeFixPop;
+  const first=pop.querySelector('button:not(.close)');if(first)first.focus({preventScroll:true});}
+const sw=i=>`<span class="sw" style="background:${FIXCOL[i%FIXCOL.length]}"></span>`;
+function junctionMenu(i){const J=S.junctions[i];if(!J)return;S.fixSel={j:i};drawFixLayer();
+  const here=fixAtJunction(J),has=m=>here.some(f=>f.mode===m),pairFix=(a,b)=>here.some(f=>f.mode==='pair'&&f.arms&&[f.arms[0],f.arms[1]].every(v=>[J.arms[a],J.arms[b]].some(w=>Math.abs(((v-w+540)%360)-180)<15)));
+  const cur=new Set(J.pairs.map(p=>p[0]+'-'+p[1]));
+  let h=`<h3>Junction of ${J.arms.length} lines</h3><p>Pick which two lines are one line running straight through. The colors match the spokes on the picture.</p><div class="row">`;
+  for(let a=0;a<J.arms.length;a++)for(let b=a+1;b<J.arms.length;b++){const on=cur.has(a+'-'+b);
+    h+=`<button data-pair="${a},${b}" aria-pressed="${on}">${sw(a)}${sw(b)} ${on?'run through (now)':'run through'}</button>`;}
+  h+=`</div><button data-act="apart" aria-pressed="${has('apart')}">No line runs through: they all just meet here</button>`;
+  h+=`<button data-act="corner" aria-pressed="${has('corner')}">Make it a sharp corner</button>`;
+  h+=`<button data-act="round" aria-pressed="${has('round')}">Make it a smooth curve</button>`;
+  h+=`<button data-act="auto" aria-pressed="${!here.length}">Automatic${here.length?' (remove my fix)':''}</button>`;
+  const p=jPage(J);openFixPop(h,p[0],p[1]);
+  const [sx,sy]=workToSrc(J.wx,J.wy);
+  $('fixPop').querySelectorAll('[data-pair]').forEach(bt=>bt.onclick=()=>{const[a,b]=bt.dataset.pair.split(',').map(Number);
+    changeFixes(()=>{// a line can only run through one way: drop my other pairings that use either of these two lines
+      S.fixes=S.fixes.filter(f=>!(here.includes(f)&&(f.mode==='pair'?f.arms.some(v=>[J.arms[a],J.arms[b]].some(w=>Math.abs(((v-w+540)%360)-180)<15)):f.mode==='apart')));
+      S.fixes.push({sx,sy,mode:'pair',arms:[J.arms[a],J.arms[b]]});});});
+  $('fixPop').querySelectorAll('[data-act]').forEach(bt=>bt.onclick=()=>{const act=bt.dataset.act;
+    changeFixes(()=>{if(act==='auto'){S.fixes=S.fixes.filter(f=>!here.includes(f));return;}
+      if(act==='apart')S.fixes=S.fixes.filter(f=>!here.includes(f));
+      else S.fixes=S.fixes.filter(f=>!(here.includes(f)&&(f.mode==='corner'||f.mode==='round')));
+      S.fixes.push({sx,sy,mode:act});});});}
+function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=workToSrc(wx,wy);
+  const near=S.fixes.filter(f=>(f.mode==='corner'||f.mode==='round')&&(()=>{const[x,y]=srcToWork(f.sx,f.sy);return Math.hypot(x-wx,y-wy)<20;})());
+  S.fixSel={pt:[px,py]};drawFixLayer();
+  let h=`<h3>This spot on the line</h3><p>Choose how the line should look here.</p>`;
+  h+=`<button data-act="corner" aria-pressed="${near.some(f=>f.mode==='corner')}">Sharp corner here</button>`;
+  h+=`<button data-act="round" aria-pressed="${near.some(f=>f.mode==='round')}">Smooth curve here (no corner)</button>`;
+  h+=`<button data-act="auto" aria-pressed="${!near.length}">Automatic${near.length?' (remove my fix)':''}</button>`;
+  openFixPop(h,px,py);
+  $('fixPop').querySelectorAll('[data-act]').forEach(bt=>bt.onclick=()=>{const act=bt.dataset.act;
+    changeFixes(()=>{S.fixes=S.fixes.filter(f=>!near.includes(f));if(act!=='auto')S.fixes.push({sx,sy,mode:act});});});}
+$('fixLayer').addEventListener('click',e=>{const L=$('fixLayer'),r=L.getBoundingClientRect(),sc=layerScale();
+  const img=$('view'),offx=(r.width-img.naturalWidth*sc)/2,offy=(r.height-img.naturalHeight*sc)/2;
+  const px=(e.clientX-r.left-offx)/sc,py=(e.clientY-r.top-offy)/sc,lim=16/sc;
+  let bi=-1,bd=lim;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;bi=i;}});
+  if(bi>=0){junctionMenu(bi);return;}
+  const q=nearestStroke(px,py,12/sc);if(q){pointMenu(q[0],q[1]);return;}
+  closeFixPop();});
+$('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
+  if(S.fixMode&&S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));showView();}
+  closeFixPop();drawFixLayer();updateFixBar();});
+$('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();schedule(run,0);});
+$('fixClear').addEventListener('click',()=>{if(!S.fixes.length)return;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();schedule(run,0);});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('fixPop').hidden)closeFixPop();});
+$('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
+window.addEventListener('resize',()=>{placeFixLayer();});
 
 // ---- controls ----
 const rerender=()=>{updateLabels();schedule(render,120);};
