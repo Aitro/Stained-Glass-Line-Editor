@@ -131,3 +131,6 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .fix-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:.84rem;color:var(--muted)}
 .fix-bar button{padding:4px 10px;font-size:.84rem}
 .fix-count{font-family:var(--f-mono);color:var(--ink)}
+.fix-reach{display:inline-flex;align-items:center;gap:6px}
+.fix-reach select{font:inherit;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+.fix-layer{touch-action:none}

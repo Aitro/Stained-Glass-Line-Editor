@@ -29,7 +29,9 @@ Fixing a spot by hand:
 - Click **Fix lines** above the preview. Every junction gets a dot.
 - Click a dot to choose which two lines run straight through it (the colored spokes on the picture match the colored buttons), to have no line run through, or to make it a sharp corner or a smooth curve.
 - Click anywhere else on a line to put a sharp corner there, or to make a corner smooth.
-- Fixed spots turn green. **Automatic** on a spot removes its fix; **Undo** and **Clear all fixes** are under the preview.
+- **Drag** a line to reshape it: the line bends toward where you drag, easing off along the line on either side. **Drag reach** (under the preview) sets how far along the line the pull goes. A straight line stays straight (it pivots, or moves as a whole). Drag a junction dot to move the junction; every line meeting there follows. Lines that end on a line you move stay attached to it.
+- Dragging redraws straight away; the program's own decisions aren't re-run, so a line dragged far enough to cross another won't join it automatically.
+- Fixed spots turn green (a dragged spot shows a green diamond). **Automatic** on a spot removes its fix or drag; **Undo** and **Clear all fixes** are under the preview.
 - Fixes are remembered in your browser for that picture, and stay put when you change the size or line width.
 
 Optional:

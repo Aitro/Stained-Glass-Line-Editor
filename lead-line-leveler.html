@@ -141,6 +141,9 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .fix-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:.84rem;color:var(--muted)}
 .fix-bar button{padding:4px 10px;font-size:.84rem}
 .fix-count{font-family:var(--f-mono);color:var(--ink)}
+.fix-reach{display:inline-flex;align-items:center;gap:6px}
+.fix-reach select{font:inherit;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+.fix-layer{touch-action:none}
 </style>
 
 <div class="app">
@@ -252,7 +255,8 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
       <div id="fixPop" class="fix-pop" role="dialog" aria-label="Fix this spot" hidden></div>
     </div>
     <div class="fix-bar" id="fixBar" hidden>
-      <span id="fixHelp">Click a dot (a junction) or anywhere on a line to choose how it should look.</span>
+      <span id="fixHelp">Click a dot or a line to choose how it should look, or drag it to reshape it.</span>
+      <label class="fix-reach">Drag reach <select id="fixReach"><option value="short">short</option><option value="medium" selected>medium</option><option value="wide">wide</option></select></label>
       <span class="fix-count" id="fixCount"></span>
       <button id="fixUndo" disabled>Undo</button>
       <button id="fixClear" disabled>Clear all fixes</button>
@@ -1486,7 +1490,7 @@ worker.onmessage=e=>{const m=e.data;
   else if(m.type==='loaded'){if(m.id!==S.loadId)return;S.otsu=m.otsu;if($('threshAuto').checked)$('thresh').value=m.otsu;updateLabels();S.running=false;run();}
   else if(m.type==='done'){S.running=false;
     if(S.pending){S.pending=false;run();return;}
-    S.strokes=m.pts;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];markBorder();render();drawFixLayer();
+    S.rawStrokes=m.pts;S.offs=m.offs;S.strokes=applyDrags();S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];markBorder();render();drawFixLayer();
     setStatus('Done in '+(m.ms/1000).toFixed(1)+' s',false);}
   else if(m.type==='error'){S.running=false;setStatus('Could not process this image: '+m.message,false);}};
 function setStatus(t,busy){$('statusText').textContent=t;$('status').classList.toggle('busy',!!busy);}
@@ -1692,7 +1696,7 @@ function showStats(geo){const s=S.stats;if(!s||!S.offs||S.offs.length<2){['sThin
 const FIXCOL=['#d2392c','#1f6fd1','#e08a00','#7b3fbf','#13917b','#c2185b','#5d6b70'];
 function srcToWork(sx,sy){const cr=S.crop;return[(sx-cr.x+PAD)*S.sx-0.5,(sy-cr.y+PAD)*S.sy-0.5];}   // -> worker's own x,y
 function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)/S.sy+cr.y-PAD];}
-function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
+function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode!=='drag').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
 function saveFixes(){try{if(S.fixKey)localStorage.setItem(S.fixKey,JSON.stringify(S.fixes));}catch(e){}updateFixBar();}
 function loadFixes(name,w,h){S.fixKey='lll-fixes:'+name+':'+w+'x'+h;S.fixes=[];S.fixSel=null;S.undo=[];
   try{const v=JSON.parse(localStorage.getItem(S.fixKey)||'[]');if(Array.isArray(v))S.fixes=v.filter(f=>f&&isFinite(f.sx)&&isFinite(f.sy)&&f.mode);}catch(e){}
@@ -1702,7 +1706,11 @@ function updateFixBar(){const n=S.fixes.length;$('fixCount').textContent=n?n+(n=
 function changeFixes(fn){S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();fn();saveFixes();closeFixPop();setStatus('Applying your fix…',true);schedule(run,0);}
 
 // where things are on the preview: page px of the result picture
-function jPage(J){return pageGeom().map(J.x,J.y);}
+function jPage(J){const geo=pageGeom();let[x,y]=[J.x,J.y];
+  // (a junction the user dragged is shown where they put it)
+  for(const f of S.fixes){if(f.mode!=='drag'||!f.j)continue;const a=outPos(...srcToWork(f.sx,f.sy));
+    if(Math.hypot(a[0]-x,a[1]-y)<3*Math.max(2,widthIn()*S.workPPI)){const v=rotVec(f.dx*S.sx,f.dy*S.sy);x+=v[0];y+=v[1];}}
+  return geo.map(x,y);}
 function pageToWorkInternal(px,py){const geo=pageGeom();const ox=PAD*S.sx,oy=PAD*S.sy;
   let x=(px-geo.m)/geo.k+ox-0.5,y=(py-geo.m)/geo.k+oy-0.5;          // output position, worker coords
   if(S.rot){const a=-S.rot*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),cy=S.work.h/2,cx=S.work.w/2;   // undo the squaring-up turn
@@ -1719,8 +1727,9 @@ function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view=
     h+=`<circle class="jn${fx?' fixed':''}${S.fixSel&&S.fixSel.j===i?' sel':''}" cx="${p[0]}" cy="${p[1]}" r="${r}" style="stroke-width:${(fx?2:2.5)*k}"/>`;}
   // fixes that sit on a line rather than at a junction
   const geo=pageGeom();
-  for(const f of S.fixes){if(f.mode!=='corner'&&f.mode!=='round')continue;const[x,y]=srcToWork(f.sx,f.sy);
-    if(S.junctions.some(J=>Math.hypot(J.wx-x,J.wy-y)<12))continue;const q=outPos(x,y);const p=geo.map(q[0],q[1]);
+  for(const f of S.fixes){if(f.mode!=='corner'&&f.mode!=='round'&&f.mode!=='drag')continue;if(f.mode==='drag'&&f.j)continue;   // (a dragged junction shows as its dot)
+let[x,y]=srcToWork(f.sx+(f.mode==='drag'?f.dx:0),f.sy+(f.mode==='drag'?f.dy:0));
+    if(f.mode!=='drag'&&S.junctions.some(J=>Math.hypot(J.wx-x,J.wy-y)<12))continue;const q=outPos(x,y);const p=geo.map(q[0],q[1]);
     h+=`<rect class="pt" x="${p[0]-r*.8}" y="${p[1]-r*.8}" width="${r*1.6}" height="${r*1.6}" transform="rotate(45 ${p[0]} ${p[1]})" style="stroke-width:${2*k}"/>`;}
   if(S.fixSel&&S.fixSel.j!=null){const J=S.junctions[S.fixSel.j];if(J){const p=jPage(J),len=46*k;
     J.arms.forEach((a,i)=>{const t=a*Math.PI/180;h+=`<line class="spoke" x1="${p[0]}" y1="${p[1]}" x2="${p[0]+Math.cos(t)*len}" y2="${p[1]+Math.sin(t)*len}" stroke="${FIXCOL[i%FIXCOL.length]}" style="stroke-width:${7*k}"/>`;});}}
@@ -1765,27 +1774,98 @@ function junctionMenu(i){const J=S.junctions[i];if(!J)return;S.fixSel={j:i};draw
       else S.fixes=S.fixes.filter(f=>!(here.includes(f)&&(f.mode==='corner'||f.mode==='round')));
       S.fixes.push({sx,sy,mode:act});});});}
 function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=workToSrc(wx,wy);
-  const near=S.fixes.filter(f=>(f.mode==='corner'||f.mode==='round')&&(()=>{const[x,y]=srcToWork(f.sx,f.sy);return Math.hypot(x-wx,y-wy)<20;})());
+  const near=S.fixes.filter(f=>(f.mode==='corner'||f.mode==='round'||f.mode==='drag')&&(()=>{const m=f.mode==='drag';const[x,y]=srcToWork(f.sx+(m?f.dx:0),f.sy+(m?f.dy:0));return Math.hypot(x-wx,y-wy)<(m?2.5:1)*20;})());
   S.fixSel={pt:[px,py]};drawFixLayer();
   let h=`<h3>This spot on the line</h3><p>Choose how the line should look here.</p>`;
   h+=`<button data-act="corner" aria-pressed="${near.some(f=>f.mode==='corner')}">Sharp corner here</button>`;
   h+=`<button data-act="round" aria-pressed="${near.some(f=>f.mode==='round')}">Smooth curve here (no corner)</button>`;
-  h+=`<button data-act="auto" aria-pressed="${!near.length}">Automatic${near.length?' (remove my fix)':''}</button>`;
+  h+=`<button data-act="auto" aria-pressed="${!near.length}">Automatic${near.length?(near.some(f=>f.mode==='drag')?' (undo my changes here)':' (remove my fix)'):''}</button>`;
   openFixPop(h,px,py);
   $('fixPop').querySelectorAll('[data-act]').forEach(bt=>bt.onclick=()=>{const act=bt.dataset.act;
-    changeFixes(()=>{S.fixes=S.fixes.filter(f=>!near.includes(f));if(act!=='auto')S.fixes.push({sx,sy,mode:act});});});}
-$('fixLayer').addEventListener('click',e=>{const L=$('fixLayer'),r=L.getBoundingClientRect(),sc=layerScale();
-  const img=$('view'),offx=(r.width-img.naturalWidth*sc)/2,offy=(r.height-img.naturalHeight*sc)/2;
-  const px=(e.clientX-r.left-offx)/sc,py=(e.clientY-r.top-offy)/sc,lim=16/sc;
+    {const before=S.fixes.slice();S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=S.fixes.filter(f=>!near.includes(f));if(act!=='auto')S.fixes.push({sx,sy,mode:act});saveFixes();closeFixPop();afterFixChange(before);}});}
+function fixClick(px,py){const sc=layerScale(),lim=16/sc;
   let bi=-1,bd=lim;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;bi=i;}});
   if(bi>=0){junctionMenu(bi);return;}
   const q=nearestStroke(px,py,12/sc);if(q){pointMenu(q[0],q[1]);return;}
-  closeFixPop();});
+  closeFixPop();}
+
+// ---- dragging a line to reshape it ----
+// A drag is kept like the other fixes, in the source picture's pixels: where the line was grabbed, how far it
+// was moved, and how far along the line the pull reaches. It is applied to the program's finished lines, so
+// it never changes any of the program's own decisions, and redrawing after a drag needs no re-run.
+const REACH={short:5,medium:14,wide:34};           // in line widths
+function reachWork(){return REACH[$('fixReach').value||'medium']*Math.max(2,widthIn()*S.workPPI);}
+function rotVec(vx,vy){if(!S.rot)return[vx,vy];const a=-S.rot*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a);return[vx*ca-vy*sa,vx*sa+vy*ca];}
+function unrotVec(vx,vy){if(!S.rot)return[vx,vy];const a=S.rot*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a);return[vx*ca-vy*sa,vx*sa+vy*ca];}
+const smooth01=x=>x<=0?0:x>=1?1:x*x*(3-2*x);
+// move the lines in P (flat x,y in output working pixels) for one drag; returns the strokes it moved
+function applyOneDrag(P,offs,d){const n=offs.length-1;const[ax,ay]=outPos(...srcToWork(d.sx,d.sy));const[vx,vy]=rotVec(d.dx*S.sx,d.dy*S.sy);
+  const R=Math.max(4,d.r*S.sx),lw=Math.max(2,widthIn()*S.workPPI),orig=Float32Array.from(P),moved=new Set();
+  const arc=s=>{const a=offs[s],b=offs[s+1],L=new Float64Array(b-a);for(let j=a+1;j<b;j++)L[j-a]=L[j-a-1]+Math.hypot(P[2*j]-P[2*j-2],P[2*j+1]-P[2*j-1]);return L;};
+  // move stroke s by (vx,vy) times a weight that falls off along the line from index i0 (or ramps for a straight line)
+  const pull=(s,i0,ux,uy,reach)=>{const a=offs[s],b=offs[s+1];if(b-a<2)return;const L=arc(s),tot=L[L.length-1],s0=L[i0-a];
+    let x0=P[2*a],y0=P[2*a+1],x1=P[2*b-2],y1=P[2*b-1],lx=x1-x0,ly=y1-y0,ll=Math.hypot(lx,ly),dev=0;
+    for(let j=a;j<b;j++)dev=Math.max(dev,ll>1e-6?Math.abs((P[2*j]-x0)*ly-(P[2*j+1]-y0)*lx)/ll:0);
+    const straight=ll>4*lw&&dev<0.35*lw;const t0=tot>0?s0/tot:0;
+    for(let j=a;j<b;j++){const t=tot>0?L[j-a]/tot:0;let w;
+      if(straight){w=t0<0.3?(1-t)/(1-t0):t0>0.7?t/t0:1;}            // a straight line stays straight: it turns about its far end, or moves as a whole
+      else w=1-smooth01(Math.abs(L[j-a]-s0)/reach);
+      if(w<=0)continue;P[2*j]+=ux*w;P[2*j+1]+=uy*w;}moved.add(s);};
+  if(d.j){// a junction: every line ending there moves its end, easing off along the line
+    for(let s=0;s<n;s++){const a=offs[s],b=offs[s+1];if(b-a<2)continue;
+      for(const e of[a,b-1]){if(Math.hypot(orig[2*e]-ax,orig[2*e+1]-ay)>1.5*lw)continue;pull(s,e,vx,vy,Math.min(R,arc(s)[b-a-1]*0.6));}}
+    // ...and a line running through it bends there
+    let bs=-1,bi=-1,bd=1.2*lw;for(let s=0;s<n;s++){if(moved.has(s))continue;for(let j=offs[s]+1;j<offs[s+1]-1;j++){const dd=Math.hypot(orig[2*j]-ax,orig[2*j+1]-ay);if(dd<bd){bd=dd;bs=s;bi=j;}}}
+    if(bs>=0)pull(bs,bi,vx,vy,R);}
+  else{let bs=-1,bi=-1,bd=2*lw;for(let s=0;s<n;s++)for(let j=offs[s];j<offs[s+1];j++){const dd=Math.hypot(P[2*j]-ax,P[2*j+1]-ay);if(dd<bd){bd=dd;bs=s;bi=j;}}
+    if(bs<0)return moved;pull(bs,bi,vx,vy,R);}
+  // lines that end on a moved line stay on it: their end moves with the spot they land on
+  const movedNow=[...moved];
+  for(let s=0;s<n;s++){if(moved.has(s))continue;const a=offs[s],b=offs[s+1];if(b-a<2)continue;
+    for(const e of[a,b-1]){let best=null,bd=0.8*lw;for(const m of movedNow)for(let j=offs[m];j<offs[m+1];j++){const dd=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(dd<bd){bd=dd;best=j;}}
+      if(best==null)continue;const ux=P[2*best]-orig[2*best],uy=P[2*best+1]-orig[2*best+1];if(Math.hypot(ux,uy)<0.05)continue;
+      const L=arc(s);pull(s,e,ux,uy,Math.min(R,L[L.length-1]*0.6));}}
+  return moved;}
+function applyDrags(extra){if(!S.rawStrokes)return S.rawStrokes;const ds=S.fixes.filter(f=>f.mode==='drag');if(extra)ds.push(extra);if(!ds.length)return S.rawStrokes;
+  const P=Float32Array.from(S.rawStrokes);for(const d of ds)applyOneDrag(P,S.offs,d);return P;}
+function redrawDrags(){if(!S.rawStrokes)return;S.strokes=applyDrags();ptsCache=null;markBorder();render();drawFixLayer();}
+// pointer handling on the layer: a press that doesn't move is a click (menus); one that moves is a drag
+let press=null;
+function layerPoint(e){const L=$('fixLayer'),r=L.getBoundingClientRect(),sc=layerScale(),img=$('view');
+  const offx=(r.width-img.naturalWidth*sc)/2,offy=(r.height-img.naturalHeight*sc)/2;return[(e.clientX-r.left-offx)/sc,(e.clientY-r.top-offy)/sc];}
+$('fixLayer').addEventListener('pointerdown',e=>{if(e.button!==0)return;const[px,py]=layerPoint(e),sc=layerScale();
+  let j=-1,bd=12/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;j=i;}});
+  const q=j<0?nearestStroke(px,py,12/sc):null;
+  press={px,py,x0:e.clientX,y0:e.clientY,j,q,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);});
+// where the lines at a junction really meet (the program's junction point can sit a little off them)
+function junctionMeet(J){const geo=pageGeom(),c=jPage(J),lw=Math.max(2,widthIn()*S.workPPI)*geo.k,pts=S.strokes,offs=S.offs,E=[];
+  for(let s=0;s+1<offs.length;s++){if(offs[s+1]-offs[s]<2)continue;for(const e of[offs[s],offs[s+1]-1]){const p=geo.map(pts[2*e],pts[2*e+1]);if(Math.hypot(p[0]-c[0],p[1]-c[1])<2.5*lw)E.push(p);}}
+  if(E.length)return[E.reduce((t,p)=>t+p[0],0)/E.length,E.reduce((t,p)=>t+p[1],0)/E.length];
+  return nearestStroke(c[0],c[1],3*lw)||c;}
+function pressDrag(e){const[px,py]=layerPoint(e),geo=pageGeom();if(press.j>=0&&!press.at)press.at=junctionMeet(S.junctions[press.j]);const at=press.j>=0?press.at:press.q;
+  const[wx,wy]=pageToWorkInternal(at[0],at[1]);const[sx,sy]=workToSrc(wx,wy);
+  const[ox,oy]=unrotVec((px-press.px)/geo.k,(py-press.py)/geo.k);
+  return{mode:'drag',sx,sy,dx:ox/S.sx,dy:oy/S.sy,r:reachWork()/S.sx,j:press.j>=0};}
+$('fixLayer').addEventListener('pointermove',e=>{if(!press)return;
+  if(!press.dragging){if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)<5||(press.j<0&&!press.q))return;press.dragging=true;closeFixPop();}
+  const d=pressDrag(e),P=applyDrags(d),geo=pageGeom(),k=1/layerScale();
+  // preview: the lines that this drag moves, drawn over the picture
+  const Q=Float32Array.from(applyDrags()),moved=applyOneDrag(Q,S.offs,d);let h='';
+  for(const s of moved){let pth='';for(let j=S.offs[s];j<S.offs[s+1];j++){const p=geo.map(P[2*j],P[2*j+1]);pth+=(j===S.offs[s]?'M':'L')+p[0].toFixed(1)+','+p[1].toFixed(1);}
+    h+=`<path d="${pth}" fill="none" stroke="var(--fix)" stroke-width="${3*k}" stroke-linecap="round" opacity=".9"/>`;}
+  drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',h);});
+$('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
+  if(!p.dragging){press=null;fixClick(p.px,p.py);return;}
+  const d=pressDrag(e);press=null;if(Math.hypot(d.dx,d.dy)<0.3){drawFixLayer();return;}
+  S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();S.fixes.push(d);saveFixes();redrawDrags();});
+$('fixLayer').addEventListener('pointercancel',()=>{press=null;drawFixLayer();});
 $('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
   if(S.fixMode&&S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));showView();}
   closeFixPop();drawFixLayer();updateFixBar();});
-$('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();schedule(run,0);});
-$('fixClear').addEventListener('click',()=>{if(!S.fixes.length)return;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();schedule(run,0);});
+// (only drags changed: redraw straight away; anything else: the program runs again)
+function afterFixChange(before){const key=a=>JSON.stringify(a.filter(f=>f.mode!=='drag'));if(key(before)!==key(S.fixes))schedule(run,0);else redrawDrags();}
+$('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
+$('fixClear').addEventListener('click',()=>{if(!S.fixes.length)return;const before=S.fixes;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();afterFixChange(before);});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('fixPop').hidden)closeFixPop();});
 $('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
 window.addEventListener('resize',()=>{placeFixLayer();});
