@@ -315,13 +315,16 @@ function fixClick(px,py){const sc=layerScale(),lim=16/sc;
     if(!q){drawFixLayer();setStatus('No line there: mirror cancelled');return;}
     const[wx,wy]=pageToWorkInternal(q[0],q[1]);const[msx,msy]=workToSrc(wx,wy);
     const f={mode:'mirror',sx:m.sx,sy:m.sy,msx,msy};
-    // (it only changes something when that line really lies opposite this one)
-    const test=Float32Array.from(applyDrags());if(!applyOneMirror(test,S.offs,f).size){drawFixLayer();setStatus('That line is not opposite the first one: mirror cancelled');return;}
+    // (it must actually change something)
+    const test=Float32Array.from(applyDrags());if(!applyOneMirror(test,S.offs,f).size){drawFixLayer();setStatus('Could not mirror that line onto the first one: mirror cancelled');return;}
     S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();
     S.fixes=S.fixes.filter(x=>!m.near.includes(x)||x.mode!=='mirror');S.fixes.push(f);saveFixes();redrawDrags();setStatus('Mirrored');return;}
+  // (a joint takes the click when it is right on it; otherwise a line nearby does, so lines close to a joint can
+  // still be picked; failing both, a joint a little further off)
   let bi=-1,bd=lim;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;bi=i;}});
-  if(bi>=0){junctionMenu(bi);return;}
+  if(bi>=0&&bd<7/sc){junctionMenu(bi);return;}
   const q=nearestStroke(px,py,12/sc);if(q){pointMenu(q[0],q[1]);return;}
+  if(bi>=0){junctionMenu(bi);return;}
   closeFixPop();}
 
 // ---- dragging a line to reshape it ----
@@ -363,25 +366,26 @@ function applyOneDrag(P,offs,d){const n=offs.length-1;const[ax,ay]=outPos(...src
   return moved;}
 // ---- mirroring a line from the other side of the pattern ----
 // A mirror fix is kept as two spots in the source picture's pixels: on the line to change, and on the line to copy.
-// The line to copy is flipped across the pattern's upright centre line; the stretch of the line to change that lies
-// alongside that flipped copy (on its own side of the centre) takes its shape exactly. Where it meets other lines
-// it still meets them (see hold below), and lines that end on it stay on it.
+// Each picked line is taken between its joints (its own ends and the spots where other lines end on it). The line
+// to copy is flipped across the pattern's upright centre line, and the line to change takes its shape exactly.
+// Where it meets other lines it still meets them (see hold below), and lines that end on it stay on it.
 function patternMidX(){const P=S.rawStrokes;let lo=Infinity,hi=-Infinity;for(let j=0;j<P.length;j+=2){if(P[j]<lo)lo=P[j];if(P[j]>hi)hi=P[j];}return(lo+hi)/2;}
 function applyOneMirror(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*S.workPPI),moved=new Set(),orig=Float32Array.from(P);
   const cx=patternMidX(),[tx,ty]=outPos(...srcToWork(m.sx,m.sy)),[qx,qy]=outPos(...srcToWork(m.msx,m.msy));
   const near=(x,y,lim)=>{let bs=-1,bi=-1,bd=lim;for(let s=0;s<n;s++)for(let j=offs[s];j<offs[s+1];j++){const d=Math.hypot(P[2*j]-x,P[2*j+1]-y);if(d<bd){bd=d;bs=s;bi=j;}}return[bs,bi];};
-  const[ts,ti]=near(tx,ty,3*lw),[ss]=near(qx,qy,3*lw);if(ts<0||ss<0)return moved;
-  const side=Math.sign(P[2*ti]-cx)||1,sSide=Math.sign(qx-cx)||-side,edge=0.25*lw;
-  // the line to copy, flipped (only its part on its own side of the centre)
-  const M=[];for(let j=offs[ss];j<offs[ss+1];j++){const x=P[2*j],y=P[2*j+1];if((x-cx)*sSide>=-edge)M.push([2*cx-x,y,j]);}
-  if(M.length<2)return moved;
-  const nearM=(x,y)=>{let bk=0,bd=Infinity;for(let k=0;k<M.length;k++){const d=Math.hypot(M[k][0]-x,M[k][1]-y);if(d<bd){bd=d;bk=k;}}return[bk,bd];};
-  // the stretch of the line to change that runs alongside the copy
-  const a=offs[ts],b=offs[ts+1],lim=8*lw,ok=j=>(P[2*j]-cx)*side>=-edge&&nearM(P[2*j],P[2*j+1])[1]<lim;
-  if(!ok(ti))return moved;let i0=ti,i1=ti;while(i0>a&&ok(i0-1))i0--;while(i1<b-1&&ok(i1+1))i1++;if(i1-i0<3)return moved;
-  let k0=nearM(P[2*i0],P[2*i0+1])[0],k1=nearM(P[2*i1],P[2*i1+1])[0];if(Math.abs(k1-k0)<2)return moved;
-  // (the copy, between the points matching the stretch's two ends, in the same direction)
-  const C=(k0<=k1?M.slice(k0,k1+1):M.slice(k1,k0+1).reverse()).map(p=>[p[0],p[1]]);
+  const[ts,ti]=near(tx,ty,3*lw),[ss,si]=near(qx,qy,3*lw);if(ts<0||ss<0)return moved;
+  // each picked line is taken between its joints: its own ends, and the spots where other lines end on it
+  const piece=(s0,i)=>{const a=offs[s0],b=offs[s0+1]-1;let lo=a,hi=b;
+    for(let s=0;s<n;s++){if(s===s0)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;
+      for(const e of[sa,sb-1]){let bj=-1,bd=1.2*lw;for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(d<bd){bd=d;bj=j;}}
+        if(bj<0)continue;const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
+        if(fromA<1.5*lw||fromB<1.5*lw)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}}
+    return[lo,hi];};
+  const[i0,i1]=piece(ts,ti),[k0,k1]=piece(ss,si);if(i1-i0<3||k1-k0<2||(ts===ss&&!(k1<i0||k0>i1)))return moved;
+  // the line to copy, flipped across the centre, running the same way as the line to change
+  let C=[];for(let j=k0;j<=k1;j++)C.push([2*cx-orig[2*j],orig[2*j+1]]);
+  const dd=(p,j)=>Math.hypot(p[0]-orig[2*j],p[1]-orig[2*j+1]);if(dd(C[0],i0)+dd(C[C.length-1],i1)>dd(C[C.length-1],i0)+dd(C[0],i1))C.reverse();
+  const a=offs[ts],b=offs[ts+1];
   const LC=[0];for(let k=1;k<C.length;k++)LC.push(LC[k-1]+Math.hypot(C[k][0]-C[k-1][0],C[k][1]-C[k-1][1]));const totC=LC[LC.length-1];if(totC<1)return moved;
   // how each end of the stretch is held: partway along the line, or where other lines end too (the point of a
   // V), it stays exactly where it is; an end that rests on another line slides along the copy to meet that
