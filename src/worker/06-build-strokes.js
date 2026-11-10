@@ -593,7 +593,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         if(ia<2||ib>out.length-3)continue;
         const A=out[ia],B=out[ib],ta=[A[0]-out[ia-2][0],A[1]-out[ia-2][1]],tb=[out[ib+2][0]-B[0],out[ib+2][1]-B[1]];
         const na=Math.hypot(ta[0],ta[1])||1,nb=Math.hypot(tb[0],tb[1])||1,ch=Math.hypot(B[0]-A[0],B[1]-A[1]);
-        const turn=angDeg([ta[0]/na,ta[1]/na],[p[0]-out[Math.max(0,ip-2)][0],p[1]-out[Math.max(0,ip-2)][1]].map((v,_,a)=>v/(Math.hypot(a[0],a[1])||1)));
+        // (a point where the two sides meet at a real angle, like the tip of a diamond, stays sharp)
+        if(angDeg([ta[0]/na,ta[1]/na],[tb[0]/nb,tb[1]/nb])>25)continue;
         const m0=[ta[0]/na*ch,ta[1]/na*ch],m1=[tb[0]/nb*ch,tb[1]/nb*ch];const n=ib-ia,br=[];
         for(let j=0;j<=n;j++){const t=j/n,t2=t*t,t3=t2*t;br.push([(2*t3-3*t2+1)*A[0]+(t3-2*t2+t)*m0[0]+(-2*t3+3*t2)*B[0]+(t3-t2)*m1[0],(2*t3-3*t2+1)*A[1]+(t3-2*t2+t)*m0[1]+(-2*t3+3*t2)*B[1]+(t3-t2)*m1[1]]);}
         let dev=0;for(let j=0;j<=n;j++)dev=Math.max(dev,Math.hypot(br[j][0]-out[ia+j][0],br[j][1]-out[ia+j][1]));if(dev>0.5*med)continue;
