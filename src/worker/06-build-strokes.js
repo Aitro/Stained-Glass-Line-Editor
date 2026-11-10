@@ -324,10 +324,18 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const straightSide=dir=>{const m=10*K;if(!closed&&(dir<0?i-m<0:i+m>n-1))return false;const g=t=>Q[closed?((i+dir*t)%n+n)%n:i+dir*t];
         const A=g(Math.round(0.5*K)),B=g(m),dx=B[0]-A[0],dy=B[1]-A[1],dl=Math.hypot(dx,dy)||1;let dv=0;
         for(let t=Math.round(0.5*K);t<=m;t++){const q=g(t);dv=Math.max(dv,Math.abs((q[0]-A[0])*dy-(q[1]-A[1])*dx)/dl);}const ax=Math.min(Math.abs(dx),Math.abs(dy))/dl;return dv<0.6*u&&dl>8*K&&ax<0.09;};
-      if(ah<0.7*ang[jj]&&!(ah>=0.55*ang[jj]&&straightSide(-1)&&straightSide(1)))continue;
+      // (the same for two long, very straight runs at a slant that meet at a clear angle, like the points
+      // of a diamond border, where the scan rounded the tip)
+      const longSide=dir=>{const m=20*K;if(!closed&&(dir<0?i-m<0:i+m>n-1))return null;const g=t=>Q[closed?((i+dir*t)%n+n)%n:i+dir*t];
+        // (a line joining partway along makes a small bulge of ink: a short stretch may stray a little)
+        const A=g(Math.round(1.5*K)),B=g(m),dx=B[0]-A[0],dy=B[1]-A[1],dl=Math.hypot(dx,dy)||1;let dv=0,off=0,cnt=0;
+        for(let t=Math.round(1.5*K);t<=m;t++){const q=g(t),e=Math.abs((q[0]-A[0])*dy-(q[1]-A[1])*dx)/dl;dv=Math.max(dv,e);cnt++;if(e>0.3*u)off++;}
+        return dv<0.8*u&&off<=0.15*cnt&&dl>16*K?[dx/dl,dy/dl]:null;};
+      let tip=false;if(ah>=0.4*ang[jj]){const s1=longSide(-1),s2=longSide(1);if(s1&&s2){const c=-(s1[0]*s2[0]+s1[1]*s2[1]);tip=Math.acos(Math.max(-1,Math.min(1,c)))>60*Math.PI/180;}}
+      if(ah<0.7*ang[jj]&&!(ah>=0.55*ang[jj]&&straightSide(-1)&&straightSide(1))&&!tip)continue;
       // (a small round cap, like the top of a teardrop, keeps turning past the tip: over twice the
       // distance it turns far more; a real corner's sides run on straight-ish, so it turns about the same)
-      {const k2=2*K;if(closed||(i-k2>=0&&i+k2<n)){const a2=Q[closed?(i-k2+n)%n:i-k2],b2=Q[closed?(i+k2)%n:i+k2];
+      if(!tip){const k2=2*K;if(closed||(i-k2>=0&&i+k2<n)){const a2=Q[closed?(i-k2+n)%n:i-k2],b2=Q[closed?(i+k2)%n:i+k2];
         const w1=[Q[i][0]-a2[0],Q[i][1]-a2[1]],w2=[b2[0]-Q[i][0],b2[1]-Q[i][1]];
         const a2g=Math.acos(Math.max(-1,Math.min(1,(w1[0]*w2[0]+w1[1]*w2[1])/(norm2(w1)*norm2(w2)+1e-9))));
         if(ah<0.8*ang[jj]&&a2g>1.3*ang[jj])continue;}}
@@ -739,7 +747,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const F=fitted[a.cF];const ni=p=>{let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});return bi;};
       const sd=(p,q)=>{const i=ni(p);const f0=F[Math.max(0,i-3)],f1=F[Math.min(F.length-1,i+3)];return Math.sign((f1[0]-f0[0])*(q[1]-F[i][1])-(f1[1]-f0[1])*(q[0]-F[i][0]));};
       let best=null;
-      for(const b of its){if(b===a||b.cF!==a.cF||b.ci===a.ci||(landAng.get(b.kk)??0)<30)continue;const pb=land.get(b.kk);
+      for(const b of its){if(b===a||b.cF!==a.cF||b.ci===a.ci||(landAng.get(b.kk)??0)<35)continue;const pb=land.get(b.kk);
         const ahead=(pb[0]-pa[0])*fw[0]+(pb[1]-pa[1])*fw[1],gap=Math.hypot(pb[0]-pa[0],pb[1]-pa[1]);
         if(ahead<=0||gap>8*med||sd(pa,a.e.anchor)!==sd(pb,b.e.anchor))continue;
         // and the two run together into one band of doubled ink along the way (they touch, not just near)

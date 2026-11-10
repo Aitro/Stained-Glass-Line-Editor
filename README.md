@@ -30,8 +30,9 @@ Fixing a spot by hand:
 - Click a dot to choose which two lines run straight through it (the colored spokes on the picture match the colored buttons), to have no line run through, or to make it a sharp corner or a smooth curve.
 - Click anywhere else on a line to put a sharp corner there, or to make a corner smooth.
 - **Drag** a line to reshape it: the line bends toward where you drag, easing off along the line on either side. **Drag reach** (under the preview) sets how far along the line the pull goes. A straight line stays straight (it pivots, or moves as a whole). Drag a junction dot to move the junction; every line meeting there follows. Lines that end on a line you move stay attached to it.
+- **Mirror** a line from the other side of the pattern: click the line you want to change, choose **Mirror the matching line from the other side…**, then click the line to copy. The copy is flipped across the pattern's upright centre line and the line you picked takes its shape. Where several lines meet at its end (such as the point of a V), that end stays put; an end that rests on another line slides along to meet it; lines that end on the changed line stay attached. Press Esc to cancel before the second click.
 - Dragging redraws straight away; the program's own decisions aren't re-run, so a line dragged far enough to cross another won't join it automatically.
-- Fixed spots turn green (a dragged spot shows a green diamond). **Automatic** on a spot removes its fix or drag; **Undo** and **Clear all fixes** are under the preview.
+- Fixed spots turn green (a dragged spot shows a green diamond). **Automatic** on a spot removes its fix, drag or mirror; **Undo** and **Clear all fixes** are under the preview.
 - Fixes are remembered in your browser for that picture, and stay put when you change the size or line width.
 
 Optional:
