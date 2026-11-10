@@ -603,14 +603,41 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     // (and of two lines there that run on parallel, a long straight line carries on into the one that lies
     // on its own extension, not the one beside it)
     const forced=[];
-    if(lst.length>=3){const fitL=it=>{const E=edges[it[0]],tot=E.L[E.L.length-1];if(tot<16*med)return null;const t1=Math.min(tot-2*med,30*med),pts=[];
-        for(let t=8*med;t<=t1;t+=Math.max(1,u))pts.push(at(E.P,it[1]===0?t:tot-t,E.L));const A=pts[0],B=pts[pts.length-1],ab=[B[0]-A[0],B[1]-A[1]],l=Math.hypot(ab[0],ab[1]);
-        if(l<4*med||!pts.every(q=>Math.abs((q[0]-A[0])*ab[1]-(q[1]-A[1])*ab[0])/l<0.3*med))return null;return{A,d:[ab[0]/l,ab[1]/l],pts};};
-      const fl=info.map(fitL);
-      for(let x=0;x<info.length;x++){if(!fl[x])continue;const sc=[];
-        for(let y=0;y<info.length;y++){if(y===x||!fl[y])continue;if(-(fl[x].d[0]*fl[y].d[0]+fl[x].d[1]*fl[y].d[1])<Math.cos(12*Math.PI/180))continue;
-          let s2=0;for(const q of fl[y].pts)s2+=Math.abs((q[0]-fl[x].A[0])*fl[x].d[1]-(q[1]-fl[x].A[1])*fl[x].d[0]);sc.push([s2/fl[y].pts.length,y]);}
-        sc.sort((p,q)=>p[0]-q[0]);if(sc.length&&sc[0][0]<0.5*med&&(sc.length<2||sc[1][0]>1.0*med))forced.push([x,sc[0][1],sc.length>=2||sc[0][0]<0.3*med]);}}
+    if(lst.length>=3){
+      // (a long border line cut short by another junction just beyond, where a third line branches off it, is
+      // followed on through up to three junctions into each piece that roughly carries on: which of them really
+      // continues it is settled below, by which lines up with the line on the other side)
+      const dir=(Q,LQ,a,b)=>{const p=at(Q,a,LQ),q=at(Q,b,LQ),n=Math.hypot(q[0]-p[0],q[1]-p[1])||1;return[(q[0]-p[0])/n,(q[1]-p[1])/n];};
+      const paths=it=>{const E=edges[it[0]];let P=E.P.map(q=>q.slice());if(it[1]===1)P.reverse();const L=arclen(P),tot0=L[L.length-1];
+        if(tot0>=16*med||E.closed)return[{P,L}];const out=[];
+        const go=(Z0,fk,from,hops,seen)=>{const LZ0=arclen(Z0),tz=LZ0[LZ0.length-1];
+          if(tz>=30*med||hops>=3||fk==null||seen.has(fk)){if(hops&&tz>=40*med)out.push({P:Z0,L:LZ0,from:tot0,hops});return;}
+          const dIn=dir(Z0,LZ0,Math.max(0,tz-12*med),tz);let any=false;
+          for(const[jj,ss]of inc.get(fk)||[]){if(jj===from)continue;const F=edges[jj];if(F.closed)continue;let R=F.P.map(q=>q.slice());if(ss===1)R.reverse();const LR=arclen(R),tr=LR[LR.length-1];
+            if(tr<3*med)continue;const dOut=dir(R,LR,Math.min(tr,1.5*med),Math.min(tr,6*med));if(dIn[0]*dOut[0]+dIn[1]*dOut[1]<Math.cos(15*Math.PI/180))continue;
+            any=true;go([...Z0,...R.slice(1)],find(ss===0?F.e:F.a),jj,hops+1,new Set([...seen,fk]));}
+          if(!any&&hops&&tz>=40*med)out.push({P:Z0,L:LZ0,from:tot0,hops});};
+        go(P,find(it[1]===0?E.e:E.a),it[0],0,new Set([find(k)]));return out.length?out:[{P,L}];};
+      const fitL=({P:EP,L:EL,from,hops})=>{const tot=EL[EL.length-1];if(tot<16*med)return null;
+        // (followed on through a junction: measured beyond the short piece, which may bend where it starts)
+        const t0=from!=null?Math.max(8*med,from+4*med):8*med,t1=Math.min(tot-2*med,t0+22*med),pts=[];
+        for(let t=t0;t<=t1;t+=Math.max(1,u))pts.push(at(EP,t,EL));if(pts.length<2)return null;const A=pts[0],B=pts[pts.length-1],ab=[B[0]-A[0],B[1]-A[1]],l=Math.hypot(ab[0],ab[1]);
+        if(l<4*med)return null;{const dv=pts.map(q=>Math.abs((q[0]-A[0])*ab[1]-(q[1]-A[1])*ab[0])/l);
+          // (followed on through two or more junctions, a ruler-straight line may have a short bulge of ink where another
+          // line joins partway)
+          const ok=!(hops>=2)?dv.every(e=>e<0.3*med):(Math.max(...dv)<0.8*med&&dv.filter(e=>e>=0.3*med).length<=0.15*dv.length&&dv.filter(e=>e>=0.1*med).length<=0.2*dv.length);if(!ok)return null;}
+        return{A,d:[ab[0]/l,ab[1]/l],pts,short:tot<40*med,ext:from!=null,tot};};
+      const fl=info.map(it=>paths(it).map(fitL).filter(Boolean));
+      for(let x=0;x<info.length;x++){if(!fl[x].length)continue;const sc=[];let short=false;
+        for(let y=0;y<info.length;y++){if(y===x||!fl[y].length)continue;let bs=Infinity,bsh=false;
+          for(const fx of fl[x])for(const fy of fl[y]){if(-(fx.d[0]*fy.d[0]+fx.d[1]*fy.d[1])<Math.cos(12*Math.PI/180))continue;
+            // (a line followed on through a junction only carries on into another long line)
+            if((fx.ext&&fy.tot<40*med)||(fy.ext&&fx.tot<40*med))continue;
+            let s2=0;for(const q of fy.pts)s2+=Math.abs((q[0]-fx.A[0])*fx.d[1]-(q[1]-fx.A[1])*fx.d[0]);s2/=fy.pts.length;if(s2<bs){bs=s2;bsh=fx.short;}}
+          if(bs<Infinity)sc.push([bs,y,bsh]);}
+        sc.sort((p,q)=>p[0]-q[0]);
+        // (measured from a shorter piece the fit is rougher: allow it a little more)
+        const lim=sc.length&&sc[0][2]?0.9*med:0.5*med;if(sc.length&&sc[0][0]<lim&&(sc.length<2||sc[1][0]>Math.max(1.0*med,2*lim)))forced.push([x,sc[0][1],sc.length>=2||sc[0][0]<0.3*med]);}}
     if(lst.length===2){const ang=angDeg(info[0][3],info[1][3]);const corner=ang<145;
       partner.set(key(info[0][0],info[0][1]),[info[1][0],info[1][1],corner]);partner.set(key(info[1][0],info[1][1]),[info[0][0],info[0][1],corner]);return;}
     const allp=[];for(let x=0;x<info.length;x++)for(let y=x+1;y<info.length;y++)allp.push([angDeg(info[x][3],info[y][3]),x,y]);
