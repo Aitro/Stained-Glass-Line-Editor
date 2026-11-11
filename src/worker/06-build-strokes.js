@@ -331,7 +331,15 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
             if(sh<6*med&&dc>0.4*med){const k=0.4*med/dc;cp=[np[0]+(cp[0]-np[0])*k,np[1]+(cp[1]-np[1])*k];}}
           pieces.push([cp]);weights.push([PIN]);}}
       pieces.push(Q);weights.push(wq);});
-    if(C.closed){const GC=GAP*1.5;/* (where a closed line starts and ends: low trust, but not a junction) */weights[weights.length-1][weights[weights.length-1].length-1]=GC;weights[0][0]=GC;pieces.push([pieces[0][0].slice()]);weights.push([GC]);}
+    if(C.closed){const GC=GAP*1.5;
+      // (a closed line made of several pieces closes at a junction; where its two ends meet there at a clear angle,
+      // like the tip of a diamond border, that point is pinned like a corner, so it stays sharp rather than cut flat)
+      const[lj,lRev]=C.seq[C.seq.length-1],[fj,fRev]=C.seq[0],pe=C.seq.length>1?ends.get(key(lj,lRev?0:1)):null,ce=C.seq.length>1?ends.get(key(fj,fRev?1:0)):null;
+      const np=ce&&nodePos.get(ce.node);
+      const turn=pe&&ce&&pe.dir&&ce.dir?Math.abs(pe.dir[0]*ce.dir[1]-pe.dir[1]*ce.dir[0]):0;   // (sine of the angle between the two ends' lines)
+      if(pe&&ce&&np&&pe.anchor&&ce.anchor&&turn>Math.sin(30*Math.PI/180)){let cp=lsqPoint([pe.anchor,ce.anchor],[pe.dir,ce.dir],np);if(Math.hypot(cp[0]-np[0],cp[1]-np[1])>3*u)cp=np.slice();
+        pieces.unshift([cp]);weights.unshift([PIN]);pieces.push([cp.slice()]);weights.push([PIN]);}
+      else{/* (where a closed line starts and ends: low trust, but not a junction) */weights[weights.length-1][weights[weights.length-1].length-1]=GC;weights[0][0]=GC;pieces.push([pieces[0][0].slice()]);weights.push([GC]);}}
     C.raw=[].concat(...pieces);C.w=[].concat(...weights);}
   // corners inside traced lines
   const K=Math.max(4,Math.round(1.8*u));

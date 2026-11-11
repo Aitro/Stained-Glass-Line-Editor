@@ -13,7 +13,7 @@ worker.onmessage=e=>{const m=e.data;
   else if(m.type==='loaded'){if(m.id!==S.loadId)return;S.otsu=m.otsu;if($('threshAuto').checked)$('thresh').value=m.otsu;updateLabels();S.running=false;run();}
   else if(m.type==='done'){S.running=false;
     if(S.pending){S.pending=false;run();return;}
-    S.rawStrokes=m.pts;S.rawOffs=m.offs;S.rawHw=m.hw;S.rawFill=m.fill;S.rawFcurve=m.fcurve;S.areaCache=null;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];S.strokes=applyDrags();markBorder();render();drawFixLayer();
+    S.rawStrokes=m.pts;S.rawOffs=m.offs;S.rawHw=m.hw;S.rawFill=m.fill;S.rawFcurve=m.fcurve;S.areaCache=null;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;if(m.axes)S.axes=m.axes;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];S.strokes=applyDrags();markBorder();render();drawFixLayer();
     setStatus('Done in '+(m.ms/1000).toFixed(1)+' s',false);}
   else if(m.type==='error'){S.running=false;setStatus('Could not process this image: '+m.message,false);}};
 function setStatus(t,busy){$('statusText').textContent=t;$('status').classList.toggle('busy',!!busy);}
@@ -148,8 +148,11 @@ function drawStrokes(g,geo,color,wIn,bIn){const offs=S.offs,n=offs.length-1;cons
     for(let s=0;s<n;s++){if((useB?S.borderFlags[s]:0)!==pass)continue;if(offs[s+1]-offs[s]<1)continue;
       const P=allStrokePts(geo,wIn,bIn)[s];
       g.moveTo(P[0][0],P[0][1]);if(P.length===1)g.lineTo(P[0][0]+.01,P[0][1]);
-      for(let j=1;j<P.length;j++)g.lineTo(P[j][0],P[j][1]);}
+      for(let j=1;j<P.length;j++)g.lineTo(P[j][0],P[j][1]);if(isLoop(P,wIn))g.closePath();}
     g.stroke();}}
+// (a line that ends where it began, like a whole border, is closed, so the spot where its ends meet is drawn as a
+// corner like any other, not as two line ends side by side)
+function isLoop(P,wIn){return P.length>3&&Math.hypot(P[0][0]-P[P.length-1][0],P[0][1]-P[P.length-1][1])<0.5*wIn*OUT_PPI;}
 
 function render(){if(!S.strokes)return;const geo=pageGeom();
   const c=document.createElement('canvas');c.width=geo.pw;c.height=geo.ph;const g=c.getContext('2d');
@@ -172,7 +175,7 @@ function buildSVG(geo){const offs=S.offs,n=offs.length-1;const useB=$('borderOn'
   const group=(pass,w)=>{let out=`<g fill="none" stroke="#000" stroke-width="${(w*OUT_PPI).toFixed(3)}" stroke-linecap="round" stroke-linejoin="miter" stroke-miterlimit="10">\n`;
     for(let s=0;s<n;s++){if((useB?S.borderFlags[s]:0)!==pass)continue;if(offs[s+1]-offs[s]<2)continue;let d='';
       const P=allStrokePts(geo,widthIn(),borderIn())[s];
-      P.forEach((p,j)=>{d+=(j===0?'M':'L')+p[0].toFixed(2)+','+p[1].toFixed(2);});
+      P.forEach((p,j)=>{d+=(j===0?'M':'L')+p[0].toFixed(2)+','+p[1].toFixed(2);});if(isLoop(P,w))d+='Z';
       out+=`<path d="${d}"/>\n`;}return out+'</g>\n';};
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${(geo.pw/OUT_PPI).toFixed(4)}in" height="${(geo.ph/OUT_PPI).toFixed(4)}in" viewBox="0 0 ${geo.pw} ${geo.ph}">\n`+
     ($('transparent').checked?'':'<rect width="100%" height="100%" fill="#fff"/>\n')+group(0,widthIn())+(useB?group(1,borderIn()):'')+filletSVG(geo)+'</svg>\n';}
@@ -221,7 +224,7 @@ const FIXCOL=['#d2392c','#1f6fd1','#e08a00','#7b3fbf','#13917b','#c2185b','#5d6b
 function srcToWork(sx,sy){const cr=S.crop;return[(sx-cr.x+PAD)*S.sx-0.5,(sy-cr.y+PAD)*S.sy-0.5];}   // -> worker's own x,y
 function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)/S.sy+cr.y-PAD];}
 function areasForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='area').map(f=>{const c=[[f.x0,f.y0],[f.x1,f.y1]].map(([x,y])=>srcToWork(x,y));
-  return{x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1])};});}
+  return{x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1]),flip:f.flip||'lr'};});}
 function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)&&f.mode!=='area').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
 function saveFixes(){try{if(S.fixKey)localStorage.setItem(S.fixKey,JSON.stringify(S.fixes));}catch(e){}updateFixBar();}
 function loadFixes(name,w,h){S.fixKey='lll-fixes:'+name+':'+w+'x'+h;S.fixes=[];S.fixSel=null;S.undo=[];
@@ -377,6 +380,12 @@ function applyOneDrag(P,offs,d){const n=offs.length-1;const[ax,ay]=outPos(...src
 // Each picked line is taken between its joints (its own ends and the spots where other lines end on it). The line
 // to copy is flipped across the pattern's upright centre line, and the line to change takes its shape exactly.
 // Where it meets other lines it still meets them (see hold below), and lines that end on it stay on it.
+// (the flip used for mirroring an area, in the finished lines' own coordinates: across the centre line the worker
+// found, once it has run with an area; until then across the middle of the drawing)
+function mirrorFn(flip){const A=S.axes&&S.axes[flip==='tb'?'tb':'lr'];
+  if(A){const c=outPos(A.cx,A.cy),u=rotVec(A.u[0],A.u[1]);return(x,y)=>{const dx=x-c[0],dy=y-c[1],k=2*(dx*u[0]+dy*u[1]);return[c[0]+k*u[0]-dx,c[1]+k*u[1]-dy];};}
+  const cx=patternMidX(),cy=patternMidY();return flip==='tb'?(x,y)=>[x,2*cy-y]:(x,y)=>[2*cx-x,y];}
+function patternMidY(){const P=S.rawStrokes;let lo=Infinity,hi=-Infinity;for(let j=1;j<P.length;j+=2){if(P[j]<lo)lo=P[j];if(P[j]>hi)hi=P[j];}return(lo+hi)/2;}
 function patternMidX(){const P=S.rawStrokes;let lo=Infinity,hi=-Infinity;for(let j=0;j<P.length;j+=2){if(P[j]<lo)lo=P[j];if(P[j]>hi)hi=P[j];}return(lo+hi)/2;}
 function applyOneMirror(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*S.workPPI),moved=new Set(),orig=Float32Array.from(P);
   const cx=patternMidX(),[tx,ty]=outPos(...srcToWork(m.sx,m.sy)),[qx,qy]=outPos(...srcToWork(m.msx,m.msy));
@@ -460,18 +469,19 @@ function pressDrag(e){const[px,py]=layerPoint(e),geo=pageGeom();if(press.j>=0&&!
   return{mode:'drag',sx,sy,dx:ox/S.sx,dy:oy/S.sy,r:reachWork()/S.sx,j:press.j>=0};}
 // (the box being drawn, and the matching box on the other side that it will copy from)
 function areaPreview(px,py){const k=1/layerScale(),geo=pageGeom(),b=[Math.min(press.px,px),Math.min(press.py,py),Math.max(press.px,px),Math.max(press.py,py)];
-  const cxp=geo.map(patternMidX(),0)[0],m=[2*cxp-b[2],b[1],2*cxp-b[0],b[3]];
+  const mf=mirrorFn(S.areaFlip),corners=[[b[0],b[1]],[b[2],b[1]],[b[2],b[3]],[b[0],b[3]]].map(([x,y])=>{const o=outPos(...pageToWorkInternal(x,y)),q=mf(o[0],o[1]);return geo.map(q[0],q[1]);});
   return`<rect class="area" x="${b[0]}" y="${b[1]}" width="${b[2]-b[0]}" height="${b[3]-b[1]}" style="stroke-width:${2*k}px"/>`+
-    `<rect class="area src" x="${m[0]}" y="${m[1]}" width="${m[2]-m[0]}" height="${m[3]-m[1]}" style="stroke-width:${2*k}px;stroke-dasharray:${6*k} ${4*k}"/>`+seamDots(b,k);}
+    `<polygon class="area src" points="${corners.map(q=>q[0]+','+q[1]).join(' ')}" style="stroke-width:${2*k}px;stroke-dasharray:${6*k} ${4*k}"/>`+seamDots(b,k);}
 // (where lines cross the edge of the box: green where the copy will line up with the line outside, red where the
 // two sides draw it apart or only one side has it, so the edge is better moved)
-function seamDots(b,k){if(!S.strokes||!S.offs)return'';const geo=pageGeom(),cx=patternMidX(),lw=Math.max(2,widthIn()*S.workPPI);
+function seamDots(b,k){if(!S.strokes||!S.offs)return'';const geo=pageGeom(),mf=mirrorFn(S.areaFlip),lw=Math.max(2,widthIn()*S.workPPI);
   const c=[[b[0],b[1]],[b[2],b[3]]].map(([x,y])=>outPos(...pageToWorkInternal(x,y)));
-  const T=[Math.min(c[0][0],c[1][0]),Math.min(c[0][1],c[1][1]),Math.max(c[0][0],c[1][0]),Math.max(c[0][1],c[1][1])],M=[2*cx-T[2],T[1],2*cx-T[0],T[3]];
+  const T=[Math.min(c[0][0],c[1][0]),Math.min(c[0][1],c[1][1]),Math.max(c[0][0],c[1][0]),Math.max(c[0][1],c[1][1])],mc=[[T[0],T[1]],[T[2],T[3]],[T[0],T[3]],[T[2],T[1]]].map(([x,y])=>mf(x,y)),
+    M=[Math.min(...mc.map(q=>q[0])),Math.min(...mc.map(q=>q[1])),Math.max(...mc.map(q=>q[0])),Math.max(...mc.map(q=>q[1]))];
   const inB=(x,y,q)=>x>q[0]&&x<q[2]&&y>q[1]&&y<q[3];
   const crossings=(q,flip)=>{const out=[],P=S.strokes,o=S.offs;for(let s=0;s+1<o.length;s++)for(let j=o[s];j+1<o[s+1];j++){const ax=P[2*j],ay=P[2*j+1],bx=P[2*j+2],by=P[2*j+3];
       if(inB(ax,ay,q)===inB(bx,by,q))continue;let lo=0,hi=1;const ia=inB(ax,ay,q);for(let t=0;t<20;t++){const mid=(lo+hi)/2;if(inB(ax+(bx-ax)*mid,ay+(by-ay)*mid,q)===ia)lo=mid;else hi=mid;}
-      const x=ax+(bx-ax)*lo,y=ay+(by-ay)*lo;out.push(flip?[2*cx-x,y]:[x,y]);}return out;};
+      const x=ax+(bx-ax)*lo,y=ay+(by-ay)*lo;out.push(flip?mf(x,y):[x,y]);}return out;};
   const mine=crossings(T,false),theirs=crossings(M,true);let h='';
   const dot=(p,good)=>{const q=geo.map(p[0],p[1]);h+=`<circle class="seam ${good?'ok':'bad'}" cx="${q[0]}" cy="${q[1]}" r="${5*k}" style="stroke-width:${1.5*k}px"/>`;};
   const used=new Set();
@@ -490,14 +500,15 @@ $('fixLayer').addEventListener('pointermove',e=>{if(!press)return;
 $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
   if(p.area){press=null;const[px,py]=layerPoint(e),sc=layerScale();if(!p.dragging||Math.abs(px-p.px)<8/sc||Math.abs(py-p.py)<8/sc){drawFixLayer();return;}
     const c=[[Math.min(p.px,px),Math.min(p.py,py)],[Math.max(p.px,px),Math.max(p.py,py)]].map(([x,y])=>workToSrc(...pageToWorkInternal(x,y)));
-    const f={mode:'area',x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1])};
+    const f={mode:'area',x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1]),flip:S.areaFlip==='tb'?'tb':'lr'};
     S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=S.fixes.slice();S.fixes.push(f);saveFixes();setAreaMode(false);afterFixChange(before);return;}
   if(!p.dragging){press=null;fixClick(p.px,p.py);return;}
   const d=pressDrag(e);press=null;if(Math.hypot(d.dx,d.dy)<0.3){drawFixLayer();return;}
   S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();S.fixes.push(d);saveFixes();redrawDrags();});
 $('fixLayer').addEventListener('pointercancel',()=>{press=null;drawFixLayer();});
-function setAreaMode(on){S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixLayer').classList.toggle('picking-area',on);
+function setAreaMode(on){S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixAreaFlip').hidden=!on;$('fixLayer').classList.toggle('picking-area',on);
   $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
+S.areaFlip='lr';$('fixAreaFlip').addEventListener('change',e=>{S.areaFlip=e.target.value;});
 $('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;setAreaMode(!S.areaMode);});
 $('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
   if(S.fixMode&&S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));showView();}
@@ -539,7 +550,7 @@ document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',(
 document.querySelectorAll('[data-zoom]').forEach(b=>b.addEventListener('click',()=>{S.zoom=b.dataset.zoom;
   document.querySelectorAll('[data-zoom]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));applyZoom();}));
 
-function loadFile(file){if(!file||!/^image\//.test(file.type)){setStatus('That file is not an image. Try a PNG or JPG.',false);return;}
+function loadFile(file){if(!file||!/^image\//.test(file.type)){setStatus('That file is not an image. Try a PNG or JPG.',false);return;}S.axes=null;
   const url=URL.createObjectURL(file);const img=new Image();
   img.onload=()=>{loadImage(img,file.name.replace(/\.[^.]+$/,''),false);URL.revokeObjectURL(url);};
   img.onerror=()=>setStatus('Could not read that image. Try exporting it as PNG or JPG.',false);img.src=url;}

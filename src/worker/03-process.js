@@ -6,24 +6,42 @@ function process(p){
   const t=p.auto?otsuT:p.threshold;const m=new Uint8Array(W*H);
   for(let i=0;i<W*H;i++)m[i]=p.invert?(gray[i]>=t?1:0):(gray[i]<t?1:0);
   // mirrored areas (picked by hand): inside each box the picture is replaced by the matching spot on the other side
-  // of the pattern's upright centre line, flipped. Where a line crosses the box's edge, the two sides may draw it a
+  // of the pattern's centre line (upright, or level for top-to-bottom; see symAxis), flipped. Where a line crosses the box's edge, the two sides may draw it a
   // little apart: near the edge the copy is shifted so each line meets its own line outside exactly, easing back to
   // an exact copy further in. Right at the edge both pictures are kept, so crossing lines stay joined.
   const areas=Array.isArray(p.areas)?p.areas.filter(a=>a&&[a.x0,a.y0,a.x1,a.y1].every(isFinite)):[];
-  if(areas.length){let lo=W,hi=-1;for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(m[y*W+x]){if(x<lo)lo=x;if(x>hi)hi=x;}
-    if(hi>lo){const c2=lo+hi,src=m.slice(),at=(x,y)=>{x=Math.round(x);y=Math.round(y);return x>=0&&x<W&&y>=0&&y<H?src[y*W+x]:0;},mirAt=(x,y)=>at(c2-x,y);
-      for(const a of areas){const x0=Math.max(1,Math.floor(a.x0)),x1=Math.min(W-2,Math.ceil(a.x1)),y0=Math.max(1,Math.floor(a.y0)),y1=Math.min(H-2,Math.ceil(a.y1));if(x1-x0<4||y1-y0<4)continue;
+  let axes=null,axesOut=null;
+  if(areas.length){const src=m.slice(),at=(x,y)=>{x=Math.round(x);y=Math.round(y);return x>=0&&x<W&&y>=0&&y<H?src[y*W+x]:0;};
+    axes={lr:symAxis(src,'lr'),tb:symAxis(src,'tb')};
+    const areaAxes=[];axesOut=axes;axes.areas=areaAxes;
+    {for(const a of areas){const G=axes[a.flip==='tb'?'tb':'lr'];areaAxes.push(null);if(!G)continue;
+        const A=refineAxis(src,G,a.flip==='tb'?'tb':'lr',a);areaAxes[areaAxes.length-1]=A;const cx=A.cx,cy=A.cy,u=A.u;
+        // (reflected across the pattern's centre line: through (cx,cy) along u)
+        const mirAt=(x,y)=>{const dx=x-cx,dy=y-cy,k=2*(dx*u[0]+dy*u[1]);return at(cx+k*u[0]-dx,cy+k*u[1]-dy);};let x0=Math.max(1,Math.floor(a.x0)),x1=Math.min(W-2,Math.ceil(a.x1)),y0=Math.max(1,Math.floor(a.y0)),y1=Math.min(H-2,Math.ceil(a.y1));if(x1-x0<4||y1-y0<4)continue;
         // (where lines cross each edge, in the picture and in the copy: the middles of the runs of ink along it)
-        const edges=[[x0,y0,1,0,x1-x0],[x0,y1,1,0,x1-x0],[x0,y0,0,1,y1-y0],[x1,y0,0,1,y1-y0]],widths=[],cross=[];
         const runs=(f,E)=>{const out=[];let st=-1;for(let t=0;t<=E[4]+1;t++){const v=t<=E[4]&&f(E[0]+E[2]*t,E[1]+E[3]*t);if(v&&st<0)st=t;if(!v&&st>=0){out.push([(st+t-1)/2,t-st]);st=-1;}}return out;};
-        for(const E of edges){const ro=runs(at,E),rm=runs(mirAt,E);for(const r of ro)widths.push(r[1]);cross.push([E,ro,rm]);}
+        const edgesOf=()=>[[x0,y0,1,0,x1-x0],[x0,y1,1,0,x1-x0],[x0,y0,0,1,y1-y0],[x1,y0,0,1,y1-y0]];
+        const widths=[];for(const E of edgesOf())for(const r of runs(at,E))widths.push(r[1]);
         widths.sort((p,q)=>p-q);const lw=Math.max(2,Math.min(40,widths.length?widths[widths.length>>1]:4));
+        // (each line meets the nearest unclaimed line of the copy, if one is close enough)
+        const pair=(ro,rm)=>{const c=[];for(let i=0;i<ro.length;i++)for(let j=0;j<rm.length;j++){const d=Math.abs(ro[i][0]-rm[j][0]);if(d<=Math.max(2.5*lw,0.75*(ro[i][1]+rm[j][1])))c.push([d,i,j]);}
+          c.sort((p,q)=>p[0]-q[0]);const ui=new Set(),uj=new Set(),out=[];for(const[d,i,j]of c){if(ui.has(i)||uj.has(j))continue;ui.add(i);uj.add(j);out.push([i,j,d]);}return out;};
+        // (each edge is nudged a little, in or out, to where the lines on both sides agree best)
+        const K=Math.round(2.5*lw),cost=E=>{const ro=runs(at,E),rm=runs(mirAt,E),pr=pair(ro,rm);let c=2.5*lw*(ro.length+rm.length-2*pr.length);for(const q of pr)c+=q[2];return c;};
+        for(let k=0;k<4;k++){let bo=0,bc=Infinity;for(let o=-K;o<=K;o++){const nx0=x0+(k===2?o:0),nx1=x1+(k===3?o:0),ny0=y0+(k===0?o:0),ny1=y1+(k===1?o:0);
+            if(nx0<1||ny0<1||nx1>W-2||ny1>H-2||nx1-nx0<4||ny1-ny0<4)continue;const E=[[nx0,ny0,1,0,nx1-nx0],[nx0,ny1,1,0,nx1-nx0],[nx0,ny0,0,1,ny1-ny0],[nx1,ny0,0,1,ny1-ny0]][k];
+            const c=cost(E)+0.02*lw*Math.abs(o);if(c<bc){bc=c;bo=o;}}
+          if(k===0)y0+=bo;else if(k===1)y1+=bo;else if(k===2)x0+=bo;else x1+=bo;}
+        A.box=[x0,y0,x1,y1];
+        const cross=[];for(const E of edgesOf())cross.push([E,runs(at,E),runs(mirAt,E)]);
         // (each line crossing an edge, with how far the copy must move along the edge to meet it)
-        const pins=[];for(const[E,ro,rm]of cross)for(const r of ro){let best=null,bd=5*lw;for(const q of rm){const dd=Math.abs(q[0]-r[0]);if(dd<bd){bd=dd;best=q;}}
-          if(best)pins.push({x:E[0]+E[2]*r[0],y:E[1]+E[3]*r[0],dx:E[2]*(r[0]-best[0]),dy:E[3]*(r[0]-best[0])});}
-        const B=Math.max(3*lw,0.4*Math.min(x1-x0,y1-y0)),band=Math.max(2,Math.round(0.35*lw));
-        for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const e=Math.min(x-x0,x1-x,y-y0,y1-y);let sx=0,sy=0;
-          if(pins.length&&e<B){let sw=0;for(const q of pins){const w=1/(Math.pow(Math.hypot(x-q.x,y-q.y),3)+1e-3);sw+=w;sx+=w*q.dx;sy+=w*q.dy;}const f=1-(t=>t*t*(3-2*t))(e/B);sx=sx/sw*f;sy=sy/sw*f;}
+        // (a box across the centre line: the part on the side holding most of the box takes the copy, the rest stays)
+        const nv=[u[1],-u[0]],sideOf=(x,y)=>Math.sign((x-cx)*nv[0]+(y-cy)*nv[1]),bs=sideOf((x0+x1)/2,(y0+y1)/2)||1,keep=(x,y)=>sideOf(x,y)===-bs;
+        const pins=[];for(const[E,ro,rm]of cross)for(const[i,j]of pair(ro,rm)){const r=ro[i],best=rm[j];if(keep(E[0]+E[2]*r[0],E[1]+E[3]*r[0]))continue;
+          pins.push({x:E[0]+E[2]*r[0],y:E[1]+E[3]*r[0],dx:E[2]*(r[0]-best[0]),dy:E[3]*(r[0]-best[0])});}
+        const B=Math.max(3*lw,0.4*Math.min(x1-x0,y1-y0)),S2=4*lw,band=Math.max(2,Math.round(0.35*lw));
+        for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){if(keep(x,y))continue;const e=Math.min(x-x0,x1-x,y-y0,y1-y);let sx=0,sy=0;
+          if(pins.length){let sw=0;for(const q of pins){const w=1/((x-q.x)**2+(y-q.y)**2+1e-3);sw+=w;sx+=w*q.dx;sy+=w*q.dy;}sx/=sw;sy/=sw;}
           const v=mirAt(x-sx,y-sy);m[y*W+x]=e<band?(v|src[y*W+x]):v;}}}}
   // estimate typical line thickness from ridge of distance map
   const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;
@@ -77,9 +95,59 @@ function process(p){
     const hw=raw.map((_,i)=>{const a=raw.slice(Math.max(0,i-75),Math.min(raw.length,i+76)).sort((p,q)=>p-q);return a[Math.floor(a.length*0.4)];});
     S.forEach((q,i)=>{flat.push(q[1]+0.5,q[0]+0.5);hwf.push(hw[i]);});offs.push(flat.length/2);}
   const junctions=(built.junctions||[]).map(J=>({x:J.p[1]+0.5,y:J.p[0]+0.5,wx:J.q[1],wy:J.q[0],arms:J.arms,pairs:J.pairs,fixed:J.fixed}));
-  return{junctions,pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
+  return{axes:axesOut,junctions,pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
 
 // ===================================================================== curve stage
 // Trace the centerline into a graph of lines and junctions, rebuild junctions the way a
 // pattern is drawn (lines run through, branches land on them, crossings stay crossings),
 // keep real corners sharp, and smooth each long curve with a fidelity-checked smoother.
+
+// The line a pattern's outline is most nearly mirror-symmetric about: upright ('lr') or level ('tb'). The outline (the
+// whole panel, holes filled) is used rather than the lines inside, which may not be symmetric (a wavy stem, say); lines a
+// few degrees either way and a little off the middle are tried, and the one whose flip lands most of the panel on itself
+// is kept. A crooked scan or an uneven outer border is then still flipped across its true centre line.
+// The centre line a box is mirrored across, fitted to the lines where they cross the box's edge: tried a little to
+// either side of (and a little tilted from) both the outline's centre line and the plain middle of the drawing, keeping
+// whichever lays the most ink of the copy on the ink outside.
+function refineAxis(src,G,flip,a){const x0=Math.max(1,Math.floor(a.x0)),x1=Math.min(W-2,Math.ceil(a.x1)),y0=Math.max(1,Math.floor(a.y0)),y1=Math.min(H-2,Math.ceil(a.y1));
+  if(x1-x0<4||y1-y0<4)return Object.assign({},G);
+  let lo=W,hi=-1,ly=H,hy=-1;for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(src[y*W+x]){if(x<lo)lo=x;if(x>hi)hi=x;if(y<ly)ly=y;if(y>hy)hy=y;}
+  const R=Math.max(6,Math.round(0.012*Math.max(W,H))),pts=[],st=Math.max(1,Math.round(Math.max(x1-x0,y1-y0)/400));
+  for(let y=Math.max(0,y0-R);y<=Math.min(H-1,y1+R);y+=st)for(let x=Math.max(0,x0-R);x<=Math.min(W-1,x1+R);x+=st){
+    const e=Math.min(Math.abs(x-x0),Math.abs(x-x1),Math.abs(y-y0),Math.abs(y-y1));const inside=x>=x0&&x<=x1&&y>=y0&&y<=y1;if(inside&&e>R)continue;if(!inside&&!(x>=x0-R&&x<=x1+R&&y>=y0-R&&y<=y1+R))continue;pts.push(x,y);}
+  const n=pts.length/2;if(!n)return Object.assign({},G);
+  const mk=(c,ang)=>{const u=flip==='tb'?[Math.cos(ang),Math.sin(ang)]:[-Math.sin(ang),Math.cos(ang)];return flip==='tb'?{cx:G.cx,cy:c,u}:{cx:c,cy:G.cy,u};};
+  const score=A=>{const{cx,cy,u}=A;let both=0,any=0;for(let i=0;i<n;i++){const x=pts[2*i],y=pts[2*i+1],dx=x-cx,dy=y-cy,k=2*(dx*u[0]+dy*u[1]);
+      const mx=Math.round(cx+k*u[0]-dx),my=Math.round(cy+k*u[1]-dy),v=src[y*W+x],w=mx>=0&&mx<W&&my>=0&&my<H?src[my*W+mx]:0;if(v&&w)both++;if(v||w)any++;}return any?both/any:0;};
+  const angOf=A=>flip==='tb'?Math.atan2(A.u[1],A.u[0]):Math.atan2(-A.u[0],A.u[1]);
+  let best=null,bs=-1;const span=Math.max(8,Math.round(0.015*(flip==='tb'?H:W)));
+  for(const[c0,a0]of[[flip==='tb'?G.cy:G.cx,angOf(G)],[flip==='tb'?(ly+hy)/2:(lo+hi)/2,0]]){let c=c0,an=a0,b=score(mk(c,an));
+    for(const[dc,da,nc,na]of[[1,0.25,span,2],[0.25,0.05,4,5]]){const cc=c,aa=an;for(let ia=-na;ia<=na;ia++)for(let ic=-nc;ic<=nc;ic++){const A=mk(cc+ic*dc,aa+ia*da*Math.PI/180),sc=score(A);if(sc>b+1e-9){b=sc;c=cc+ic*dc;an=aa+ia*da*Math.PI/180;}}}
+    if(b>bs){bs=b;best=mk(c,an);}}
+  // (a box across the centre line, with a line running down that centre line: the centre line is laid right along it)
+  {const side=(x,y)=>Math.sign((x-best.cx)*best.u[1]-(y-best.cy)*best.u[0]),sg=[side(x0,y0),side(x1,y0),side(x0,y1),side(x1,y1)];
+    if(sg.includes(1)&&sg.includes(-1)){const c0=flip==='tb'?best.cy:best.cx,a0=angOf(best);let top=0,ta=a0,hits=null;
+      for(let da=-1;da<=1.001;da+=0.1){const an=a0+da*Math.PI/180,u=mk(c0,an).u,h=[];
+        for(let o=-span;o<=span;o+=0.5){let n=0,t=0;if(flip==='tb'){for(let x=x0;x<=x1;x++){const y=Math.round(c0+o+(x-best.cx)*u[1]/u[0]);t++;if(y>=y0&&y<=y1&&src[y*W+x])n++;}}
+            else{for(let y=y0;y<=y1;y++){const x=Math.round(c0+o+(y-best.cy)*u[0]/u[1]);t++;if(x>=x0&&x<=x1&&src[y*W+x])n++;}}h.push([o,n/(t||1)]);}
+        const m=Math.max(...h.map(q=>q[1]));if(m>top+1e-9){top=m;ta=an;hits=h;}}
+      if(top>0.6){const on=hits.filter(q=>q[1]>=0.9*top),near=on.reduce((p,q)=>Math.abs(q[0])<Math.abs(p[0])?q:p);
+        let a=near[0],b=near[0];while(on.some(q=>q[0]===a-0.5))a-=0.5;while(on.some(q=>q[0]===b+0.5))b+=0.5;const o=(a+b)/2,nb=mk(c0+o,ta);best.cx=nb.cx;best.cy=nb.cy;best.u=nb.u;}}}
+  best.match=bs;return best;}
+function symAxis(mask,flip){const f=Math.max(1,Math.round(Math.max(W,H)/500)),w=Math.ceil(W/f),h=Math.ceil(H/f),s=new Uint8Array(w*h);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(mask[y*W+x])s[((y/f)|0)*w+((x/f)|0)]=1;
+  // (the panel: everything not reachable from the picture's edge without crossing a line)
+  const out=new Uint8Array(w*h),st=[];for(let x=0;x<w;x++){st.push(x,(h-1)*w+x);}for(let y=0;y<h;y++){st.push(y*w,y*w+w-1);}
+  while(st.length){const i=st.pop();if(out[i]||s[i])continue;out[i]=1;const x=i%w,y=(i/w)|0;if(x>0)st.push(i-1);if(x<w-1)st.push(i+1);if(y>0)st.push(i-w);if(y<h-1)st.push(i+w);}
+  const pan=[];let lo=w,hi=-1,ly=h,hy=-1;for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(!out[y*w+x]){pan.push(x,y);if(x<lo)lo=x;if(x>hi)hi=x;if(y<ly)ly=y;if(y>hy)hy=y;}
+  if(hi<=lo)return null;const n=pan.length/2,step=Math.max(1,Math.floor(n/40000));
+  const score=(cx,cy,ang)=>{const u=flip==='tb'?[Math.cos(ang),Math.sin(ang)]:[-Math.sin(ang),Math.cos(ang)];let hit=0,tot=0;
+    for(let i=0;i<n;i+=step){const dx=pan[2*i]-cx,dy=pan[2*i+1]-cy,k=2*(dx*u[0]+dy*u[1]),x=Math.round(cx+k*u[0]-dx),y=Math.round(cy+k*u[1]-dy);tot++;
+      if(x>=0&&x<w&&y>=0&&y<h&&!out[y*w+x])hit++;}return hit/(tot||1);};
+  let cx=(lo+hi)/2,cy=(ly+hy)/2,ang=0,best=score(cx,cy,ang);const span=flip==='tb'?(hy-ly):(hi-lo),base=best;
+  // (coarse, then finer: angle in degrees, and how far off the middle)
+  for(const[da,dd,na,nd]of[[0.5,Math.max(1,span*0.01),6,4],[0.1,Math.max(0.5,span*0.002),5,5],[0.02,0.25,5,4]]){const a0=ang,c0=flip==='tb'?cy:cx;
+    for(let ia=-na;ia<=na;ia++)for(let id=-nd;id<=nd;id++){const a=a0+ia*da*Math.PI/180,c=c0+id*dd,sc=flip==='tb'?score(cx,c,a):score(c,cy,a);
+      if(sc>best+1e-9){best=sc;ang=a;if(flip==='tb')cy=c;else cx=c;}}}
+  const u=flip==='tb'?[Math.cos(ang),Math.sin(ang)]:[-Math.sin(ang),Math.cos(ang)];
+  return{cx:(cx+0.5)*f-0.5,cy:(cy+0.5)*f-0.5,u,match:best,base};}
