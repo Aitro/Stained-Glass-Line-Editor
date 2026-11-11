@@ -148,6 +148,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .fix-layer .area{fill:color-mix(in srgb,var(--fix) 10%,transparent);stroke:var(--fix)}
 .fix-layer .area.src{fill:none;stroke:var(--fix);opacity:.75}
 .fix-layer.picking-area{cursor:crosshair}
+.mat.picking-area{cursor:crosshair;touch-action:none}
 .fix-layer .seam.ok{fill:#2e9d5a;stroke:#fff}
 .fix-layer .seam.bad{fill:#d4372c;stroke:#fff}
 </style>
@@ -2121,6 +2122,9 @@ $('fixLayer').addEventListener('pointerdown',e=>{if(e.button!==0)return;const[px
   let j=-1,bd=12/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;j=i;}});
   const q=j<0?nearestStroke(px,py,12/sc):null;
   press={px,py,x0:e.clientX,y0:e.clientY,j,q,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);});
+// (in box mode the box can start anywhere on the mat, including outside the picture; it is cut to the picture)
+$('mat').addEventListener('pointerdown',e=>{if(!S.areaMode||e.button!==0||!S.fixMode||$('fixLayer').contains(e.target)||$('fixPop').contains(e.target))return;
+  const[px,py]=layerPoint(e);closeFixPop();press={area:true,px,py,x0:e.clientX,y0:e.clientY,dragging:false};try{$('fixLayer').setPointerCapture(e.pointerId);}catch(_){}e.preventDefault();});
 // where the lines at a junction really meet (the program's junction point can sit a little off them)
 function junctionMeet(J){const geo=pageGeom(),c=jPage(J),lw=Math.max(2,widthIn()*S.workPPI)*geo.k,pts=S.strokes,offs=S.offs,E=[];
   for(let s=0;s+1<offs.length;s++){if(offs[s+1]-offs[s]<2)continue;for(const e of[offs[s],offs[s+1]-1]){const p=geo.map(pts[2*e],pts[2*e+1]);if(Math.hypot(p[0]-c[0],p[1]-c[1])<2.5*lw)E.push(p);}}
@@ -2131,7 +2135,7 @@ function pressDrag(e){const[px,py]=layerPoint(e),geo=pageGeom();if(press.j>=0&&!
   const[ox,oy]=unrotVec((px-press.px)/geo.k,(py-press.py)/geo.k);
   return{mode:'drag',sx,sy,dx:ox/S.sx,dy:oy/S.sy,r:reachWork()/S.sx,j:press.j>=0,whole:press.j<0&&$('fixReach').value==='line'};}
 // (the box being drawn, and the matching box on the other side that it will copy from)
-function areaPreview(px,py){const k=1/layerScale(),geo=pageGeom(),b=[Math.min(press.px,px),Math.min(press.py,py),Math.max(press.px,px),Math.max(press.py,py)];
+function areaPreview(px,py){const k=1/layerScale(),geo=pageGeom(),img=$('view'),cx=v=>Math.max(0,Math.min(img.naturalWidth,v)),cy=v=>Math.max(0,Math.min(img.naturalHeight,v)),b=[cx(Math.min(press.px,px)),cy(Math.min(press.py,py)),cx(Math.max(press.px,px)),cy(Math.max(press.py,py))];
   const mf=mirrorFn(S.areaFlip),corners=[[b[0],b[1]],[b[2],b[1]],[b[2],b[3]],[b[0],b[3]]].map(([x,y])=>{const o=outPos(...pageToWorkInternal(x,y)),q=mf(o[0],o[1]);return geo.map(q[0],q[1]);});
   return`<rect class="area" x="${b[0]}" y="${b[1]}" width="${b[2]-b[0]}" height="${b[3]-b[1]}" style="stroke-width:${2*k}px"/>`+
     `<polygon class="area src" points="${corners.map(q=>q[0]+','+q[1]).join(' ')}" style="stroke-width:${2*k}px;stroke-dasharray:${6*k} ${4*k}"/>`+seamDots(b,k);}
@@ -2161,7 +2165,7 @@ $('fixLayer').addEventListener('pointermove',e=>{if(!press)return;
     h+=`<path d="${pth}" fill="none" stroke="var(--fix)" stroke-width="${3*k}" stroke-linecap="round" opacity=".9"/>`;}
   drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',h);});
 $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
-  if(p.area){press=null;const[px,py]=layerPoint(e),sc=layerScale();if(!p.dragging||Math.abs(px-p.px)<8/sc||Math.abs(py-p.py)<8/sc){drawFixLayer();return;}
+  if(p.area){press=null;const img=$('view'),cl=(v,m)=>Math.max(0,Math.min(m,v)),q=layerPoint(e),sc=layerScale();p.px=cl(p.px,img.naturalWidth);p.py=cl(p.py,img.naturalHeight);const px=cl(q[0],img.naturalWidth),py=cl(q[1],img.naturalHeight);if(!p.dragging||Math.abs(px-p.px)<8/sc||Math.abs(py-p.py)<8/sc){drawFixLayer();return;}
     const c=[[Math.min(p.px,px),Math.min(p.py,py)],[Math.max(p.px,px),Math.max(p.py,py)]].map(([x,y])=>workToSrc(...pageToWorkInternal(x,y)));
     const f={mode:'area',x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1]),flip:S.areaFlip==='tb'?'tb':'lr'};
     S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=S.fixes.slice();S.fixes.push(f);saveFixes();setAreaMode(false);afterFixChange(before);return;}
@@ -2169,7 +2173,7 @@ $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
   const d=pressDrag(e);press=null;if(Math.hypot(d.dx,d.dy)<0.3){drawFixLayer();return;}
   S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();S.fixes.push(d);saveFixes();redrawDrags();});
 $('fixLayer').addEventListener('pointercancel',()=>{press=null;drawFixLayer();});
-function setAreaMode(on){S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixAreaFlip').hidden=!on;$('fixLayer').classList.toggle('picking-area',on);
+function setAreaMode(on){S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixAreaFlip').hidden=!on;$('fixLayer').classList.toggle('picking-area',on);$('mat').classList.toggle('picking-area',on);
   $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
 S.areaFlip='lr';$('fixAreaFlip').addEventListener('change',e=>{S.areaFlip=e.target.value;});
 $('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;setAreaMode(!S.areaMode);});
