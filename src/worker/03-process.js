@@ -6,13 +6,25 @@ function process(p){
   const t=p.auto?otsuT:p.threshold;const m=new Uint8Array(W*H);
   for(let i=0;i<W*H;i++)m[i]=p.invert?(gray[i]>=t?1:0):(gray[i]<t?1:0);
   // mirrored areas (picked by hand): inside each box the picture is replaced by the matching spot on the other side
-  // of the pattern's upright centre line, flipped; along the box's edge both are kept, so lines crossing it join up
+  // of the pattern's upright centre line, flipped. Where a line crosses the box's edge, the two sides may draw it a
+  // little apart: near the edge the copy is shifted so each line meets its own line outside exactly, easing back to
+  // an exact copy further in. Right at the edge both pictures are kept, so crossing lines stay joined.
   const areas=Array.isArray(p.areas)?p.areas.filter(a=>a&&[a.x0,a.y0,a.x1,a.y1].every(isFinite)):[];
   if(areas.length){let lo=W,hi=-1;for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(m[y*W+x]){if(x<lo)lo=x;if(x>hi)hi=x;}
-    if(hi>lo){const c2=lo+hi,band=Math.max(3,Math.round(0.004*Math.max(W,H))),src=m.slice();
-      for(const a of areas){const x0=Math.max(0,Math.floor(a.x0)),x1=Math.min(W-1,Math.ceil(a.x1)),y0=Math.max(0,Math.floor(a.y0)),y1=Math.min(H-1,Math.ceil(a.y1));
-        for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const mx=c2-x;if(mx<0||mx>=W)continue;const v=src[y*W+mx],e=Math.min(x-x0,x1-x,y-y0,y1-y);
-          m[y*W+x]=e<band?(v|src[y*W+x]):v;}}}}
+    if(hi>lo){const c2=lo+hi,src=m.slice(),at=(x,y)=>{x=Math.round(x);y=Math.round(y);return x>=0&&x<W&&y>=0&&y<H?src[y*W+x]:0;},mirAt=(x,y)=>at(c2-x,y);
+      for(const a of areas){const x0=Math.max(1,Math.floor(a.x0)),x1=Math.min(W-2,Math.ceil(a.x1)),y0=Math.max(1,Math.floor(a.y0)),y1=Math.min(H-2,Math.ceil(a.y1));if(x1-x0<4||y1-y0<4)continue;
+        // (where lines cross each edge, in the picture and in the copy: the middles of the runs of ink along it)
+        const edges=[[x0,y0,1,0,x1-x0],[x0,y1,1,0,x1-x0],[x0,y0,0,1,y1-y0],[x1,y0,0,1,y1-y0]],widths=[],cross=[];
+        const runs=(f,E)=>{const out=[];let st=-1;for(let t=0;t<=E[4]+1;t++){const v=t<=E[4]&&f(E[0]+E[2]*t,E[1]+E[3]*t);if(v&&st<0)st=t;if(!v&&st>=0){out.push([(st+t-1)/2,t-st]);st=-1;}}return out;};
+        for(const E of edges){const ro=runs(at,E),rm=runs(mirAt,E);for(const r of ro)widths.push(r[1]);cross.push([E,ro,rm]);}
+        widths.sort((p,q)=>p-q);const lw=Math.max(2,Math.min(40,widths.length?widths[widths.length>>1]:4));
+        // (each line crossing an edge, with how far the copy must move along the edge to meet it)
+        const pins=[];for(const[E,ro,rm]of cross)for(const r of ro){let best=null,bd=5*lw;for(const q of rm){const dd=Math.abs(q[0]-r[0]);if(dd<bd){bd=dd;best=q;}}
+          if(best)pins.push({x:E[0]+E[2]*r[0],y:E[1]+E[3]*r[0],dx:E[2]*(r[0]-best[0]),dy:E[3]*(r[0]-best[0])});}
+        const B=Math.max(3*lw,0.4*Math.min(x1-x0,y1-y0)),band=Math.max(2,Math.round(0.35*lw));
+        for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const e=Math.min(x-x0,x1-x,y-y0,y1-y);let sx=0,sy=0;
+          if(pins.length&&e<B){let sw=0;for(const q of pins){const w=1/(Math.pow(Math.hypot(x-q.x,y-q.y),3)+1e-3);sw+=w;sx+=w*q.dx;sy+=w*q.dy;}const f=1-(t=>t*t*(3-2*t))(e/B);sx=sx/sw*f;sy=sy/sw*f;}
+          const v=mirAt(x-sx,y-sy);m[y*W+x]=e<band?(v|src[y*W+x]):v;}}}}
   // estimate typical line thickness from ridge of distance map
   const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;
   let dbg=edt(bg);const ridge=[];

@@ -158,7 +158,7 @@ function render(){if(!S.strokes)return;const geo=pageGeom();
   $('borderWarn').hidden=!($('borderOn').checked&&!S.hasBorder);
   c.toBlob(async b=>{S.resultBlob=await withPPI(b,OUT_PPI);if(S.resultURL)URL.revokeObjectURL(S.resultURL);S.resultURL=URL.createObjectURL(S.resultBlob);
     if(S.overlayURL){URL.revokeObjectURL(S.overlayURL);S.overlayURL=null;}
-    $('savePng').disabled=false;$('saveSvg').disabled=false;showView();},'image/png');
+    $('savePng').disabled=false;$('saveSvg').disabled=false;$('saveDxf').disabled=false;showView();},'image/png');
   S.svg=buildSVG(geo);showStats(geo);}
 
 function makeOverlay(cb){const geo=pageGeom();const c=document.createElement('canvas');c.width=geo.pw;c.height=geo.ph;const g=c.getContext('2d');
@@ -561,6 +561,56 @@ async function save(data,ext){const note=$('note');
     'Saving is not available here. Switch to Result, then right-click (or long-press) the image and choose Save image.';}}
 $('savePng').addEventListener('click',()=>{if(S.resultBlob)save(S.resultBlob,'png');});
 $('saveSvg').addEventListener('click',()=>{if(S.svg)save(S.svg,'svg');});
+// ---- cut file for a cutter (Silhouette and the like) ----
+// Every glass piece is the white space between the new lines; its edge is a closed cut line that already sits half
+// a lead width back from each line, so the cut pieces keep the chosen gap between them. The result picture is read
+// back, the white pieces are told apart (the white all round the panel is not a piece), and the edges between white
+// and line are followed at the half-way grey, so they are smooth rather than stepped. Written as DXF (R12), which
+// every edition of Silhouette Studio opens; units are inches.
+async function cutLoops(){const img=new Image();img.src=S.resultURL;await img.decode();
+  const ppi=Math.min(OUT_PPI,Math.max(100,Math.floor(Math.sqrt(16e6/(img.naturalWidth*img.naturalHeight))*OUT_PPI)));   // (as fine as about 16 million pixels allows)
+  const W=Math.round(img.naturalWidth*ppi/OUT_PPI),H=Math.round(img.naturalHeight*ppi/OUT_PPI),c=document.createElement('canvas');c.width=W+2;c.height=H+2;
+  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W+2,H+2);x.drawImage(img,1,1,W,H);const d=x.getImageData(0,0,W+2,H+2).data,GW=W+2,GH=H+2;
+  const g=new Float32Array(GW*GH);for(let i=0;i<GW*GH;i++)g[i]=0.299*d[4*i]+0.587*d[4*i+1]+0.114*d[4*i+2];
+  // (the white pieces, told apart; the one touching the edge is the white all round the panel)
+  const lab=new Int32Array(GW*GH).fill(-1),area=[],stack=new Int32Array(GW*GH);let nl=0;
+  for(let i=0;i<GW*GH;i++){if(lab[i]>=0||g[i]<128)continue;let sp=0,cnt=0;stack[sp++]=i;lab[i]=nl;
+    while(sp){const k=stack[--sp];cnt++;const kx=k%GW,ky=(k/GW)|0;for(const nb of[kx>0?k-1:-1,kx<GW-1?k+1:-1,ky>0?k-GW:-1,ky<GH-1?k+GW:-1])if(nb>=0&&lab[nb]<0&&g[nb]>=128){lab[nb]=nl;stack[sp++]=nb;}}
+    area.push(cnt);nl++;}
+  const outside=lab[0],minArea=0.004*ppi*ppi;   // (specks under about 1/16 inch square are left out)
+  // (edges between white and line, followed at the half-way grey: marching squares)
+  const L=128,eid=(ax,ay,bx,by)=>ay===by?2*(ay*GW+Math.min(ax,bx)):2*(Math.min(ay,by)*GW+ax)+1;
+  const ept=(ax,ay,bx,by)=>{const ga=g[ay*GW+ax],gb=g[by*GW+bx],t=(L-ga)/((gb-ga)||1e-9);return[ax+(bx-ax)*t,ay+(by-ay)*t];};
+  const segs=new Map(),pos=new Map(),own=new Map();
+  const add=(e1,e2)=>{(segs.get(e1)||segs.set(e1,[]).get(e1)).push(e2);(segs.get(e2)||segs.set(e2,[]).get(e2)).push(e1);};
+  for(let y=0;y+1<GH;y++)for(let xx=0;xx+1<GW;xx++){const v=[g[y*GW+xx],g[y*GW+xx+1],g[(y+1)*GW+xx+1],g[(y+1)*GW+xx]],k=(v[0]>=L?1:0)|(v[1]>=L?2:0)|(v[2]>=L?4:0)|(v[3]>=L?8:0);
+    if(k===0||k===15)continue;
+    const E=[[xx,y,xx+1,y],[xx+1,y,xx+1,y+1],[xx,y+1,xx+1,y+1],[xx,y,xx,y+1]];   // top, right, bottom, left
+    const id=j=>{const[a,b,cc,dd]=E[j],e=eid(a,b,cc,dd);if(!pos.has(e)){pos.set(e,ept(a,b,cc,dd));const wa=g[b*GW+a]>=L;own.set(e,wa?lab[b*GW+a]:lab[dd*GW+cc]);}return e;};
+    const T={1:[[3,0]],2:[[0,1]],3:[[3,1]],4:[[1,2]],6:[[0,2]],7:[[3,2]],8:[[2,3]],9:[[0,2]],11:[[1,2]],12:[[1,3]],13:[[0,1]],14:[[3,0]]};
+    // (white touching white only at a corner stays two pieces, as they were told apart above)
+    if(k===5||k===10){const pr=k===5?[[3,0],[1,2]]:[[0,1],[3,2]];for(const[a,b]of pr)add(id(a),id(b));}
+    else for(const[a,b]of T[k])add(id(a),id(b));}
+  // (linked into closed loops)
+  const loops=[],seen=new Set();
+  for(const[e0]of segs){if(seen.has(e0))continue;const loop=[];let prev=-1,cur=e0;
+    for(let guard=0;guard<4*segs.size;guard++){seen.add(cur);loop.push(pos.get(cur));const nb=segs.get(cur);const nx=nb[0]!==prev||nb.length<2?nb[0]:nb[1];
+      if(nx===undefined||nx===e0){break;}if(seen.has(nx)&&nx!==e0)break;prev=cur;cur=nx;}
+    const o=own.get(e0);if(o==null||o<0||o===outside||area[o]<minArea||loop.length<8)continue;
+    loops.push(rdp(loop.map(([px,py])=>[(px-1)/ppi,(py-1)/ppi]),0.25/ppi));}
+  return{loops,w:W/ppi,h:H/ppi};}
+// (fewer points along the straight parts, within the given tolerance)
+function rdp(P,tol){if(P.length<4)return P;const keep=new Uint8Array(P.length);keep[0]=keep[P.length-1]=1;const st=[[0,P.length-1]];
+  while(st.length){const[a,b]=st.pop();const ax=P[a][0],ay=P[a][1],dx=P[b][0]-ax,dy=P[b][1]-ay,l=Math.hypot(dx,dy)||1e-9;let bi=-1,bd=tol;
+    for(let i=a+1;i<b;i++){const dd=Math.abs((P[i][0]-ax)*dy-(P[i][1]-ay)*dx)/l;if(dd>bd){bd=dd;bi=i;}}if(bi>=0){keep[bi]=1;st.push([a,bi],[bi,b]);}}
+  return P.filter((_,i)=>keep[i]);}
+function dxfFile(cut){const o=['0','SECTION','2','HEADER','9','$ACADVER','1','AC1009','9','$INSUNITS','70','1','9','$EXTMIN','10','0','20','0','9','$EXTMAX','10',cut.w.toFixed(4),'20',cut.h.toFixed(4),'0','ENDSEC',
+    '0','SECTION','2','TABLES','0','TABLE','2','LAYER','70','1','0','LAYER','2','PIECES','70','0','62','7','6','CONTINUOUS','0','ENDTAB','0','ENDSEC','0','SECTION','2','ENTITIES'];
+  for(const L of cut.loops){o.push('0','POLYLINE','8','PIECES','66','1','70','1','10','0','20','0','30','0');
+    for(const[x,y]of L)o.push('0','VERTEX','8','PIECES','10',x.toFixed(4),'20',(cut.h-y).toFixed(4),'30','0');o.push('0','SEQEND','8','PIECES');}
+  o.push('0','ENDSEC','0','EOF');return o.join('\r\n')+'\r\n';}
+$('saveDxf').addEventListener('click',async()=>{if(!S.resultURL)return;$('note').textContent='Making the cut file…';
+  try{const cut=await cutLoops();save(dxfFile(cut),'dxf');$('note').textContent+=' '+cut.loops.length+' cut lines.';}catch(err){$('note').textContent='Could not make the cut file: '+(err&&err.message||err);}});
 (async()=>{try{S.dl=await (window.claude&&window.claude.use?window.claude.use('downloads'):null);}catch(e){S.dl=null;}})();
 
 // example pattern with deliberately uneven lines
