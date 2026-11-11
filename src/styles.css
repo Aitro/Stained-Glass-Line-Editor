@@ -153,3 +153,8 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .field-inline select{flex:0 1 auto;min-width:0}
 
 .fix-layer .pt.joint{fill:#fff;stroke:var(--fix-done)}
+.fix-layer .sym-line{stroke:var(--fix);fill:none}
+.fix-layer .sym-shade{fill:color-mix(in srgb,var(--fix) 12%,transparent);stroke:none}
+.fix-layer .check-piece{fill:rgba(240,130,0,.18);stroke:#e07800}
+.fix-layer .check-dot{fill:#e07800;stroke:#fff}
+.fix-layer .check-label{fill:#8a4300;stroke:#fff;paint-order:stroke;font-family:system-ui,sans-serif;font-weight:600}

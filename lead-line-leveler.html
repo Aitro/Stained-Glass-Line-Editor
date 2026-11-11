@@ -163,6 +163,11 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .field-inline select{flex:0 1 auto;min-width:0}
 
 .fix-layer .pt.joint{fill:#fff;stroke:var(--fix-done)}
+.fix-layer .sym-line{stroke:var(--fix);fill:none}
+.fix-layer .sym-shade{fill:color-mix(in srgb,var(--fix) 12%,transparent);stroke:none}
+.fix-layer .check-piece{fill:rgba(240,130,0,.18);stroke:#e07800}
+.fix-layer .check-dot{fill:#e07800;stroke:#fff}
+.fix-layer .check-label{fill:#8a4300;stroke:#fff;paint-order:stroke;font-family:system-ui,sans-serif;font-weight:600}
 </style>
 
 <div class="app">
@@ -280,6 +285,8 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
       <label class="fix-reach">Drag reach <select id="fixReach"><option value="short">short</option><option value="medium" selected>medium</option><option value="wide">wide</option><option value="line">whole line</option></select></label>
       <button id="fixArea" aria-pressed="false" title="Drag a box around a spot to replace it with a mirror of the same spot on the other side">Mirror an area</button>
       <select id="fixAreaFlip" hidden aria-label="Copy from"><option value="lr">from the other side (left ↔ right)</option><option value="tb">from the other end (top ↔ bottom)</option></select>
+      <button id="fixSym" title="Copy one half of the pattern onto the other, flipped, so both sides match">Make symmetric…</button>
+      <button id="fixCheck" aria-pressed="false" title="Mark pieces that are hard to cut in glass: sharp points, deep inside curves, slivers, tiny pieces">Check pieces</button>
       <span class="fix-count" id="fixCount"></span>
       <button id="fixUndo" disabled>Undo</button>
       <button id="fixClear" disabled>Clear all fixes</button>
@@ -364,6 +371,20 @@ function process(p){
   const areas=Array.isArray(p.areas)?p.areas.filter(a=>a&&[a.x0,a.y0,a.x1,a.y1].every(isFinite)):[];
   // (the centre lines are always found, so the page can show where a new box will copy from)
   let axes={lr:symAxis(m,'lr'),tb:symAxis(m,'tb'),areas:[]},axesOut=axes;
+  // (the centre line of the drawing itself, where the lines on both sides best fall on each other: for making
+  // the whole pattern symmetric)
+  // the whole pattern made symmetric (picked by hand): one half replaced by the other, flipped across the centre
+  // line; right along the centre line both pictures are kept, so a line running down it stays whole
+  const halves=Array.isArray(p.halves)?p.halves.filter(h=>h&&(h.flip==='lr'||h.flip==='tb')):[];
+  // (found only when wanted: it takes a moment)
+  if(p.inkAxes||halves.length){axes.inkLr=inkAxis(m,'lr',axes.lr);axes.inkTb=inkAxis(m,'tb',axes.tb);}
+  for(const hf of halves){const A=hf.flip==='tb'?axes.inkTb:axes.inkLr;if(!A)continue;const src=m.slice(),u=A.u,nv=[u[1],-u[0]],off=+hf.off||0;
+    const cx=A.cx+nv[0]*off,cy=A.cy+nv[1]*off,keepSide=hf.keep>0?1:-1;
+    // (half a line's width either side of the centre line, at this picture's scale)
+    let band=2;{const r=[];for(let y=1;y<H-1;y+=3)for(let x=1;x<W-1;x+=3){const i=y*W+x;if(src[i]&&!src[i-1])for(let k=1;k<60;k++){if(x+k>=W||!src[i+k]){r.push(k);break;}}}r.sort((a,b)=>a-b);if(r.length)band=Math.max(2,0.6*r[r.length>>1]);}
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){const dx=x-cx,dy=y-cy,sd=dx*nv[0]+dy*nv[1];if(Math.sign(sd)===keepSide&&Math.abs(sd)>band)continue;
+      const k=2*(dx*u[0]+dy*u[1]),mx=Math.round(cx+k*u[0]-dx),my=Math.round(cy+k*u[1]-dy),v=mx>=0&&mx<W&&my>=0&&my<H?src[my*W+mx]:0;
+      m[y*W+x]=Math.abs(sd)<=band?(v|src[y*W+x]):v;}}
   if(areas.length){const src=m.slice(),at=(x,y)=>{x=Math.round(x);y=Math.round(y);return x>=0&&x<W&&y>=0&&y<H?src[y*W+x]:0;};
     const areaAxes=axes.areas;
     {for(const a of areas){const G=axes[a.flip==='tb'?'tb':'lr'];areaAxes.push(null);if(!G)continue;
@@ -488,6 +509,18 @@ function refineAxis(src,G,flip,a){const x0=Math.max(1,Math.floor(a.x0)),x1=Math.
       if(top>0.6){const on=hits.filter(q=>q[1]>=0.9*top),near=on.reduce((p,q)=>Math.abs(q[0])<Math.abs(p[0])?q:p);
         let a=near[0],b=near[0];while(on.some(q=>q[0]===a-0.5))a-=0.5;while(on.some(q=>q[0]===b+0.5))b+=0.5;const o=(a+b)/2,nb=mk(c0+o,ta);best.cx=nb.cx;best.cy=nb.cy;best.u=nb.u;}}}
   best.match=bs;return best;}
+// The centre line that lays the drawing's own lines best onto themselves when flipped: tried a little to either side
+// of the outline's centre line and a little tilted, coarse first, then finely.
+function inkAxis(mask,flip,G){if(!G)return null;const f=Math.max(1,Math.round(Math.max(W,H)/600)),w=Math.ceil(W/f),h=Math.ceil(H/f),s=new Uint8Array(w*h);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(mask[y*W+x])s[((y/f)|0)*w+((x/f)|0)]=1;
+  const dl=new Uint8Array(w*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let v=0;for(let j=-1;j<=1&&!v;j++)for(let i=-1;i<=1;i++){const X=x+i,Y=y+j;if(X>=0&&Y>=0&&X<w&&Y<h&&s[Y*w+X]){v=1;break;}}dl[y*w+x]=v;}
+  const pts=[];for(let i=0;i<w*h;i++)if(s[i])pts.push(i%w,(i/w)|0);const n=pts.length/2;if(!n)return Object.assign({},G);const st=Math.max(1,Math.floor(n/30000));
+  const mk=(c,ang)=>{const u=flip==='tb'?[Math.cos(ang),Math.sin(ang)]:[-Math.sin(ang),Math.cos(ang)];return flip==='tb'?{cx:G.cx,cy:c,u}:{cx:c,cy:G.cy,u};};
+  const score=A=>{const cx=(A.cx+0.5)/f-0.5,cy=(A.cy+0.5)/f-0.5,u=A.u;let hit=0,tot=0;for(let i=0;i<n;i+=st){const dx=pts[2*i]-cx,dy=pts[2*i+1]-cy,k=2*(dx*u[0]+dy*u[1]),x=Math.round(cx+k*u[0]-dx),y=Math.round(cy+k*u[1]-dy);tot++;if(x>=0&&x<w&&y>=0&&y<h&&dl[y*w+x])hit++;}return hit/(tot||1);};
+  const angOf=A=>flip==='tb'?Math.atan2(A.u[1],A.u[0]):Math.atan2(-A.u[0],A.u[1]);
+  let c=flip==='tb'?G.cy:G.cx,an=angOf(G),b=score(mk(c,an));const span=0.03*(flip==='tb'?H:W);
+  for(const[dc,da,nc,na]of[[f,0.25,Math.ceil(span/f),6],[f/4,0.05,6,5]]){const cc=c,aa=an;for(let ia=-na;ia<=na;ia++)for(let ic=-nc;ic<=nc;ic++){const A=mk(cc+ic*dc,aa+ia*da*Math.PI/180),sc=score(A);if(sc>b+1e-9){b=sc;c=cc+ic*dc;an=aa+ia*da*Math.PI/180;}}}
+  const out=mk(c,an);out.match=b;return out;}
 function symAxis(mask,flip){const f=Math.max(1,Math.round(Math.max(W,H)/500)),w=Math.ceil(W/f),h=Math.ceil(H/f),s=new Uint8Array(w*h);
   for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(mask[y*W+x])s[((y/f)|0)*w+((x/f)|0)]=1;
   // (the panel: everything not reachable from the picture's edge without crossing a line)
@@ -1652,6 +1685,7 @@ worker.onmessage=e=>{const m=e.data;
   else if(m.type==='done'){S.running=false;
     if(S.pending){S.pending=false;run();return;}
     S.rawStrokes=m.pts;S.rawOffs=m.offs;S.rawHw=m.hw;S.rawFill=m.fill;S.rawFcurve=m.fcurve;S.areaCache=null;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;if(m.axes)S.axes=m.axes;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];S.strokes=applyDrags();markBorder();render();drawFixLayer();
+    if(S.symWaiting&&S.symPending){S.symWaiting=false;if(symAxisOf(S.symPending)){drawFixLayer();symMenu();}}
     setStatus('Done in '+(m.ms/1000).toFixed(1)+' s',false);}
   else if(m.type==='error'){S.running=false;setStatus('Could not process this image: '+m.message,false);}};
 function setStatus(t,busy){$('statusText').textContent=t;$('status').classList.toggle('busy',!!busy);}
@@ -1710,7 +1744,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker()};}
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half')};}
 let timer=null;
 function schedule(fn,ms){clearTimeout(timer);timer=setTimeout(fn,ms);}
 function run(){if(!S.work)return;if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
@@ -1804,7 +1838,7 @@ function render(){if(!S.strokes)return;const geo=pageGeom();
   $('borderWarn').hidden=!($('borderOn').checked&&!S.hasBorder);
   c.toBlob(async b=>{S.resultBlob=await withPPI(b,OUT_PPI);if(S.resultURL)URL.revokeObjectURL(S.resultURL);S.resultURL=URL.createObjectURL(S.resultBlob);
     if(S.overlayURL){URL.revokeObjectURL(S.overlayURL);S.overlayURL=null;}
-    $('savePng').disabled=false;$('saveSvg').disabled=false;$('saveDxf').disabled=false;showView();},'image/png');
+    $('savePng').disabled=false;$('saveSvg').disabled=false;$('saveDxf').disabled=false;showView();if(S.checkOn)runCheck();},'image/png');
   S.svg=buildSVG(geo);showStats(geo);}
 
 function makeOverlay(cb){const geo=pageGeom();const c=document.createElement('canvas');c.width=geo.pw;c.height=geo.ph;const g=c.getContext('2d');
@@ -1874,10 +1908,11 @@ function srcToWork(sx,sy){const cr=S.crop;return[(sx-cr.x+PAD)*S.sx-0.5,(sy-cr.y
 function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)/S.sy+cr.y-PAD];}
 function areasForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='area').map(f=>{const c=[[f.x0,f.y0],[f.x1,f.y1]].map(([x,y])=>srcToWork(x,y));
   return{x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1]),flip:f.flip||'lr',ox:(f.ox||0)*S.sx,oy:(f.oy||0)*S.sy};});}
-function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)&&f.mode!=='area').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
+function halvesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='half').map(f=>({flip:f.flip,keep:f.keep,off:(f.off||0)*(f.flip==='tb'?S.sy:S.sx)}));}
+function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)&&f.mode!=='area'&&f.mode!=='half').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
 function saveFixes(){try{if(S.fixKey)localStorage.setItem(S.fixKey,JSON.stringify(S.fixes));}catch(e){}updateFixBar();}
 function loadFixes(name,w,h){S.fixKey='lll-fixes:'+name+':'+w+'x'+h;S.fixes=[];S.fixSel=null;S.undo=[];
-  try{const v=JSON.parse(localStorage.getItem(S.fixKey)||'[]');if(Array.isArray(v))S.fixes=v.filter(f=>f&&f.mode&&(f.mode==='area'?[f.x0,f.y0,f.x1,f.y1].every(isFinite):isFinite(f.sx)&&isFinite(f.sy)));}catch(e){}
+  try{const v=JSON.parse(localStorage.getItem(S.fixKey)||'[]');if(Array.isArray(v))S.fixes=v.filter(f=>f&&f.mode&&(f.mode==='half'?(f.flip==='lr'||f.flip==='tb'):f.mode==='area'?[f.x0,f.y0,f.x1,f.y1].every(isFinite):isFinite(f.sx)&&isFinite(f.sy)));}catch(e){}
   closeFixPop();updateFixBar();}
 function updateFixBar(){const n=S.fixes.length;$('fixCount').textContent=n?n+(n===1?' fix':' fixes'):'';
   $('fixClear').disabled=!n;$('fixUndo').disabled=!(S.undo&&S.undo.length);}
@@ -1912,6 +1947,14 @@ function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view=
     h+=`<polygon class="area src pending" points="${poly.map(q=>q[0]+','+q[1]).join(' ')}" style="stroke-width:${2.5*k}px;stroke-dasharray:${6*k} ${4*k}"/>`;
     h+=`<g class="area-grip" transform="translate(${g[0]} ${g[1]})"><circle r="${11*k}" style="stroke-width:${2*k}px"/><path d="M${-6*k},0H${6*k}M0,${-6*k}V${6*k}" style="stroke-width:${2*k}px"/></g>`;
     h+=seamDots(b,k,f,d);}
+  // (the centre line of a symmetric pattern; while choosing, the half that will be replaced is shaded)
+  {const img=$('view'),hv=S.symPending||S.fixes.find(f=>f.mode==='half');if(hv){const ln=symLine(hv,S.symPending&&press&&press.sym?press.off:0);if(ln){
+      const W_=img.naturalWidth,H_=img.naturalHeight;h+=`<clipPath id="imgClip"><rect width="${W_}" height="${H_}"/></clipPath>`;
+      if(S.symPending)h+=`<polygon clip-path="url(#imgClip)" class="sym-shade" points="${ln.shade.map(q=>q[0]+','+q[1]).join(' ')}"/>`;
+      h+=`<line clip-path="url(#imgClip)" class="sym-line${S.symPending?' pending':''}" x1="${ln.a[0]}" y1="${ln.a[1]}" x2="${ln.b[0]}" y2="${ln.b[1]}" style="stroke-width:${2.5*k}px;stroke-dasharray:${10*k} ${6*k}"/>`;
+      if(S.symPending)h+=`<g class="area-grip" transform="translate(${ln.mid[0]} ${ln.mid[1]})"><circle r="${12*k}" style="stroke-width:${2*k}px"/><path d="M${-7*k},0H${7*k}M0,${-7*k}V${7*k}" style="stroke-width:${2*k}px"/></g>`;}}}
+  // (pieces that are hard to cut in glass)
+  if(S.checkOn&&S.checkMarks)h+=checkMarkup(k);
   for(let i=0;i<S.junctions.length;i++){const J=S.junctions[i],p=jPage(J),fx=fixAtJunction(J).length>0;
     h+=`<circle class="jn${fx?' fixed':''}${S.fixSel&&S.fixSel.j===i?' sel':''}" cx="${p[0]}" cy="${p[1]}" r="${r}" style="stroke-width:${(fx?2:2.5)*k}"/>`;}
   // fixes that sit on a line rather than at a junction
@@ -2222,6 +2265,9 @@ var press=null;
 function layerPoint(e){const L=$('fixLayer'),r=L.getBoundingClientRect(),sc=layerScale(),img=$('view');
   const offx=(r.width-img.naturalWidth*sc)/2,offy=(r.height-img.naturalHeight*sc)/2;return[(e.clientX-r.left-offx)/sc,(e.clientY-r.top-offy)/sc];}
 $('fixLayer').addEventListener('pointerdown',e=>{if(e.button!==0)return;const[px,py]=layerPoint(e),sc=layerScale();
+  if(S.symPending){const ln=symLine(S.symPending);if(ln){const dx=ln.b[0]-ln.a[0],dy=ln.b[1]-ln.a[1],dd=Math.abs((px-ln.a[0])*dy-(py-ln.a[1])*dx)/(Math.hypot(dx,dy)||1);
+      if(dd<14/sc||Math.hypot(ln.mid[0]-px,ln.mid[1]-py)<16/sc){closeFixPop();press={sym:true,px,py,x0:e.clientX,y0:e.clientY,off:0,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}
+    return;}
   if(S.areaPending){const f=S.areaPending,poly=areaSrcPoly(f,-1),g=gripAt(poly);if(inPoly(poly,px,py)||Math.hypot(g[0]-px,g[1]-py)<14/sc){closeFixPop();
       press={grip:f,pending:true,px,py,x0:e.clientX,y0:e.clientY,d:[0,0],dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}
   if(S.areaMode){if(S.areaPending)cancelPending();closeFixPop();press={area:true,px,py,x0:e.clientX,y0:e.clientY,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}
@@ -2280,6 +2326,8 @@ function showHover(px,py){const L=$('fixLayer'),old=L.querySelector('#hoverMark'
   if(h)L.insertAdjacentHTML('beforeend',`<g id="hoverMark" pointer-events="none">${h}</g>`);}
 $('fixLayer').addEventListener('pointerleave',()=>{const m=$('fixLayer').querySelector('#hoverMark');if(m)m.remove();});
 $('fixLayer').addEventListener('pointermove',e=>{if(!press){if(e.pointerType==='mouse'){const[px,py]=layerPoint(e);cancelAnimationFrame(hoverRaf);hoverRaf=requestAnimationFrame(()=>showHover(px,py));}return;}
+  if(press.sym){const[px,py]=layerPoint(e),geo=pageGeom(),A=symAxisOf(S.symPending);if(!A)return;const[wx,wy]=unrotVec((px-press.px)/geo.k,(py-press.py)/geo.k);
+    press.off=wx*A.u[1]-wy*A.u[0];press.dragging=true;drawFixLayer();return;}
   if(press.grip){const[px,py]=layerPoint(e);press.d=[px-press.px,py-press.py];if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)>=3)press.dragging=true;drawFixLayer();return;}
   if(press.area){if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)>=5)press.dragging=true;if(!press.dragging)return;const[px,py]=layerPoint(e);drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',areaPreview(px,py));return;}
   if(!press.dragging){if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)<5||(press.j<0&&!press.q))return;press.dragging=true;closeFixPop();}
@@ -2290,6 +2338,7 @@ $('fixLayer').addEventListener('pointermove',e=>{if(!press){if(e.pointerType==='
     h+=`<path d="${pth}" fill="none" stroke="var(--fix)" stroke-width="${3*k}" stroke-linecap="round" opacity=".9"/>`;}
   drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',h);});
 $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
+  if(p.sym){press=null;const hv=S.symPending;if(hv&&p.dragging)hv.off=(hv.off||0)+p.off/(hv.flip==='tb'?S.sy:S.sx);drawFixLayer();symMenu();return;}
   if(p.grip&&p.pending){press=null;const f=p.grip;if(p.dragging){const geo=pageGeom(),[wx,wy]=unrotVec(p.d[0]/geo.k,p.d[1]/geo.k);f.ox+=wx/S.sx;f.oy+=wy/S.sy;}drawFixLayer();pendingMenu();return;}
   if(p.grip){press=null;if(!p.dragging){drawFixLayer();return;}const geo=pageGeom(),[wx,wy]=unrotVec(p.d[0]/geo.k,p.d[1]/geo.k),f=p.grip;
     S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=JSON.parse(JSON.stringify(S.fixes));
@@ -2311,18 +2360,93 @@ function pendingMenu(){const f=S.areaPending;if(!f)return;const b=areaPageBox(f)
 function applyPending(){const f=S.areaPending;if(!f)return;S.areaPending=null;$('fixPop').hidden=true;
   S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=S.fixes.slice();S.fixes.push(f);saveFixes();setAreaMode(false);afterFixChange(before);}
 function cancelPending(){S.areaPending=null;$('fixPop').hidden=true;S.fixSel=null;drawFixLayer();}
+// ---- making the whole pattern symmetric ----
+// One half is replaced by the other, flipped across the drawing's centre line (found by the program where the lines
+// on both sides best fall on each other). The line can be slid sideways before applying, if it is off the middle.
+function symAxisOf(hv){const A=S.axes&&(hv.flip==='tb'?S.axes.inkTb:S.axes.inkLr);return A||null;}
+function symLine(hv,extra){const A=symAxisOf(hv);if(!A)return null;const geo=pageGeom(),u=A.u,nv=[u[1],-u[0]],off=(hv.off||0)*(hv.flip==='tb'?S.sy:S.sx)+(extra||0);
+  const c=[A.cx+nv[0]*off,A.cy+nv[1]*off],L=3*Math.max(S.work.w,S.work.h),P=v=>{const q=outPos(v[0],v[1]);return geo.map(q[0],q[1]);};
+  const a=P([c[0]-u[0]*L,c[1]-u[1]*L]),b=P([c[0]+u[0]*L,c[1]+u[1]*L]),mid=P(c),side=-(hv.keep>0?1:-1);
+  const sa=P([c[0]-u[0]*L+nv[0]*L*side,c[1]-u[1]*L+nv[1]*L*side]),sb=P([c[0]+u[0]*L+nv[0]*L*side,c[1]+u[1]*L+nv[1]*L*side]);
+  return{a,b,mid,shade:[a,b,sb,sa],nv,u};}
+const SYMCH=[['lr',-1,'Copy the left half onto the right'],['lr',1,'Copy the right half onto the left'],['tb',1,'Copy the top half onto the bottom'],['tb',-1,'Copy the bottom half onto the top']];
+function symMenu(){const hv=S.symPending;if(!hv)return;const ln=symLine(hv);const had=S.fixes.some(f=>f.mode==='half');
+  let h=`<h3>Make the pattern symmetric</h3><p>The shaded half is replaced by the other half, flipped across the dashed centre line. If the line isn't on the middle of the design, drag it sideways first.</p>`;
+  for(const[fl,kp,t]of SYMCH)h+=`<button data-sym="${fl},${kp}" aria-pressed="${hv.flip===fl&&hv.keep===kp}">${t}</button>`;
+  h+=`<div class="row"><button data-act="apply">Apply</button><button data-act="cancel">Cancel</button></div>`;
+  if(had)h+=`<button data-act="remove">Remove the symmetry (back to the drawing as it was)</button>`;
+  const img=$('view');const px=ln?ln.mid[0]:img.naturalWidth/2,py=ln?Math.min(ln.mid[1],img.naturalHeight*0.25):40;
+  openFixPop(h,px+0.18*img.naturalWidth,py);const pop=$('fixPop');
+  pop.querySelectorAll('[data-sym]').forEach(bt=>bt.onclick=()=>{const[fl,kp]=bt.dataset.sym.split(',');if(hv.flip!==fl)hv.off=0;hv.flip=fl;hv.keep=+kp;drawFixLayer();symMenu();});
+  pop.querySelector('[data-act="apply"]').onclick=()=>{const f={mode:'half',flip:hv.flip,keep:hv.keep,off:hv.off||0};S.symPending=null;$('fixPop').hidden=true;
+    S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=S.fixes.slice();S.fixes=S.fixes.filter(x=>x.mode!=='half');S.fixes.push(f);saveFixes();afterFixChange(before);};
+  pop.querySelector('[data-act="cancel"]').onclick=cancelSym;pop.querySelector('.close').onclick=cancelSym;
+  const rm=pop.querySelector('[data-act="remove"]');if(rm)rm.onclick=()=>{S.symPending=null;$('fixPop').hidden=true;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));const before=S.fixes.slice();S.fixes=S.fixes.filter(x=>x.mode!=='half');saveFixes();afterFixChange(before);};}
+function cancelSym(){S.symPending=null;S.wantInk=false;$('fixPop').hidden=true;drawFixLayer();}
+function openSym(){if(!S.strokes)return;setAreaMode(false);closeFixPop();const cur=S.fixes.find(f=>f.mode==='half');S.symPending=cur?{flip:cur.flip,keep:cur.keep,off:cur.off||0}:{flip:'lr',keep:-1,off:0};
+  if(!symAxisOf(S.symPending)){S.wantInk=true;S.symWaiting=true;setStatus('Finding the centre line…',true);schedule(run,0);return;}
+  drawFixLayer();symMenu();}
+$('fixSym').addEventListener('click',openSym);
+
+// ---- checking the pieces for glass cutting ----
+// Every glass piece (the white space between lines) is looked at for what is hard to cut or likely to break:
+// a point sharper than about 30 degrees, an inside curve deeper than it is wide, a sliver under 1/4 inch wide, or a
+// piece too small to hold while grinding. Each is marked on the picture so it can be changed with the line tools.
+const CHECK={pointDeg:30,pointArm:0.12,narrow:0.25,tinyArea:0.15,pocketDepth:0.3,pocketRatio:0.7};
+async function runCheck(){if(!S.resultURL)return;const id=++S.checkRun;const c=await cutLoops(true);if(id!==S.checkRun)return;const ppi=c.ppi,marks=[];
+  // (how wide each piece is at its widest: the biggest circle that fits inside it)
+  const{lab,GW,GH,outside}=c,D=new Float32Array(GW*GH),INF=1e9;for(let i=0;i<GW*GH;i++)D[i]=lab[i]>=0&&lab[i]!==outside?INF:0;
+  for(let y=1;y<GH-1;y++)for(let x=1;x<GW-1;x++){const i=y*GW+x;if(!D[i])continue;D[i]=Math.min(D[i],D[i-1]+1,D[i-GW]+1,D[i-GW-1]+1.4142,D[i-GW+1]+1.4142);}
+  for(let y=GH-2;y>0;y--)for(let x=GW-2;x>0;x--){const i=y*GW+x;if(!D[i])continue;D[i]=Math.min(D[i],D[i+1]+1,D[i+GW]+1,D[i+GW+1]+1.4142,D[i+GW-1]+1.4142);}
+  const rmax=new Float32Array(c.area.length);for(let i=0;i<GW*GH;i++){const l=lab[i];if(l>=0&&D[i]>rmax[l])rmax[l]=D[i];}
+  // (each piece's outline: the longest loop it owns)
+  const outer=new Map();c.loops.forEach((L,i)=>{const o=c.owners[i];let len=0;for(let k=1;k<L.length;k++)len+=Math.hypot(L[k][0]-L[k-1][0],L[k][1]-L[k-1][1]);if(!outer.has(o)||outer.get(o).len<len)outer.set(o,{L,len});});
+  for(const[o,{L}]of outer){const iss=[],area=c.area[o]/(ppi*ppi),width=2*rmax[o]/ppi;
+    if(area<CHECK.tinyArea)iss.push({t:'tiny piece',p:centroid(L)});
+    else if(width<CHECK.narrow)iss.push({t:'sliver: under 1/4 inch wide',p:centroid(L)});
+    // (evenly spaced points round the outline)
+    const R=resampleLoop(L,0.02);const n=R.length;if(n<12){if(iss.length)marks.push({L,iss});continue;}
+    let sa=0;for(let i=0;i<n;i++){const a=R[i],b=R[(i+1)%n];sa+=a[0]*b[1]-b[0]*a[1];}const sgn=Math.sign(sa)||1;
+    const arm=Math.max(2,Math.round(CHECK.pointArm/0.02)),ang=new Float32Array(n),cvx=new Int8Array(n);
+    for(let i=0;i<n;i++){const p=R[i],a=R[(i-arm+n)%n],b=R[(i+arm)%n],v1=[a[0]-p[0],a[1]-p[1]],v2=[b[0]-p[0],b[1]-p[1]];
+      ang[i]=Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/((Math.hypot(...v1)*Math.hypot(...v2))||1))))*180/Math.PI;
+      const tx=p[0]-a[0],ty=p[1]-a[1],ux=b[0]-p[0],uy=b[1]-p[1];cvx[i]=Math.sign(tx*uy-ty*ux)===sgn?1:0;}
+    for(let i=0;i<n;i++){if(!cvx[i]||ang[i]>=CHECK.pointDeg)continue;let isMin=true;for(let k=-arm;k<=arm;k++){const j=(i+k+n)%n;if(ang[j]<ang[i]||(ang[j]===ang[i]&&k<0)){isMin=false;break;}}
+      if(isMin)iss.push({t:'sharp point ('+Math.round(ang[i])+'°)',p:R[i]});}
+    // (inside curves: how far the outline dips in from a straight edge across the opening, against the opening's width)
+    const H_=hullIdx(R);for(let q=0;q<H_.length;q++){const i0=H_[q],i1=H_[(q+1)%H_.length],A=R[i0],B=R[i1],mouth=Math.hypot(B[0]-A[0],B[1]-A[1]);if(mouth<0.05)continue;
+      let best=0,bi=-1;for(let j=(i0+1)%n;j!==i1;j=(j+1)%n){const P_=R[j],d=Math.abs((B[0]-A[0])*(A[1]-P_[1])-(A[0]-P_[0])*(B[1]-A[1]))/mouth;if(d>best){best=d;bi=j;}}
+      if(bi>=0&&best>=CHECK.pocketDepth&&best>=CHECK.pocketRatio*mouth)iss.push({t:'deep inside curve',p:R[bi]});}
+    if(iss.length)marks.push({L,iss});}
+  S.checkMarks=marks.map(m=>({poly:m.L.map(([x,y])=>[x*OUT_PPI,y*OUT_PPI]),iss:m.iss.map(q=>({t:q.t,p:[q.p[0]*OUT_PPI,q.p[1]*OUT_PPI]}))}));
+  const cnt={};for(const m of marks)for(const q of m.iss){const t=q.t.replace(/ \(.*\)/,'').replace(/:.*/,'');cnt[t]=(cnt[t]||0)+1;}
+  $('note').textContent=marks.length?'Pieces to look at: '+Object.entries(cnt).map(([t,n])=>n+' '+t+(n>1?'s':'')).join(', ')+'. They are marked in orange.':'No hard-to-cut pieces found.';
+  drawFixLayer();}
+function centroid(L){let x=0,y=0;for(const p of L){x+=p[0];y+=p[1];}return[x/L.length,y/L.length];}
+function resampleLoop(L,step){const out=[];let carry=0;for(let i=0;i<L.length;i++){const a=L[i],b=L[(i+1)%L.length],d=Math.hypot(b[0]-a[0],b[1]-a[1]);let t=carry;
+    while(t<d){out.push([a[0]+(b[0]-a[0])*t/d,a[1]+(b[1]-a[1])*t/d]);t+=step;}carry=t-d;}return out;}
+function hullIdx(P){const idx=P.map((_,i)=>i).sort((a,b)=>P[a][0]-P[b][0]||P[a][1]-P[b][1]);const cr=(o,a,b)=>(P[a][0]-P[o][0])*(P[b][1]-P[o][1])-(P[a][1]-P[o][1])*(P[b][0]-P[o][0]);
+  const lo=[],up=[];for(const i of idx){while(lo.length>=2&&cr(lo[lo.length-2],lo[lo.length-1],i)<=0)lo.pop();lo.push(i);}
+  for(let k=idx.length-1;k>=0;k--){const i=idx[k];while(up.length>=2&&cr(up[up.length-2],up[up.length-1],i)<=0)up.pop();up.push(i);}
+  // (in the order the outline runs, so each hull edge spans the stretch of outline between its two ends)
+  return[...new Set([...lo.slice(0,-1),...up.slice(0,-1)])].sort((a,b)=>a-b);}
+function checkMarkup(k){let h='';for(const m of S.checkMarks){h+=`<polygon class="check-piece" points="${m.poly.map(q=>q[0].toFixed(1)+','+q[1].toFixed(1)).join(' ')}" style="stroke-width:${2*k}px"/>`;
+    for(const q of m.iss){h+=`<circle class="check-dot" cx="${q.p[0]}" cy="${q.p[1]}" r="${6*k}" style="stroke-width:${2*k}px"/><text class="check-label" x="${q.p[0]+9*k}" y="${q.p[1]-7*k}" style="font-size:${12*k}px;stroke-width:${3*k}px">${q.t}</text>`;}}
+  return h;}
+S.checkRun=0;
+$('fixCheck').addEventListener('click',()=>{S.checkOn=!S.checkOn;$('fixCheck').setAttribute('aria-pressed',String(S.checkOn));if(S.checkOn){$('note').textContent='Checking the pieces…';runCheck();}else{S.checkMarks=null;$('note').textContent='';drawFixLayer();}});
 function setAreaMode(on){if(!on&&S.areaPending)S.areaPending=null;S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixAreaFlip').hidden=!on;$('fixLayer').classList.toggle('picking-area',on);$('mat').classList.toggle('picking-area',on);
   $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
 S.areaFlip='lr';$('fixAreaFlip').addEventListener('change',e=>{S.areaFlip=e.target.value;});
-$('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;setAreaMode(!S.areaMode);});
-$('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
+$('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;S.symPending=null;setAreaMode(!S.areaMode);});
+$('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
   if(S.fixMode&&S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));showView();}
   closeFixPop();drawFixLayer();updateFixBar();});
 // (only drags changed: redraw straight away; anything else: the program runs again)
 function afterFixChange(before){const key=a=>JSON.stringify(a.filter(f=>!PAGE_FIX.has(f.mode)));if(key(before)!==key(S.fixes))schedule(run,0);else redrawDrags();}
 $('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
 $('fixClear').addEventListener('click',()=>{if(!S.fixes.length)return;const before=S.fixes;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();afterFixChange(before);});
-document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.areaPending&&!/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyPending();return;}if(e.key!=='Escape')return;if(S.areaPending){cancelPending();return;}if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.areaPending&&!/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyPending();return;}if(e.key!=='Escape')return;if(S.symPending){cancelSym();return;}if(S.areaPending){cancelPending();return;}if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
 $('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
 window.addEventListener('resize',()=>{placeFixLayer();});
 
@@ -2423,13 +2547,13 @@ async function cutLoops(){const img=new Image();img.src=S.resultURL;await img.de
     if(k===5||k===10){const pr=k===5?[[3,0],[1,2]]:[[0,1],[3,2]];for(const[a,b]of pr)add(id(a),id(b));}
     else for(const[a,b]of T[k])add(id(a),id(b));}
   // (linked into closed loops)
-  const loops=[],seen=new Set();
+  const loops=[],owners=[],seen=new Set();
   for(const[e0]of segs){if(seen.has(e0))continue;const loop=[];let prev=-1,cur=e0;
     for(let guard=0;guard<4*segs.size;guard++){seen.add(cur);loop.push(pos.get(cur));const nb=segs.get(cur);const nx=nb[0]!==prev||nb.length<2?nb[0]:nb[1];
       if(nx===undefined||nx===e0){break;}if(seen.has(nx)&&nx!==e0)break;prev=cur;cur=nx;}
     const o=own.get(e0);if(o==null||o<0||o===outside||area[o]<minArea||loop.length<8)continue;
-    loops.push(rdp(loop.map(([px,py])=>[(px-1)/ppi,(py-1)/ppi]),0.25/ppi));}
-  return{loops,w:W/ppi,h:H/ppi};}
+    loops.push(rdp(loop.map(([px,py])=>[(px-1)/ppi,(py-1)/ppi]),0.25/ppi));owners.push(o);}
+  return{loops,owners,w:W/ppi,h:H/ppi,ppi,lab,GW,GH,outside,area};}
 // (fewer points along the straight parts, within the given tolerance)
 function rdp(P,tol){if(P.length<4)return P;const keep=new Uint8Array(P.length);keep[0]=keep[P.length-1]=1;const st=[[0,P.length-1]];
   while(st.length){const[a,b]=st.pop();const ax=P[a][0],ay=P[a][1],dx=P[b][0]-ax,dy=P[b][1]-ay,l=Math.hypot(dx,dy)||1e-9;let bi=-1,bd=tol;

@@ -12,6 +12,20 @@ function process(p){
   const areas=Array.isArray(p.areas)?p.areas.filter(a=>a&&[a.x0,a.y0,a.x1,a.y1].every(isFinite)):[];
   // (the centre lines are always found, so the page can show where a new box will copy from)
   let axes={lr:symAxis(m,'lr'),tb:symAxis(m,'tb'),areas:[]},axesOut=axes;
+  // (the centre line of the drawing itself, where the lines on both sides best fall on each other: for making
+  // the whole pattern symmetric)
+  // the whole pattern made symmetric (picked by hand): one half replaced by the other, flipped across the centre
+  // line; right along the centre line both pictures are kept, so a line running down it stays whole
+  const halves=Array.isArray(p.halves)?p.halves.filter(h=>h&&(h.flip==='lr'||h.flip==='tb')):[];
+  // (found only when wanted: it takes a moment)
+  if(p.inkAxes||halves.length){axes.inkLr=inkAxis(m,'lr',axes.lr);axes.inkTb=inkAxis(m,'tb',axes.tb);}
+  for(const hf of halves){const A=hf.flip==='tb'?axes.inkTb:axes.inkLr;if(!A)continue;const src=m.slice(),u=A.u,nv=[u[1],-u[0]],off=+hf.off||0;
+    const cx=A.cx+nv[0]*off,cy=A.cy+nv[1]*off,keepSide=hf.keep>0?1:-1;
+    // (half a line's width either side of the centre line, at this picture's scale)
+    let band=2;{const r=[];for(let y=1;y<H-1;y+=3)for(let x=1;x<W-1;x+=3){const i=y*W+x;if(src[i]&&!src[i-1])for(let k=1;k<60;k++){if(x+k>=W||!src[i+k]){r.push(k);break;}}}r.sort((a,b)=>a-b);if(r.length)band=Math.max(2,0.6*r[r.length>>1]);}
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){const dx=x-cx,dy=y-cy,sd=dx*nv[0]+dy*nv[1];if(Math.sign(sd)===keepSide&&Math.abs(sd)>band)continue;
+      const k=2*(dx*u[0]+dy*u[1]),mx=Math.round(cx+k*u[0]-dx),my=Math.round(cy+k*u[1]-dy),v=mx>=0&&mx<W&&my>=0&&my<H?src[my*W+mx]:0;
+      m[y*W+x]=Math.abs(sd)<=band?(v|src[y*W+x]):v;}}
   if(areas.length){const src=m.slice(),at=(x,y)=>{x=Math.round(x);y=Math.round(y);return x>=0&&x<W&&y>=0&&y<H?src[y*W+x]:0;};
     const areaAxes=axes.areas;
     {for(const a of areas){const G=axes[a.flip==='tb'?'tb':'lr'];areaAxes.push(null);if(!G)continue;
@@ -136,6 +150,18 @@ function refineAxis(src,G,flip,a){const x0=Math.max(1,Math.floor(a.x0)),x1=Math.
       if(top>0.6){const on=hits.filter(q=>q[1]>=0.9*top),near=on.reduce((p,q)=>Math.abs(q[0])<Math.abs(p[0])?q:p);
         let a=near[0],b=near[0];while(on.some(q=>q[0]===a-0.5))a-=0.5;while(on.some(q=>q[0]===b+0.5))b+=0.5;const o=(a+b)/2,nb=mk(c0+o,ta);best.cx=nb.cx;best.cy=nb.cy;best.u=nb.u;}}}
   best.match=bs;return best;}
+// The centre line that lays the drawing's own lines best onto themselves when flipped: tried a little to either side
+// of the outline's centre line and a little tilted, coarse first, then finely.
+function inkAxis(mask,flip,G){if(!G)return null;const f=Math.max(1,Math.round(Math.max(W,H)/600)),w=Math.ceil(W/f),h=Math.ceil(H/f),s=new Uint8Array(w*h);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(mask[y*W+x])s[((y/f)|0)*w+((x/f)|0)]=1;
+  const dl=new Uint8Array(w*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++){let v=0;for(let j=-1;j<=1&&!v;j++)for(let i=-1;i<=1;i++){const X=x+i,Y=y+j;if(X>=0&&Y>=0&&X<w&&Y<h&&s[Y*w+X]){v=1;break;}}dl[y*w+x]=v;}
+  const pts=[];for(let i=0;i<w*h;i++)if(s[i])pts.push(i%w,(i/w)|0);const n=pts.length/2;if(!n)return Object.assign({},G);const st=Math.max(1,Math.floor(n/30000));
+  const mk=(c,ang)=>{const u=flip==='tb'?[Math.cos(ang),Math.sin(ang)]:[-Math.sin(ang),Math.cos(ang)];return flip==='tb'?{cx:G.cx,cy:c,u}:{cx:c,cy:G.cy,u};};
+  const score=A=>{const cx=(A.cx+0.5)/f-0.5,cy=(A.cy+0.5)/f-0.5,u=A.u;let hit=0,tot=0;for(let i=0;i<n;i+=st){const dx=pts[2*i]-cx,dy=pts[2*i+1]-cy,k=2*(dx*u[0]+dy*u[1]),x=Math.round(cx+k*u[0]-dx),y=Math.round(cy+k*u[1]-dy);tot++;if(x>=0&&x<w&&y>=0&&y<h&&dl[y*w+x])hit++;}return hit/(tot||1);};
+  const angOf=A=>flip==='tb'?Math.atan2(A.u[1],A.u[0]):Math.atan2(-A.u[0],A.u[1]);
+  let c=flip==='tb'?G.cy:G.cx,an=angOf(G),b=score(mk(c,an));const span=0.03*(flip==='tb'?H:W);
+  for(const[dc,da,nc,na]of[[f,0.25,Math.ceil(span/f),6],[f/4,0.05,6,5]]){const cc=c,aa=an;for(let ia=-na;ia<=na;ia++)for(let ic=-nc;ic<=nc;ic++){const A=mk(cc+ic*dc,aa+ia*da*Math.PI/180),sc=score(A);if(sc>b+1e-9){b=sc;c=cc+ic*dc;an=aa+ia*da*Math.PI/180;}}}
+  const out=mk(c,an);out.match=b;return out;}
 function symAxis(mask,flip){const f=Math.max(1,Math.round(Math.max(W,H)/500)),w=Math.ceil(W/f),h=Math.ceil(H/f),s=new Uint8Array(w*h);
   for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(mask[y*W+x])s[((y/f)|0)*w+((x/f)|0)]=1;
   // (the panel: everything not reachable from the picture's edge without crossing a line)
