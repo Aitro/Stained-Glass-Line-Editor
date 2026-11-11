@@ -441,43 +441,84 @@ function areaBase(){const areas=S.fixes.filter(f=>f.mode==='area'),key=JSON.stri
     for(const f of areas)B=applyOneArea(B,f);S.areaCache={raw:S.rawStrokes,key,B};}
   const B=S.areaCache.B;S.offs=B.offs;S.hw=B.hw;S.fill=B.fill;S.fcurve=B.fcurve;return B;}
 function applyOneArea(B,f){const{P,offs,hw}=B,n=offs.length-1,lw=Math.max(2,widthIn()*S.workPPI),cx=patternMidX();
-  const T=areaWorkBox(f),M=[2*cx-T[2],T[1],2*cx-T[0],T[3]];
+  const T=areaWorkBox(f),M=[2*cx-T[2],T[1],2*cx-T[0],T[3]],box=Math.min(T[2]-T[0],T[3]-T[1]);
   const inB=(x,y,b)=>x>b[0]&&x<b[2]&&y>b[1]&&y<b[3];
+  const hyp=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1]);
   // (where the segment from p to q, one end inside box b and one outside, crosses its edge)
   const cross=(p,q,b)=>{let lo=0,hi=1;const ip=inB(p[0],p[1],b);for(let k=0;k<30;k++){const t=(lo+hi)/2,x=p[0]+(q[0]-p[0])*t,y=p[1]+(q[1]-p[1])*t;if(inB(x,y,b)===ip)lo=t;else hi=t;}return(lo+hi)/2;};
-  // the pieces of every line that lie outside the box (kept), and inside the matching box (copied, flipped)
-  const runs=[];   // {pts:[[x,y]], hw:[], edge:[startOnEdge,endOnEdge], copy}
-  const take=(want,b,flip)=>{for(let s=0;s<n;s++){let cur=null;const a=offs[s],e=offs[s+1];
+  // the pieces of every line that lie outside the box (kept), and inside the matching box (copied, flipped);
+  // a copied piece remembers where its line carries on outside the matching box
+  const runs=[];
+  const take=(want,b,copy)=>{for(let s=0;s<n;s++){let cur=null;const a=offs[s],e=offs[s+1];
     for(let j=a;j<e;j++){const p=[P[2*j],P[2*j+1]],ok=want(p);
-      if(ok){if(!cur){cur={pts:[],hw:[],edge:[false,false],copy:flip};
-          if(j>a){const q=[P[2*j-2],P[2*j-1]],t=cross(q,p,b);cur.pts.push([q[0]+(p[0]-q[0])*t,q[1]+(p[1]-q[1])*t]);cur.hw.push(hw[j-1]+(hw[j]-hw[j-1])*t);cur.edge[0]=true;}}
+      if(ok){if(!cur){cur={pts:[],hw:[],edge:[false,false],copy,cont:[null,null]};
+          if(j>a){const q=[P[2*j-2],P[2*j-1]],t=cross(q,p,b);cur.pts.push([q[0]+(p[0]-q[0])*t,q[1]+(p[1]-q[1])*t]);cur.hw.push(hw[j-1]+(hw[j]-hw[j-1])*t);cur.edge[0]=true;cur.cont[0]={s,j:j-1,dir:-1};}}
         cur.pts.push(p);cur.hw.push(hw[j]);}
-      else if(cur){const q=[P[2*j-2],P[2*j-1]],t=cross(q,p,b);cur.pts.push([q[0]+(p[0]-q[0])*t,q[1]+(p[1]-q[1])*t]);cur.hw.push(hw[j-1]+(hw[j]-hw[j-1])*t);cur.edge[1]=true;runs.push(cur);cur=null;}}
+      else if(cur){const q=[P[2*j-2],P[2*j-1]],t=cross(q,p,b);cur.pts.push([q[0]+(p[0]-q[0])*t,q[1]+(p[1]-q[1])*t]);cur.hw.push(hw[j-1]+(hw[j]-hw[j-1])*t);cur.edge[1]=true;cur.cont[1]={s,j,dir:1};runs.push(cur);cur=null;}}
     if(cur)runs.push(cur);}};
   take(p=>!inB(p[0],p[1],T),T,false);
   const before=runs.length;take(p=>inB(p[0],p[1],M),M,true);
   for(let r=before;r<runs.length;r++)runs[r].pts=runs[r].pts.map(p=>[2*cx-p[0],p[1]]);
   for(let r=runs.length-1;r>=0;r--)if(runs[r].pts.length<2)runs.splice(r,1);
-  // join the cut ends at the edge of the box: a copied end to the nearest kept end, else onto the nearest line
-  // (each cut end with the direction it was heading as it reached the edge)
-  const ends=[];runs.forEach((R,r)=>{for(const at of[0,1])if(R.edge[at]){const m=R.pts.length,e=at?R.pts[m-1]:R.pts[0];let b=e,L=0;
-    for(let i=1;i<m&&L<2*lw;i++){const q=at?R.pts[m-1-i]:R.pts[i];L+=Math.hypot(q[0]-b[0],q[1]-b[1]);b=q;}
-    const dx=e[0]-b[0],dy=e[1]-b[1],dl=Math.hypot(dx,dy)||1;ends.push({r,at,p:e.slice(),d:[dx/dl,dy/dl],used:false});}});
-  // (the two sides can sit a few line widths apart: the join is spread over about a third of the box so it bends gently)
-  const spread=Math.max(4*lw,0.35*Math.min(T[2]-T[0],T[3]-T[1]));
-  const moveEnd=(R,at,q)=>{const pts=R.pts,m=pts.length,e=at?m-1:0,d=[q[0]-pts[e][0],q[1]-pts[e][1]];if(Math.hypot(d[0],d[1])<1e-6)return;
-    let L=0;const reach=spread;for(let i=0;i<m;i++){const k=at?m-1-i:i;if(i>0){const kp=at?k+1:k-1;L+=Math.hypot(pts[k][0]-pts[kp][0],pts[k][1]-pts[kp][1]);}
-      const w=1-smooth01(L/reach);if(w<=0)break;pts[k]=[pts[k][0]+d[0]*w,pts[k][1]+d[1]*w];}};
-  const nearOn=(p,copy)=>{let best=null,bd=4*lw;runs.forEach(R=>{if(R.copy!==copy)return;for(const q of R.pts){const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd){bd=d;best=q;}}});return best;};
-  const cE=ends.filter(e=>runs[e.r].copy),kE=ends.filter(e=>!runs[e.r].copy);
-  // (a copied end and a kept end that carry on from each other meet halfway, each easing in)
-  const pairs=[];for(const c of cE)for(const k of kE){const d=Math.hypot(c.p[0]-k.p[0],c.p[1]-k.p[1]),dot=c.d[0]*k.d[0]+c.d[1]*k.d[1];
-    if(d<Math.max(4*lw,0.25*Math.min(T[2]-T[0],T[3]-T[1]))&&dot<-Math.cos(50*Math.PI/180))pairs.push([d+lw*(1+dot),c,k]);}
-  const link=new Map();   // "run:end" -> [run,end] of the line it now carries on into
-  pairs.sort((a,b)=>a[0]-b[0]);for(const[,c,k]of pairs){if(c.used||k.used)continue;c.used=k.used=true;const q=[(c.p[0]+k.p[0])/2,(c.p[1]+k.p[1])/2];
-    moveEnd(runs[c.r],c.at,q);moveEnd(runs[k.r],k.at,q);link.set(c.r+':'+c.at,[k.r,k.at]);link.set(k.r+':'+k.at,[c.r,c.at]);}
-  for(const e of ends){if(e.used)continue;const q=nearOn(e.p,!runs[e.r].copy);if(q)moveEnd(runs[e.r],e.at,q);}
-  // (joined pieces become one line, smoothed around each join so it bends without a kink)
+  const endPt=(R,at)=>at?R.pts[R.pts.length-1]:R.pts[0];
+  // (the nearest point on a run to p, and how far)
+  const nearRun=(R,p)=>{let best=null,bd=Infinity;for(let i=0;i+1<R.pts.length;i++){const a=R.pts[i],b=R.pts[i+1],ab=[b[0]-a[0],b[1]-a[1]],l2=ab[0]*ab[0]+ab[1]*ab[1]||1;
+      const t=Math.max(0,Math.min(1,((p[0]-a[0])*ab[0]+(p[1]-a[1])*ab[1])/l2)),q=[a[0]+ab[0]*t,a[1]+ab[1]*t],d=hyp(p,q);if(d<bd){bd=d;best=q;}}return[best,bd];};
+  // lines that end on another line (outside the box): remembered, so they can be put back on it afterwards
+  const lands=[];runs.forEach((R,r)=>{for(const at of[0,1]){if(R.edge[at])continue;const e=endPt(R,at);let bt=-1,bd=1.2*lw;
+    runs.forEach((R2,r2)=>{if(r2===r)return;const[,d]=nearRun(R2,e);if(d<bd&&hyp(e,endPt(R2,0))>1.5*lw&&hyp(e,endPt(R2,1))>1.5*lw){bd=d;bt=r2;}});if(bt>=0)lands.push({r,at,to:bt,d0:bd});}});
+  // each cut end with the direction it was heading as it reached the edge
+  const dirAt=(R,at)=>{const m=R.pts.length,e=endPt(R,at);let b=e,L=0;for(let i=1;i<m&&L<2*lw;i++){const q=at?R.pts[m-1-i]:R.pts[i];L+=hyp(q,b);b=q;}const dl=hyp(e,b)||1;return[(e[0]-b[0])/dl,(e[1]-b[1])/dl];};
+  const ends=[];runs.forEach((R,r)=>{for(const at of[0,1])if(R.edge[at])ends.push({r,at,p:endPt(R,at).slice(),d:dirAt(R,at),used:false});});
+  // move a run's end to q, easing the run in over the given length
+  const moveEnd=(R,at,q,reach)=>{const pts=R.pts,m=pts.length,e=at?m-1:0,d=[q[0]-pts[e][0],q[1]-pts[e][1]];if(Math.hypot(d[0],d[1])<1e-6)return;
+    let L=0;for(let i=0;i<m;i++){const k=at?m-1-i:i;if(i>0){const kp=at?k+1:k-1;L+=hyp(pts[k],pts[kp]);}const w=1-smooth01(L/reach);if(w<=0)break;pts[k]=[pts[k][0]+d[0]*w,pts[k][1]+d[1]*w];}};
+  const runLen=R=>{let L=0;for(let i=1;i<R.pts.length;i++)L+=hyp(R.pts[i],R.pts[i-1]);return L;};
+  // copied ends and kept ends that carry on from each other are joined
+  const cE=ends.filter(e=>runs[e.r].copy),kE=ends.filter(e=>!runs[e.r].copy),link=new Map();
+  const pairs=[];for(const c of cE)for(const k of kE){const d=hyp(c.p,k.p),dot=c.d[0]*k.d[0]+c.d[1]*k.d[1];
+    if(d<Math.max(4*lw,0.25*box)&&dot<-Math.cos(50*Math.PI/180))pairs.push([d+lw*(1+dot),c,k]);}
+  pairs.sort((a,b)=>a[0]-b[0]);
+  // (a line that only passes through the box, where the two sides place it more than about a line width apart,
+  // keeps its own course: copying it would make a step at its edges)
+  {const pick=new Map();for(const[,c,k]of pairs){if(pick.has('c'+c.r+':'+c.at)||pick.has('k'+k.r+':'+k.at))continue;pick.set('c'+c.r+':'+c.at,k);pick.set('k'+k.r+':'+k.at,c);}
+    for(let r=before;r<runs.length;r++){const R=runs[r];if(!R.copy||!R.edge[0]||!R.edge[1])continue;const k0=pick.get('c'+r+':0'),k1=pick.get('c'+r+':1');if(!k0||!k1)continue;
+      const o0=hyp(R.pts[0],k0.p),o1=hyp(R.pts[R.pts.length-1],k1.p);if(Math.max(o0,o1)<1.2*lw)continue;
+      const a=runs[k0.r].cont[k0.at],b=runs[k1.r].cont[k1.at];if(!a||!b||a.s!==b.s)continue;
+      const lo=Math.min(a.j,b.j),hi=Math.max(a.j,b.j);let ok=true;for(let j=lo;j<=hi;j++)if(!inB(P[2*j],P[2*j+1],T)){ok=false;break;}if(!ok||hi-lo>500)continue;
+      const pts=[],hws=[];for(let j=a.j;a.j<=b.j?j<=b.j:j>=b.j;j+=a.j<=b.j?1:-1){pts.push([P[2*j],P[2*j+1]]);hws.push(hw[j]);}
+      R.pts=[k0.p.slice(),...pts,k1.p.slice()];R.hw=[hws[0],...hws,hws[hws.length-1]];R.copy=false;R.cont=[null,null];}}
+  for(const[,c,k]of pairs){if(c.used||k.used)continue;c.used=k.used=true;const RC=runs[c.r],RK=runs[k.r];
+    // (the copied line carries on, outside the box, as far as the spot where it comes closest to the kept line:
+    // the join goes there, so the copy inside the box stays exact and the join is as small as it can be)
+    const ct=RC.cont[c.at];if(ct){const Cc=[],Ch=[];let L=0,prev=endPt(RC,c.at);
+      for(let j=ct.j;j>=offs[ct.s]&&j<offs[ct.s+1];j+=ct.dir){const q=[2*cx-P[2*j],P[2*j+1]];L+=hyp(q,prev);prev=q;Cc.push(q);Ch.push(hw[j]);if(L>0.6*box)break;}
+      const K=at=>at?RK.pts.slice().reverse():RK.pts.slice(),Kp=K(k.at),Klen=runLen(RK);
+      if(Cc.length>=2){const CR={pts:[endPt(RC,c.at),...Cc]};let best=null,bc=Infinity,L2=0;
+        for(let i=0;i<Kp.length;i++){if(i>0)L2+=hyp(Kp[i],Kp[i-1]);if(L2>Math.min(0.6*box,Klen-1.5*lw))break;const[q,d]=nearRun(CR,Kp[i]);const cost=d+0.02*L2;if(cost<bc){bc=cost;best={i,q,d};}}
+        const d0=nearRun(CR,Kp[0])[1];
+        if(best&&best.i>0&&best.d<0.8*d0){
+          // (copied line: carried on along its own continuation up to the matching point)
+          let u=0,ud=Infinity;for(let x=0;x<Cc.length;x++){const d=hyp(Cc[x],best.q);if(d<ud){ud=d;u=x;}}
+          const addP=Cc.slice(0,u+1),addH=Ch.slice(0,u+1);
+          if(c.at){RC.pts.push(...addP);RC.hw.push(...addH);}else{RC.pts.unshift(...addP.reverse());RC.hw.unshift(...addH.reverse());}
+          // (kept line: cut back to there)
+          if(k.at){RK.pts.splice(RK.pts.length-best.i,best.i);RK.hw.splice(RK.hw.length-best.i,best.i);}else{RK.pts.splice(0,best.i);RK.hw.splice(0,best.i);}}}}
+    const q=endPt(RC,c.at).slice(),off=hyp(q,endPt(RK,k.at));
+    moveEnd(RK,k.at,q,Math.min(Math.max(4*lw,10*off),0.5*runLen(RK)));   // (only the kept line eases in)
+    link.set(c.r+':'+c.at,[k.r,k.at]);link.set(k.r+':'+k.at,[c.r,c.at]);}
+  // a cut end left over carries on, or is cut back, along its own direction to meet the nearest line; failing
+  // that it moves onto the nearest line
+  const meet=(R,at,r0)=>{const e=endPt(R,at),u=dirAt(R,at),lim=Math.max(4*lw,0.3*box);let best=null,bt=Infinity;
+    runs.forEach((R2,r2)=>{if(r2===r0)return;for(let i=0;i+1<R2.pts.length;i++){const a=R2.pts[i],b=R2.pts[i+1],ex=b[0]-a[0],ey=b[1]-a[1],den=u[0]*ey-u[1]*ex;if(Math.abs(den)<1e-9)continue;
+      const t=((a[0]-e[0])*ey-(a[1]-e[1])*ex)/den,s=((a[0]-e[0])*u[1]-(a[1]-e[1])*u[0])/den;if(s<0||s>1||t<-2*lw||t>lim)continue;if(Math.abs(t)<Math.abs(bt)){bt=t;best=[e[0]+t*u[0],e[1]+t*u[1]];}}});
+    if(!best){let bd=4*lw;runs.forEach((R2,r2)=>{if(r2===r0)return;const[q,d]=nearRun(R2,e);if(q&&d<bd){bd=d;best=q;}});}
+    if(!best)return;if(bt>0&&bt<Infinity){if(at)R.pts.push(best);else R.pts.unshift(best);if(at)R.hw.push(R.hw[R.hw.length-1]);else R.hw.unshift(R.hw[0]);}
+    else moveEnd(R,at,best,4*lw);};
+  for(const e of ends)if(!e.used)meet(runs[e.r],e.at,e.r);
+  // lines that ended on a line that has since moved are put back on it
+  for(const L of lands){const R=runs[L.r],e=endPt(R,L.at),[q,d]=nearRun(runs[L.to],e);if(q&&d>L.d0+0.3*lw)moveEnd(R,L.at,q,Math.max(4*lw,6*d));}
+  // joined pieces become one line, with only the slightest smoothing right at each join
   const done=new Set(),chains=[];
   const walk=(r0,at0)=>{const pts=[],hws=[],joins=[];let r=r0,from=at0;
     for(let guard=0;guard<runs.length+1&&!done.has(r);guard++){done.add(r);const R=runs[r];let P2=R.pts,H2=R.hw;if(from===1){P2=P2.slice().reverse();H2=H2.slice().reverse();}
@@ -485,12 +526,11 @@ function applyOneArea(B,f){const{P,offs,hw}=B,n=offs.length-1,lw=Math.max(2,widt
       const out=from===1?0:1,nx=link.get(r+':'+out);if(!nx)break;r=nx[0];from=nx[1];}
     return{pts,hw:hws,joins};};
   for(let r=0;r<runs.length;r++){if(done.has(r))continue;let r0=r,at0=0;
-    // (start from a loose end of the chain, if it has one)
     for(let guard=0,cr=r,ca=0;guard<runs.length;guard++){const nx=link.get(cr+':'+ca);if(!nx)break;cr=nx[0];ca=1-nx[1];if(cr===r)break;r0=cr;at0=ca;}
     chains.push(walk(r0,at0));}
-  for(const C of chains){if(!C.joins.length)continue;const pts=C.pts,m=pts.length,Ls=[0];for(let i=1;i<m;i++)Ls.push(Ls[i-1]+Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]));
-    const sig=Math.max(1.5*lw,spread/4),win=spread,src=pts.map(q=>q.slice());
-    for(const jn of C.joins){const s0=Ls[jn];for(let i=0;i<m;i++){const dd=Math.abs(Ls[i]-s0);if(dd>win)continue;const b=(1-smooth01(dd/win))*smooth01(Math.min(Ls[i],Ls[m-1]-Ls[i])/Math.max(2*lw,0.5*win));   // (the line's own ends stay where they are)
+  for(const C of chains){if(!C.joins.length)continue;const pts=C.pts,m=pts.length,Ls=[0];for(let i=1;i<m;i++)Ls.push(Ls[i-1]+hyp(pts[i],pts[i-1]));
+    const sig=1.5*lw,win=5*lw,src=pts.map(q=>q.slice());
+    for(const jn of C.joins){const s0=Ls[jn];for(let i=0;i<m;i++){const dd=Math.abs(Ls[i]-s0);if(dd>win)continue;const b=(1-smooth01(dd/win))*smooth01(Math.min(Ls[i],Ls[m-1]-Ls[i])/(2*lw));
         let sx=0,sy=0,sw=0;for(let k=i;k>=0&&Ls[i]-Ls[k]<3*sig;k--){const w=Math.exp(-((Ls[i]-Ls[k])**2)/(2*sig*sig));sx+=src[k][0]*w;sy+=src[k][1]*w;sw+=w;}
         for(let k=i+1;k<m&&Ls[k]-Ls[i]<3*sig;k++){const w=Math.exp(-((Ls[k]-Ls[i])**2)/(2*sig*sig));sx+=src[k][0]*w;sy+=src[k][1]*w;sw+=w;}
         pts[i]=[pts[i][0]+(sx/sw-pts[i][0])*b,pts[i][1]+(sy/sw-pts[i][1])*b];}}}
