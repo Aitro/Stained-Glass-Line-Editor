@@ -109,6 +109,8 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .mat.fit .stage{height:100%}
 .mat.fit .stage img{max-width:100%;max-height:100%;object-fit:contain}
 .mat:not(.fit) .stage img{max-width:none}
+/* (zoomed in: the stage grows to the picture, so every part of it can be scrolled to) */
+.mat:not(.fit) .stage{width:max-content;min-width:100%;justify-content:safe center;align-items:safe center}
 .sample-tag{position:absolute;top:12px;left:12px;background:rgba(0,0,0,.55);color:#fff;font-size:.78rem;padding:4px 10px;border-radius:20px;pointer-events:none;z-index:1}
 .drop-note{font-size:.82rem;color:var(--muted)}
 
@@ -159,6 +161,8 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 
 .field-inline{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:.92rem}
 .field-inline select{flex:0 1 auto;min-width:0}
+
+.fix-layer .pt.joint{fill:#fff;stroke:var(--fix-done)}
 </style>
 
 <div class="app">
@@ -358,10 +362,10 @@ function process(p){
   // little apart: near the edge the copy is shifted so each line meets its own line outside exactly, easing back to
   // an exact copy further in. Right at the edge both pictures are kept, so crossing lines stay joined.
   const areas=Array.isArray(p.areas)?p.areas.filter(a=>a&&[a.x0,a.y0,a.x1,a.y1].every(isFinite)):[];
-  let axes=null,axesOut=null;
+  // (the centre lines are always found, so the page can show where a new box will copy from)
+  let axes={lr:symAxis(m,'lr'),tb:symAxis(m,'tb'),areas:[]},axesOut=axes;
   if(areas.length){const src=m.slice(),at=(x,y)=>{x=Math.round(x);y=Math.round(y);return x>=0&&x<W&&y>=0&&y<H?src[y*W+x]:0;};
-    axes={lr:symAxis(src,'lr'),tb:symAxis(src,'tb')};
-    const areaAxes=[];axesOut=axes;axes.areas=areaAxes;
+    const areaAxes=axes.areas;
     {for(const a of areas){const G=axes[a.flip==='tb'?'tb':'lr'];areaAxes.push(null);if(!G)continue;
         const ox=+a.ox||0,oy=+a.oy||0,moved=Math.hypot(ox,oy)>0.5;
         // (a copy-from box the person moved: their spot is taken as it is, across the outline's centre line)
@@ -378,7 +382,7 @@ function process(p){
           c.sort((p,q)=>p[0]-q[0]);const ui=new Set(),uj=new Set(),out=[];for(const[d,i,j]of c){if(ui.has(i)||uj.has(j))continue;ui.add(i);uj.add(j);out.push([i,j,d]);}return out;};
         // (each edge is nudged a little, in or out, to where the lines on both sides agree best)
         const K=Math.round(2.5*lw),cost=E=>{const ro=runs(at,E),rm=runs(mirAt,E),pr=pair(ro,rm);let c=2.5*lw*(ro.length+rm.length-2*pr.length);for(const q of pr)c+=q[2];return c;};
-        for(let k=0;k<4;k++){let bo=0,bc=Infinity;for(let o=-K;o<=K;o++){const nx0=x0+(k===2?o:0),nx1=x1+(k===3?o:0),ny0=y0+(k===0?o:0),ny1=y1+(k===1?o:0);
+        for(let k=0;k<(moved?0:4);k++){let bo=0,bc=Infinity;for(let o=-K;o<=K;o++){const nx0=x0+(k===2?o:0),nx1=x1+(k===3?o:0),ny0=y0+(k===0?o:0),ny1=y1+(k===1?o:0);
             if(nx0<1||ny0<1||nx1>W-2||ny1>H-2||nx1-nx0<4||ny1-ny0<4)continue;const E=[[nx0,ny0,1,0,nx1-nx0],[nx0,ny1,1,0,nx1-nx0],[nx0,ny0,0,1,ny1-ny0],[nx1,ny0,0,1,ny1-ny0]][k];
             const c=cost(E)+0.02*lw*Math.abs(o);if(c<bc){bc=c;bo=o;}}
           if(k===0)y0+=bo;else if(k===1)y1+=bo;else if(k===2)x0+=bo;else x1+=bo;}
@@ -1668,7 +1672,12 @@ function loadImage(img,name,isSample){
   loadFixes(name,c.width,c.height);
   $('fileName').textContent=name;$('sampleTag').hidden=!isSample;$('sSize').textContent=c.width+' × '+c.height+' px';
   if(S.origURL)URL.revokeObjectURL(S.origURL);c.toBlob(b=>{S.origURL=URL.createObjectURL(b);if(S.view==='original')showView();});
-  findCrop();if($('lockRatio').checked){const z=sizeIn(),L=Math.max(z.w,z.h);const r=S.crop.h/S.crop.w;
+  findCrop();
+  // (the size this picture was last used at here, or the size a saved PNG says it was made at; otherwise the
+  // longest side stays as it is and the other follows the picture)
+  let known=null;try{known=JSON.parse(localStorage.getItem(sizeKey())||'null');}catch(e){}if(!known&&!isSample)known=S.fileSize;S.fileSize=null;
+  if(known&&known.w>0&&known.h>0){$('lockRatio').checked=!!known.lock;$('sizeW').value=fit2(known.w);$('sizeH').value=fit2(known.h);updateLabels();}
+  else if($('lockRatio').checked){const z=sizeIn(),L=Math.max(z.w,z.h);const r=S.crop.h/S.crop.w;
     if(r>=1){$('sizeH').value=fit2(L);$('sizeW').value=fit2(L/r);}else{$('sizeW').value=fit2(L);$('sizeH').value=fit2(L*r);}}
   prepare();}
 function findCrop(){const c=S.src,d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;const inv=$('invert').checked;
@@ -1815,9 +1824,15 @@ function filletSVG(geo){const fp=filletPaths(geo);if(!fp.length)return'';const d
 // add a pHYs chunk so the PNG prints at the right size
 const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
 function crc32(b){let c=0xffffffff;for(let i=0;i<b.length;i++)c=CRC[(c^b[i])&255]^(c>>>8);return(c^0xffffffff)>>>0;}
+// (a saved PNG also carries the pattern size it was made at, so opening it again here keeps that size)
+function textChunk(key,val){const t=new TextEncoder().encode(key+'\0'+val),c=new Uint8Array(12+t.length),dv=new DataView(c.buffer);dv.setUint32(0,t.length);c.set([116,69,88,116],4);c.set(t,8);dv.setUint32(8+t.length,crc32(c.subarray(4,8+t.length)));return c;}
+function readPngSize(buf){try{const b=new Uint8Array(buf),dv=new DataView(buf);if(b[1]!==80||b[2]!==78)return null;let i=8;
+  while(i+8<=b.length){const n=dv.getUint32(i),type=String.fromCharCode(b[i+4],b[i+5],b[i+6],b[i+7]);
+    if(type==='tEXt'){const t=new TextDecoder().decode(b.subarray(i+8,i+8+n)),z=t.indexOf('\0');if(t.slice(0,z)==='LeadLineLeveler'){const m=JSON.parse(t.slice(z+1));if(m.w>0&&m.h>0)return m;}}
+    if(type==='IEND'||type==='IDAT')break;i+=12+n;}}catch(e){}return null;}
 async function withPPI(blob,ppi){try{const buf=new Uint8Array(await blob.arrayBuffer());const ppm=Math.round(ppi/0.0254);
   const chunk=new Uint8Array(21);const dv=new DataView(chunk.buffer);dv.setUint32(0,9);chunk.set([112,72,89,115],4);dv.setUint32(8,ppm);dv.setUint32(12,ppm);chunk[16]=1;
-  dv.setUint32(17,crc32(chunk.subarray(4,17)));const out=new Uint8Array(buf.length+21);out.set(buf.subarray(0,33));out.set(chunk,33);out.set(buf.subarray(33),54);
+  dv.setUint32(17,crc32(chunk.subarray(4,17)));const z=sizeIn(),tx=textChunk('LeadLineLeveler',JSON.stringify({w:z.w,h:z.h,lock:$('lockRatio').checked})),out=new Uint8Array(buf.length+21+tx.length);out.set(buf.subarray(0,33));out.set(chunk,33);out.set(tx,54);out.set(buf.subarray(33),54+tx.length);
   return new Blob([out],{type:'image/png'});}catch(e){return blob;}}
 
 function showView(){const img=$('view');
@@ -1849,7 +1864,7 @@ function showStats(geo){const s=S.stats;if(!s||!S.offs||S.offs.length<2){['sThin
 // ---- fix lines: the user's own choices at junctions and along lines ----
 // A fix is kept in the source picture's own pixels, so it stays put when the size or line width changes,
 // and it is remembered in this browser for the same picture.
-const PAGE_FIX=new Set(['drag','mirror','smooth','straight','fillet']);   // fixes applied to the finished lines (no re-run needed)
+const PAGE_FIX=new Set(['drag','mirror','smooth','straight','fillet','joint']);   // fixes applied to the finished lines (no re-run needed)
 const FIXCOL=['#d2392c','#1f6fd1','#e08a00','#7b3fbf','#13917b','#c2185b','#5d6b70'];
 function srcToWork(sx,sy){const cr=S.crop;return[(sx-cr.x+PAD)*S.sx-0.5,(sy-cr.y+PAD)*S.sy-0.5];}   // -> worker's own x,y
 function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)/S.sy+cr.y-PAD];}
@@ -1888,6 +1903,11 @@ function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view=
     const moving=press&&press.grip===f,d=moving?press.d||[0,0]:[0,0],poly=areaSrcPoly(f,i).map(q=>[q[0]+d[0],q[1]+d[1]]),g=gripAt(poly);
     h+=`<polygon class="area src" points="${poly.map(q=>q[0]+','+q[1]).join(' ')}" style="stroke-width:${2*k}px;stroke-dasharray:${6*k} ${4*k}"/>`;
     h+=`<g class="area-grip" transform="translate(${g[0]} ${g[1]})"><title>Drag to move the spot this box copies from</title><circle r="${11*k}" style="stroke-width:${2*k}px"/><path d="M${-6*k},0H${6*k}M0,${-6*k}V${6*k}" style="stroke-width:${2*k}px"/></g>`;});
+  if(S.areaPending){const f=S.areaPending,b=areaPageBox(f),moving=press&&press.grip===f,d=moving?press.d||[0,0]:[0,0],poly=areaSrcPoly(f,-1).map(q=>[q[0]+d[0],q[1]+d[1]]),g=gripAt(poly);
+    h+=`<rect class="area" x="${b[0]}" y="${b[1]}" width="${b[2]-b[0]}" height="${b[3]-b[1]}" style="stroke-width:${2*k}px"/>`;
+    h+=`<polygon class="area src pending" points="${poly.map(q=>q[0]+','+q[1]).join(' ')}" style="stroke-width:${2.5*k}px;stroke-dasharray:${6*k} ${4*k}"/>`;
+    h+=`<g class="area-grip" transform="translate(${g[0]} ${g[1]})"><circle r="${11*k}" style="stroke-width:${2*k}px"/><path d="M${-6*k},0H${6*k}M0,${-6*k}V${6*k}" style="stroke-width:${2*k}px"/></g>`;
+    h+=seamDots(b,k,f,d);}
   for(let i=0;i<S.junctions.length;i++){const J=S.junctions[i],p=jPage(J),fx=fixAtJunction(J).length>0;
     h+=`<circle class="jn${fx?' fixed':''}${S.fixSel&&S.fixSel.j===i?' sel':''}" cx="${p[0]}" cy="${p[1]}" r="${r}" style="stroke-width:${(fx?2:2.5)*k}"/>`;}
   // fixes that sit on a line rather than at a junction
@@ -1895,7 +1915,7 @@ function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view=
   for(const f of S.fixes){if(f.mode==='area')continue;if(f.mode!=='corner'&&f.mode!=='round'&&!PAGE_FIX.has(f.mode))continue;if(f.mode==='drag'&&f.j)continue;   // (a dragged junction shows as its dot)
 let[x,y]=srcToWork(f.sx+(f.mode==='drag'?f.dx:0),f.sy+(f.mode==='drag'?f.dy:0));
     if(!PAGE_FIX.has(f.mode)&&S.junctions.some(J=>Math.hypot(J.wx-x,J.wy-y)<12))continue;const q=outPos(x,y);const p=geo.map(q[0],q[1]);
-    h+=`<rect class="pt" x="${p[0]-r*.8}" y="${p[1]-r*.8}" width="${r*1.6}" height="${r*1.6}" transform="rotate(45 ${p[0]} ${p[1]})" style="stroke-width:${2*k}"/>`;}
+    h+=f.mode==='joint'?`<rect class="pt joint" x="${p[0]-r*.6}" y="${p[1]-r*.6}" width="${r*1.2}" height="${r*1.2}" style="stroke-width:${2*k}"/>`:`<rect class="pt" x="${p[0]-r*.8}" y="${p[1]-r*.8}" width="${r*1.6}" height="${r*1.6}" transform="rotate(45 ${p[0]} ${p[1]})" style="stroke-width:${2*k}"/>`;}
   if(S.fixSel&&S.fixSel.j!=null){const J=S.junctions[S.fixSel.j];if(J){const p=jPage(J),len=46*k;
     J.arms.forEach((a,i)=>{const t=a*Math.PI/180;h+=`<line class="spoke" x1="${p[0]}" y1="${p[1]}" x2="${p[0]+Math.cos(t)*len}" y2="${p[1]+Math.sin(t)*len}" stroke="${FIXCOL[i%FIXCOL.length]}" style="stroke-width:${7*k}"/>`;});}}
   if(S.fixSel&&S.fixSel.pt){const q=S.fixSel.pt;h+=`<circle cx="${q[0]}" cy="${q[1]}" r="${r}" fill="none" stroke="var(--fix)" style="stroke-width:${3*k}"/>`;}
@@ -1907,11 +1927,11 @@ function nearestStroke(px,py,lim){let best=null,bd=lim;const pts=S.strokes,geo=p
   for(let j=0;j<pts.length/2;j++){const p=geo.map(pts[2*j],pts[2*j+1]);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;best=p;}}return best;}
 
 function closeFixPop(){$('fixPop').hidden=true;S.fixSel=null;if(S.fixMode)drawFixLayer();}
-function openFixPop(html,px,py){const pop=$('fixPop'),img=$('view'),mat=$('mat'),sc=layerScale();
+function openFixPop(html,px,py,left){const pop=$('fixPop'),img=$('view'),mat=$('mat'),sc=layerScale();
   // (the picture may be letterboxed inside its box; the layer sits exactly on that box)
   const L={offsetLeft:img.offsetLeft+(img.offsetWidth-img.naturalWidth*sc)/2,offsetTop:img.offsetTop+(img.offsetHeight-img.naturalHeight*sc)/2};
   pop.innerHTML='<button class="close" aria-label="Close">×</button>'+html;pop.hidden=false;
-  let x=L.offsetLeft+px*sc+18,y=L.offsetTop+py*sc-20;const mw=mat.scrollLeft+mat.clientWidth,mh=mat.scrollTop+mat.clientHeight;
+  let x=left?L.offsetLeft+px*sc-pop.offsetWidth-18:L.offsetLeft+px*sc+18,y=L.offsetTop+py*sc-20;if(left&&x<mat.scrollLeft+8)x=L.offsetLeft+px*sc+18;const mw=mat.scrollLeft+mat.clientWidth,mh=mat.scrollTop+mat.clientHeight;
   if(x+pop.offsetWidth>mw-8)x=L.offsetLeft+px*sc-pop.offsetWidth-18;if(x<mat.scrollLeft+8)x=mat.scrollLeft+8;
   if(y+pop.offsetHeight>mh-8)y=mh-pop.offsetHeight-8;if(y<mat.scrollTop+8)y=mat.scrollTop+8;
   pop.style.left=x+'px';pop.style.top=y+'px';pop.querySelector('.close').onclick=closeFixPop;
@@ -1952,6 +1972,7 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
   {const FSEL=z=>near.some(f=>f.mode==='fillet'&&f.size===z);h+=`<div class="row"><span class="row-label">Rounded corner:</span>${["small","medium","large"].map(z=>`<button data-fillet="${z}" aria-pressed="${FSEL(z)}">${z}</button>`).join("")}</div>`;}
   h+=`<button data-act="smooth" aria-pressed="${near.some(f=>f.mode==='smooth')}">Smooth this line (one even curve between its joints)</button>`;
   h+=`<button data-act="straight" aria-pressed="${near.some(f=>f.mode==='straight')}">Straighten this line (between its joints)</button>`;
+  h+=`<button data-act="joint" aria-pressed="${near.some(f=>f.mode==='joint')}">Add a joint here (Smooth and Straighten then stop at it)</button>`;
   h+=`<button data-act="mirror" aria-pressed="${near.some(f=>f.mode==='mirror')}">Mirror the matching line from the other side…</button>`;
   const areasHere=S.fixes.filter(f=>{if(f.mode!=='area')return false;const b=areaPageBox(f);return px>b[0]&&px<b[2]&&py>b[1]&&py<b[3];});
   if(areasHere.length)h+=`<button data-act="unarea">Remove the mirrored area here</button>`;
@@ -1964,7 +1985,10 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
   $('fixPop').querySelector('[data-act="mirror"]').onclick=()=>{closeFixPop();S.mirrorPick={sx,sy,px,py,near};S.fixSel={pt:[px,py]};drawFixLayer();
     setStatus('Now click the line on the other side to copy (Esc to cancel)');};
   $('fixPop').querySelectorAll('[data-act]:not([data-act="mirror"]):not([data-act="unarea"])').forEach(bt=>bt.onclick=()=>{const act=bt.dataset.act;
-    {const before=S.fixes.slice();S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=S.fixes.filter(f=>!near.includes(f));if(act!=='auto')S.fixes.push({sx,sy,mode:act});saveFixes();closeFixPop();afterFixChange(before);}});}
+    {const before=S.fixes.slice();S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));
+    // (a joint sits alongside the other fixes here: pressing it again takes it away)
+    if(act==='joint'){const had=near.filter(f=>f.mode==='joint');S.fixes=S.fixes.filter(f=>!had.includes(f));if(!had.length)S.fixes.push({sx,sy,mode:'joint'});}
+    else{S.fixes=S.fixes.filter(f=>!near.includes(f));if(act!=='auto')S.fixes.push({sx,sy,mode:act});}saveFixes();closeFixPop();afterFixChange(before);}});}
 function fixClick(px,py){const sc=layerScale(),lim=16/sc;
   if(S.mirrorPick){const m=S.mirrorPick;S.mirrorPick=null;const q=nearestStroke(px,py,16/sc);S.fixSel=null;
     if(!q){drawFixLayer();setStatus('No line there: mirror cancelled');return;}
@@ -2049,6 +2073,9 @@ function stretchTools(P,offs,lw){const n=offs.length-1,orig=Float32Array.from(P)
       for(const e of[sa,sb-1]){let bj=-1,bd=1.2*lw;for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(d<bd){bd=d;bj=j;}}
         if(bj<0)continue;const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
         if(fromA<1.5*lw||fromB<1.5*lw)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}}
+    // (joints the person added on this line count too)
+    for(const f of S.fixes){if(f.mode!=='joint')continue;const[jx,jy]=outPos(...srcToWork(f.sx,f.sy));let bj=-1,bd=2*lw;
+      for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-jx,orig[2*j+1]-jy);if(d<bd){bd=d;bj=j;}}if(bj<0||bj===i)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}
     return[lo,hi];};
   // how each end of the stretch is held: partway along the line, or where other lines end too (the point of a
   // V), it stays exactly where it is; an end that rests on another line slides along the copy to meet that
@@ -2160,17 +2187,20 @@ function areaSrcPoly(f,i){const geo=pageGeom(),c=[[f.x0,f.y0],[f.x1,f.y0],[f.x1,
   const A=S.axes&&S.axes.areas&&S.axes.areas[i]&&!(Math.hypot(ox,oy)>0.5)?S.axes.areas[i]:S.axes&&S.axes[f.flip==='tb'?'tb':'lr'];
   if(A)return c.map(([x,y])=>{const dx=x-A.cx,dy=y-A.cy,k=2*(dx*A.u[0]+dy*A.u[1]),q=outPos(A.cx+k*A.u[0]-dx+ox,A.cy+k*A.u[1]-dy+oy);return geo.map(q[0],q[1]);});
   const mf=mirrorFn(f.flip),o=rotVec(ox,oy);return c.map(([x,y])=>{const q=mf(...outPos(x,y));return geo.map(q[0]+o[0],q[1]+o[1]);});}
+function inPoly(poly,x,y){let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const[a,b]=poly[i],[d,e]=poly[j];if((b>y)!==(e>y)&&x<(d-a)*(y-b)/(e-b)+a)c=!c;}return c;}
 function gripAt(poly){return[poly.reduce((t,q)=>t+q[0],0)/poly.length,poly.reduce((t,q)=>t+q[1],0)/poly.length];}
 function areaPageBox(f){const geo=pageGeom(),b=areaWorkBox(f),p=geo.map(b[0],b[1]),q=geo.map(b[2],b[3]);return[Math.min(p[0],q[0]),Math.min(p[1],q[1]),Math.max(p[0],q[0]),Math.max(p[1],q[1])];}
 function applyDrags(extra){if(!S.rawStrokes)return S.rawStrokes;const B={P:S.rawStrokes};S.offs=S.rawOffs;S.hw=S.rawHw;S.fill=S.rawFill;S.fcurve=S.rawFcurve;const ds=S.fixes.filter(f=>PAGE_FIX.has(f.mode));if(extra)ds.push(extra);if(!ds.length)return B.P;
-  const P=Float32Array.from(B.P);for(const d of ds){if(d.mode==='mirror')applyOneMirror(P,S.offs,d);else if(d.mode==='smooth'||d.mode==='straight')applyOneSmooth(P,S.offs,d);else if(d.mode==='fillet')applyOneFillet(P,S.offs,d);else applyOneDrag(P,S.offs,d);}return P;}
+  const P=Float32Array.from(B.P);for(const d of ds){if(d.mode==='mirror')applyOneMirror(P,S.offs,d);else if(d.mode==='smooth'||d.mode==='straight')applyOneSmooth(P,S.offs,d);else if(d.mode==='fillet')applyOneFillet(P,S.offs,d);else if(d.mode==='drag')applyOneDrag(P,S.offs,d);}return P;}
 function redrawDrags(){if(!S.rawStrokes)return;S.strokes=applyDrags();ptsCache=null;markBorder();render();drawFixLayer();}
 // pointer handling on the layer: a press that doesn't move is a click (menus); one that moves is a drag
 var press=null;
 function layerPoint(e){const L=$('fixLayer'),r=L.getBoundingClientRect(),sc=layerScale(),img=$('view');
   const offx=(r.width-img.naturalWidth*sc)/2,offy=(r.height-img.naturalHeight*sc)/2;return[(e.clientX-r.left-offx)/sc,(e.clientY-r.top-offy)/sc];}
 $('fixLayer').addEventListener('pointerdown',e=>{if(e.button!==0)return;const[px,py]=layerPoint(e),sc=layerScale();
-  if(S.areaMode){closeFixPop();press={area:true,px,py,x0:e.clientX,y0:e.clientY,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}
+  if(S.areaPending){const f=S.areaPending,poly=areaSrcPoly(f,-1),g=gripAt(poly);if(inPoly(poly,px,py)||Math.hypot(g[0]-px,g[1]-py)<14/sc){closeFixPop();
+      press={grip:f,pending:true,px,py,x0:e.clientX,y0:e.clientY,d:[0,0],dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}
+  if(S.areaMode){if(S.areaPending)cancelPending();closeFixPop();press={area:true,px,py,x0:e.clientX,y0:e.clientY,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}
   {const af=S.fixes.filter(f=>f.mode==='area');for(let i=0;i<af.length;i++){const g=gripAt(areaSrcPoly(af[i],i));if(Math.hypot(g[0]-px,g[1]-py)<14/sc){closeFixPop();
       press={grip:af[i],px,py,x0:e.clientX,y0:e.clientY,d:[0,0],dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}}
   // (a drag takes a joint, and all the lines meeting there, only when it starts right on its dot; otherwise the line)
@@ -2178,7 +2208,7 @@ $('fixLayer').addEventListener('pointerdown',e=>{if(e.button!==0)return;const[px
   let q=j<0?nearestStroke(px,py,12/sc):null;if(j<0&&!q){bd=12/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;j=i;}});}
   press={px,py,x0:e.clientX,y0:e.clientY,j,q,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);});
 // (in box mode the box can start anywhere on the mat, including outside the picture; it is cut to the picture)
-$('mat').addEventListener('pointerdown',e=>{if(!S.areaMode||e.button!==0||!S.fixMode||$('fixLayer').contains(e.target)||$('fixPop').contains(e.target))return;
+$('mat').addEventListener('pointerdown',e=>{if(press||!S.areaMode||e.button!==0||!S.fixMode||$('fixLayer').contains(e.target)||$('fixPop').contains(e.target))return;
   const[px,py]=layerPoint(e);closeFixPop();press={area:true,px,py,x0:e.clientX,y0:e.clientY,dragging:false};try{$('fixLayer').setPointerCapture(e.pointerId);}catch(_){}e.preventDefault();});
 // where the lines at a junction really meet (the program's junction point can sit a little off them)
 function junctionMeet(J){const geo=pageGeom(),c=jPage(J),lw=Math.max(2,widthIn()*S.workPPI)*geo.k,pts=S.strokes,offs=S.offs,E=[];
@@ -2196,7 +2226,9 @@ function areaPreview(px,py){const k=1/layerScale(),geo=pageGeom(),img=$('view'),
     `<polygon class="area src" points="${corners.map(q=>q[0]+','+q[1]).join(' ')}" style="stroke-width:${2*k}px;stroke-dasharray:${6*k} ${4*k}"/>`+seamDots(b,k);}
 // (where lines cross the edge of the box: green where the copy will line up with the line outside, red where the
 // two sides draw it apart or only one side has it, so the edge is better moved)
-function seamDots(b,k){if(!S.strokes||!S.offs)return'';const geo=pageGeom(),mf=mirrorFn(S.areaFlip),lw=Math.max(2,widthIn()*S.workPPI);
+function seamDots(b,k,f,d){if(!S.strokes||!S.offs)return'';const geo=pageGeom(),lw=Math.max(2,widthIn()*S.workPPI);
+  // (copy-from: the box flipped across the centre line, then moved by however far its dashed box was dragged)
+  let mf=mirrorFn(f?f.flip:S.areaFlip);if(f){const o=rotVec((f.ox||0)*S.sx+unrotVec((d||[0,0])[0]/geo.k,(d||[0,0])[1]/geo.k)[0],(f.oy||0)*S.sy+unrotVec((d||[0,0])[0]/geo.k,(d||[0,0])[1]/geo.k)[1]),m0=mf;mf=(x,y)=>{const q=m0(x,y);return[q[0]+o[0],q[1]+o[1]];};}
   const c=[[b[0],b[1]],[b[2],b[3]]].map(([x,y])=>outPos(...pageToWorkInternal(x,y)));
   const T=[Math.min(c[0][0],c[1][0]),Math.min(c[0][1],c[1][1]),Math.max(c[0][0],c[1][0]),Math.max(c[0][1],c[1][1])],mc=[[T[0],T[1]],[T[2],T[3]],[T[0],T[3]],[T[2],T[1]]].map(([x,y])=>mf(x,y)),
     M=[Math.min(...mc.map(q=>q[0])),Math.min(...mc.map(q=>q[1])),Math.max(...mc.map(q=>q[0])),Math.max(...mc.map(q=>q[1]))];
@@ -2234,18 +2266,28 @@ $('fixLayer').addEventListener('pointermove',e=>{if(!press){if(e.pointerType==='
     h+=`<path d="${pth}" fill="none" stroke="var(--fix)" stroke-width="${3*k}" stroke-linecap="round" opacity=".9"/>`;}
   drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',h);});
 $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
+  if(p.grip&&p.pending){press=null;const f=p.grip;if(p.dragging){const geo=pageGeom(),[wx,wy]=unrotVec(p.d[0]/geo.k,p.d[1]/geo.k);f.ox+=wx/S.sx;f.oy+=wy/S.sy;}drawFixLayer();pendingMenu();return;}
   if(p.grip){press=null;if(!p.dragging){drawFixLayer();return;}const geo=pageGeom(),[wx,wy]=unrotVec(p.d[0]/geo.k,p.d[1]/geo.k),f=p.grip;
     S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=JSON.parse(JSON.stringify(S.fixes));
     f.ox=(f.ox||0)+wx/S.sx;f.oy=(f.oy||0)+wy/S.sy;saveFixes();drawFixLayer();afterFixChange(before);return;}
   if(p.area){press=null;const img=$('view'),cl=(v,m)=>Math.max(0,Math.min(m,v)),q=layerPoint(e),sc=layerScale();p.px=cl(p.px,img.naturalWidth);p.py=cl(p.py,img.naturalHeight);const px=cl(q[0],img.naturalWidth),py=cl(q[1],img.naturalHeight);if(!p.dragging||Math.abs(px-p.px)<8/sc||Math.abs(py-p.py)<8/sc){drawFixLayer();return;}
     const c=[[Math.min(p.px,px),Math.min(p.py,py)],[Math.max(p.px,px),Math.max(p.py,py)]].map(([x,y])=>workToSrc(...pageToWorkInternal(x,y)));
     const f={mode:'area',x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1]),flip:S.areaFlip==='tb'?'tb':'lr'};
-    S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=S.fixes.slice();S.fixes.push(f);saveFixes();setAreaMode(false);afterFixChange(before);return;}
+    f.ox=0;f.oy=0;S.areaPending=f;drawFixLayer();pendingMenu();return;}
   if(!p.dragging){press=null;fixClick(p.px,p.py);return;}
   const d=pressDrag(e);press=null;if(Math.hypot(d.dx,d.dy)<0.3){drawFixLayer();return;}
   S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();S.fixes.push(d);saveFixes();redrawDrags();});
 $('fixLayer').addEventListener('pointercancel',()=>{press=null;drawFixLayer();});
-function setAreaMode(on){S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixAreaFlip').hidden=!on;$('fixLayer').classList.toggle('picking-area',on);$('mat').classList.toggle('picking-area',on);
+// (a box just drawn waits here: its copy-from box can be dragged into place first, then it is applied)
+function pendingMenu(){const f=S.areaPending;if(!f)return;const b=areaPageBox(f);
+  openFixPop(`<h3>Mirror this area</h3><p>The dashed box is the spot it will copy from. Drag the dashed box to line it up with what you want copied, then apply. Your box stays put.</p><button data-act="apply">Apply the mirror</button><button data-act="cancel">Cancel</button>`,...(()=>{const g=gripAt(areaSrcPoly(f,-1)),right=g[0]>(b[0]+b[2])/2,down=g[1]>(b[1]+b[3])/2;
+    // (the box opens on the side away from the dashed box, so it never covers it)
+    return Math.abs(g[0]-(b[0]+b[2])/2)>=Math.abs(g[1]-(b[1]+b[3])/2)?(right?[b[0],b[1],true]:[b[2],b[1],false]):[b[2],down?b[1]:b[3],false];})());
+  const pop=$('fixPop');pop.querySelector('[data-act="apply"]').onclick=applyPending;pop.querySelector('[data-act="cancel"]').onclick=cancelPending;pop.querySelector('.close').onclick=cancelPending;}
+function applyPending(){const f=S.areaPending;if(!f)return;S.areaPending=null;$('fixPop').hidden=true;
+  S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=S.fixes.slice();S.fixes.push(f);saveFixes();setAreaMode(false);afterFixChange(before);}
+function cancelPending(){S.areaPending=null;$('fixPop').hidden=true;S.fixSel=null;drawFixLayer();}
+function setAreaMode(on){if(!on&&S.areaPending)S.areaPending=null;S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixAreaFlip').hidden=!on;$('fixLayer').classList.toggle('picking-area',on);$('mat').classList.toggle('picking-area',on);
   $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
 S.areaFlip='lr';$('fixAreaFlip').addEventListener('change',e=>{S.areaFlip=e.target.value;});
 $('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;setAreaMode(!S.areaMode);});
@@ -2256,7 +2298,7 @@ $('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null
 function afterFixChange(before){const key=a=>JSON.stringify(a.filter(f=>!PAGE_FIX.has(f.mode)));if(key(before)!==key(S.fixes))schedule(run,0);else redrawDrags();}
 $('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
 $('fixClear').addEventListener('click',()=>{if(!S.fixes.length)return;const before=S.fixes;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();afterFixChange(before);});
-document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.areaPending&&!/^(INPUT|SELECT|TEXTAREA)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyPending();return;}if(e.key!=='Escape')return;if(S.areaPending){cancelPending();return;}if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
 $('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
 window.addEventListener('resize',()=>{placeFixLayer();});
 
@@ -2269,6 +2311,9 @@ $('unit').addEventListener('change',()=>{const f=UNIT[lastUnit]/UNIT[$('unit').v
   updateLabels();if(S.stats)showStats(pageGeom());});
 $('presets').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const v=fromIn(+b.dataset.in);
   $('widthNum').value=$('unit').value==='in'?(+b.dataset.in).toFixed(4):v.toFixed(2);rerender();});
+function sizeKey(){return 'lll-size:'+S.name+':'+(S.src?S.src.width+'x'+S.src.height:'');}
+function rememberSize(){if(!S.src||S.sample)return;try{const z=sizeIn();localStorage.setItem(sizeKey(),JSON.stringify({w:z.w,h:z.h,lock:$('lockRatio').checked}));}catch(e){}}
+['sizeW','sizeH'].forEach(id=>$(id).addEventListener('change',rememberSize));$('lockRatio').addEventListener('change',rememberSize);
 $('sizeW').addEventListener('input',()=>{syncSize('w');updateLabels();schedule(prepare,600);});
 $('sizeH').addEventListener('input',()=>{syncSize('h');updateLabels();schedule(prepare,600);});
 $('lockRatio').addEventListener('change',()=>{if($('lockRatio').checked){syncSize('w');updateLabels();schedule(prepare,0);}});
@@ -2290,8 +2335,9 @@ document.querySelectorAll('[data-zoom]').forEach(b=>b.addEventListener('click',(
   document.querySelectorAll('[data-zoom]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));applyZoom();}));
 
 function loadFile(file){if(!file||!/^image\//.test(file.type)){setStatus('That file is not an image. Try a PNG or JPG.',false);return;}S.axes=null;
-  const url=URL.createObjectURL(file);const img=new Image();
-  img.onload=()=>{loadImage(img,file.name.replace(/\.[^.]+$/,''),false);URL.revokeObjectURL(url);};
+  const url=URL.createObjectURL(file);const img=new Image();S.fileSize=null;
+  {const m=/-(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)in-/.exec(file.name);if(m)S.fileSize={w:+m[1],h:+m[2],lock:false};}
+  img.onload=async()=>{try{const meta=readPngSize(await file.arrayBuffer());if(meta)S.fileSize=meta;}catch(e){}loadImage(img,file.name.replace(/\.[^.]+$/,''),false);URL.revokeObjectURL(url);};
   img.onerror=()=>setStatus('Could not read that image. Try exporting it as PNG or JPG.',false);img.src=url;}
 $('fileInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
 const mat=$('mat');

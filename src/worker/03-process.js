@@ -10,10 +10,10 @@ function process(p){
   // little apart: near the edge the copy is shifted so each line meets its own line outside exactly, easing back to
   // an exact copy further in. Right at the edge both pictures are kept, so crossing lines stay joined.
   const areas=Array.isArray(p.areas)?p.areas.filter(a=>a&&[a.x0,a.y0,a.x1,a.y1].every(isFinite)):[];
-  let axes=null,axesOut=null;
+  // (the centre lines are always found, so the page can show where a new box will copy from)
+  let axes={lr:symAxis(m,'lr'),tb:symAxis(m,'tb'),areas:[]},axesOut=axes;
   if(areas.length){const src=m.slice(),at=(x,y)=>{x=Math.round(x);y=Math.round(y);return x>=0&&x<W&&y>=0&&y<H?src[y*W+x]:0;};
-    axes={lr:symAxis(src,'lr'),tb:symAxis(src,'tb')};
-    const areaAxes=[];axesOut=axes;axes.areas=areaAxes;
+    const areaAxes=axes.areas;
     {for(const a of areas){const G=axes[a.flip==='tb'?'tb':'lr'];areaAxes.push(null);if(!G)continue;
         const ox=+a.ox||0,oy=+a.oy||0,moved=Math.hypot(ox,oy)>0.5;
         // (a copy-from box the person moved: their spot is taken as it is, across the outline's centre line)
@@ -30,7 +30,7 @@ function process(p){
           c.sort((p,q)=>p[0]-q[0]);const ui=new Set(),uj=new Set(),out=[];for(const[d,i,j]of c){if(ui.has(i)||uj.has(j))continue;ui.add(i);uj.add(j);out.push([i,j,d]);}return out;};
         // (each edge is nudged a little, in or out, to where the lines on both sides agree best)
         const K=Math.round(2.5*lw),cost=E=>{const ro=runs(at,E),rm=runs(mirAt,E),pr=pair(ro,rm);let c=2.5*lw*(ro.length+rm.length-2*pr.length);for(const q of pr)c+=q[2];return c;};
-        for(let k=0;k<4;k++){let bo=0,bc=Infinity;for(let o=-K;o<=K;o++){const nx0=x0+(k===2?o:0),nx1=x1+(k===3?o:0),ny0=y0+(k===0?o:0),ny1=y1+(k===1?o:0);
+        for(let k=0;k<(moved?0:4);k++){let bo=0,bc=Infinity;for(let o=-K;o<=K;o++){const nx0=x0+(k===2?o:0),nx1=x1+(k===3?o:0),ny0=y0+(k===0?o:0),ny1=y1+(k===1?o:0);
             if(nx0<1||ny0<1||nx1>W-2||ny1>H-2||nx1-nx0<4||ny1-ny0<4)continue;const E=[[nx0,ny0,1,0,nx1-nx0],[nx0,ny1,1,0,nx1-nx0],[nx0,ny0,0,1,ny1-ny0],[nx1,ny0,0,1,ny1-ny0]][k];
             const c=cost(E)+0.02*lw*Math.abs(o);if(c<bc){bc=c;bo=o;}}
           if(k===0)y0+=bo;else if(k===1)y1+=bo;else if(k===2)x0+=bo;else x1+=bo;}

@@ -99,6 +99,8 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .mat.fit .stage{height:100%}
 .mat.fit .stage img{max-width:100%;max-height:100%;object-fit:contain}
 .mat:not(.fit) .stage img{max-width:none}
+/* (zoomed in: the stage grows to the picture, so every part of it can be scrolled to) */
+.mat:not(.fit) .stage{width:max-content;min-width:100%;justify-content:safe center;align-items:safe center}
 .sample-tag{position:absolute;top:12px;left:12px;background:rgba(0,0,0,.55);color:#fff;font-size:.78rem;padding:4px 10px;border-radius:20px;pointer-events:none;z-index:1}
 .drop-note{font-size:.82rem;color:var(--muted)}
 
@@ -149,3 +151,5 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 
 .field-inline{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:.92rem}
 .field-inline select{flex:0 1 auto;min-width:0}
+
+.fix-layer .pt.joint{fill:#fff;stroke:var(--fix-done)}
