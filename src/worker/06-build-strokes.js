@@ -165,7 +165,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       partner.set(key(info[0][0],info[0][1]),[info[1][0],info[1][1],corner]);partner.set(key(info[1][0],info[1][1]),[info[0][0],info[0][1],corner]);return;}
     const allp=[];for(let x=0;x<info.length;x++)for(let y=x+1;y<info.length;y++)allp.push([angDeg(info[x][3],info[y][3]),x,y]);
     allp.sort((p,q)=>q[0]-p[0]);const pairs=[];
-    allp.forEach((pp,r)=>{if(pp[0]>150)pairs.push(pp);else if(r===0&&info.length===3&&pp[0]>=115&&pp[0]-allp[1][0]>=25)pairs.push(pp);});
+    // (a clear widest pair that still bends well short of straight, like the side point of a diamond border
+    // where a bar ends, is one line with a corner there)
+    allp.forEach((pp,r)=>{if(pp[0]>150)pairs.push(pp);else if(r===0&&info.length===3&&pp[0]>=115&&pp[0]-allp[1][0]>=25)pairs.push([pp[0],pp[1],pp[2],pp[0]<145]);});
     // a Y whose two arms run into each other in a rounded bottom (a U with a stem under it): the arms
     // are one curve and the stem lands on it. Seen as the arms opening out toward each other right at
     // the junction, compared with farther out.
@@ -186,10 +188,10 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     // (where one line already runs straight through a crossing, a bar that starts there square to it and
     // a line that lands there at a slant are two separate lines, unless they make a clearly straight run)
     let thru=null;
-    for(const[pa_,x,y]of pairs){if(used.has(x)||used.has(y))continue;
+    for(const[pa_,x,y,cn]of pairs){if(used.has(x)||used.has(y))continue;
       if(thru&&pa_<160){const perp=q=>Math.abs(90-angDeg(info[q][3],info[thru][3]));const px=perp(x),py=perp(y);if(Math.min(px,py)<=8&&Math.max(px,py)>=15)continue;}
       if(!thru)thru=x;used.add(x);used.add(y);
-      partner.set(key(info[x][0],info[x][1]),[info[y][0],info[y][1],false]);partner.set(key(info[y][0],info[y][1]),[info[x][0],info[x][1],false]);}});
+      partner.set(key(info[x][0],info[x][1]),[info[y][0],info[y][1],!!cn]);partner.set(key(info[y][0],info[y][1]),[info[x][0],info[x][1],!!cn]);}});
   // Two lines that run into each other at a shallow angle and then share a short stretch of ink:
   // which of them carries on past that stretch? The one whose bend continues smoothly into the
   // line on the far side (so a curving edge stays one even curve, without a bump where the
@@ -343,7 +345,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     C.raw=[].concat(...pieces);C.w=[].concat(...weights);}
   // corners inside traced lines
   const K=Math.max(4,Math.round(1.8*u));
-  const findCorners=(Q,closed)=>{const n=Q.length;if(n<2*K+3)return[];const idx=[],ang=[];
+  const findCorners=(Q,closed)=>{const n=Q.length;if(n<2*K+3)return[];const idx=[],ang=[],tips=new Set();
     for(let i=closed?0:K;i<(closed?n:n-K);i++){const a=Q[closed?(i-K+n)%n:i-K],b=Q[closed?(i+K)%n:i+K];
       const v1=[Q[i][0]-a[0],Q[i][1]-a[1]],v2=[b[0]-Q[i][0],b[1]-Q[i][1]];
       ang.push(Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(norm2(v1)*norm2(v2)+1e-9)))));idx.push(i);}
@@ -374,8 +376,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         const w1=[Q[i][0]-a2[0],Q[i][1]-a2[1]],w2=[b2[0]-Q[i][0],b2[1]-Q[i][1]];
         const a2g=Math.acos(Math.max(-1,Math.min(1,(w1[0]*w2[0]+w1[1]*w2[1])/(norm2(w1)*norm2(w2)+1e-9))));
         if(ah<0.8*ang[jj]&&a2g>1.3*ang[jj])continue;}}
-      out.push(i);}
-    return out;};
+      if(tip)tips.add(i);out.push(i);}
+    out.tips=tips;return out;};
   const land=new Map(),landTrim=new Map(),landOn=new Map(),landAng=new Map();
   const isFreeEnd=k2=>{const[j,s]=k2;const k=s===0?edges[j].a:edges[j].e;return k==null||isFree.has(find(k));};
   const prepChain=C=>{let raw=C.raw.map(q=>q.slice()),w0=C.w.slice();
@@ -389,7 +391,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     let[Q,w]=resampleKeep(raw,w0);const pins=[];w.forEach((v,i)=>{if(v>=1e5)pins.push(i);});
     const base=C.closed?Q.slice(0,-1):Q;
     // (the user's fixes: no corner where they asked for a rounded line, a corner where they asked for one)
-    let cands=C.noCorners?[]:findCorners(base,C.closed);const forced=new Set();
+    let cands=C.noCorners?[]:findCorners(base,C.closed);const forced=new Set(),tipAt=cands.tips||new Set();
     if(FIX.length){cands=cands.filter(i=>!FIX.some(f=>f.mode==='round'&&Math.hypot(base[i][0]-f.y,base[i][1]-f.x)<2.5*med));
       for(const f of FIX){if(f.mode!=='corner')continue;let bi=-1,bd=1.5*med;base.forEach((q,i)=>{const d=Math.hypot(q[0]-f.y,q[1]-f.x);if(d<bd){bd=d;bi=i;}});
         if(bi>=0){cands=cands.filter(i=>Math.abs(i-bi)>2*K);cands.push(bi);forced.add(bi);}}
@@ -402,7 +404,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         const n2=Q.length,off=Math.round(3*K),nb=[];for(const o of[-off,-off+2,off-2,off]){const t=C.closed?(i+o+n2)%n2:i+o;if(t>=0&&t<n2)nb.push(dAt(Q[t]));}
         nb.sort((p,q)=>p-q);const ref=nb.length?nb[nb.length>>1]:0.5*med;if(!frc&&dAt(Q[i])>Math.max(1.0*med,2.2*ref))continue;}
       // a junction this line was found to pass smoothly through is not a corner of it
-      {let soft=false;for(let t=Math.max(0,i-K);t<=Math.min(w.length-1,i+K);t++)if(w[t]<=GAP*1.01){soft=true;break;}if(soft&&!frc)continue;}
+      // (unless it is the point between two long straight runs, like the side point of a diamond border where
+      // a line ends: that is a corner whatever lands on it)
+      {let soft=false;for(let t=Math.max(0,i-K);t<=Math.min(w.length-1,i+K);t++)if(w[t]<=GAP*1.01){soft=true;break;}if(soft&&!frc&&!tipAt.has(i))continue;}
       const L=arclen(Q),d0=L[i];const ia=at(Q,d0-2*u,L),ib=at(Q,d0-6*u,L),ja=at(Q,d0+2*u,L),jb=at(Q,d0+6*u,L);
       const nrm=v=>{const n=norm2(v)+1e-9;return[v[0]/n,v[1]/n];};
       let cp=lsqPoint([ia,ja],[nrm([ib[0]-ia[0],ib[1]-ia[1]]),nrm([jb[0]-ja[0],jb[1]-ja[1]])],Q[i]);

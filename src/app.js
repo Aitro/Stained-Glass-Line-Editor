@@ -43,7 +43,7 @@ function loadImage(img,name,isSample){
   // longest side stays as it is and the other follows the picture)
   let known=null;try{known=JSON.parse(localStorage.getItem(sizeKey())||'null');}catch(e){}if(!known&&!isSample)known=S.fileSize;S.fileSize=null;
   if(known&&known.w>0&&known.h>0){$('lockRatio').checked=!!known.lock;$('sizeW').value=fit2(known.w);$('sizeH').value=fit2(known.h);updateLabels();}
-  else if($('lockRatio').checked){const z=sizeIn(),L=Math.max(z.w,z.h);const r=S.crop.h/S.crop.w;
+  else if(!isSample||$('lockRatio').checked){$('lockRatio').checked=true;const z=sizeIn(),L=Math.max(z.w,z.h);const r=S.crop.h/S.crop.w;
     if(r>=1){$('sizeH').value=fit2(L);$('sizeW').value=fit2(L/r);}else{$('sizeW').value=fit2(L);$('sizeH').value=fit2(L*r);}}
   prepare();}
 function findCrop(){const c=S.src,d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;const inv=$('invert').checked;
@@ -317,15 +317,16 @@ function junctionMenu(i){const J=S.junctions[i];if(!J)return;S.fixSel={j:i};draw
   h+=`<button data-act="auto" aria-pressed="${!here.length&&!jf.length}">Automatic${here.length||jf.length?' (remove my fix)':''}</button>`;
   const p=jPage(J);openFixPop(h,p[0],p[1]);
   const [sx,sy]=workToSrc(J.wx,J.wy);
-  $('fixPop').querySelectorAll('[data-fillet]').forEach(bt=>bt.onclick=()=>{const before=S.fixes.slice();S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));
-    S.fixes=S.fixes.filter(f=>!jf.includes(f));S.fixes.push({sx,sy,mode:'fillet',size:bt.dataset.fillet});saveFixes();closeFixPop();afterFixChange(before);});
-  {const au=$('fixPop').querySelector('[data-act="auto"]');if(au&&jf.length){const old=au.onclick;au.addEventListener('click',()=>{S.fixes=S.fixes.filter(f=>!jf.includes(f));saveFixes();redrawDrags();},true);}}
+  $('fixPop').querySelectorAll('[data-fillet]').forEach(bt=>bt.onclick=()=>{const f={sx,sy,mode:'fillet',size:bt.dataset.fillet};
+    if(!changesLines(f)){closeFixPop();setStatus('Could not round this corner: the two lines here are too short.',false);return;}
+    const before=S.fixes.slice();S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));
+    S.fixes=S.fixes.filter(x=>!jf.includes(x));S.fixes.push(f);saveFixes();closeFixPop();afterFixChange(before);});
   $('fixPop').querySelectorAll('[data-pair]').forEach(bt=>bt.onclick=()=>{const[a,b]=bt.dataset.pair.split(',').map(Number);
     changeFixes(()=>{// a line can only run through one way: drop my other pairings that use either of these two lines
       S.fixes=S.fixes.filter(f=>!(here.includes(f)&&(f.mode==='pair'?f.arms.some(v=>[J.arms[a],J.arms[b]].some(w=>Math.abs(((v-w+540)%360)-180)<15)):f.mode==='apart')));
       S.fixes.push({sx,sy,mode:'pair',arms:[J.arms[a],J.arms[b]]});});});
   $('fixPop').querySelectorAll('[data-act]').forEach(bt=>bt.onclick=()=>{const act=bt.dataset.act;
-    changeFixes(()=>{if(act==='auto'){S.fixes=S.fixes.filter(f=>!here.includes(f));return;}
+    changeFixes(()=>{if(act==='auto'){S.fixes=S.fixes.filter(f=>!here.includes(f)&&!jf.includes(f));return;}
       if(act==='apart')S.fixes=S.fixes.filter(f=>!here.includes(f));
       else S.fixes=S.fixes.filter(f=>!(here.includes(f)&&(f.mode==='corner'||f.mode==='round')));
       S.fixes.push({sx,sy,mode:act});});});}
@@ -344,17 +345,33 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
   if(areasHere.length)h+=`<button data-act="unarea">Remove the mirrored area here</button>`;
   h+=`<button data-act="auto" aria-pressed="${!near.length}">Automatic${near.length?(near.some(f=>PAGE_FIX.has(f.mode))?' (undo my changes here)':' (remove my fix)'):''}</button>`;
   openFixPop(h,px,py);
-  $('fixPop').querySelectorAll('[data-fillet]').forEach(bt=>bt.onclick=()=>{const before=S.fixes.slice();S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));
-    S.fixes=S.fixes.filter(f=>!(near.includes(f)&&f.mode==='fillet'));S.fixes.push({sx,sy,mode:'fillet',size:bt.dataset.fillet});saveFixes();closeFixPop();afterFixChange(before);});
+  $('fixPop').querySelectorAll('[data-fillet]').forEach(bt=>bt.onclick=()=>{const f={sx,sy,mode:'fillet',size:bt.dataset.fillet};
+    if(!changesLines(f)){closeFixPop();setStatus('No corner to round there. Click right on the point of the corner.',false);return;}
+    const before=S.fixes.slice();S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));
+    S.fixes=S.fixes.filter(x=>!(near.includes(x)&&x.mode==='fillet'));S.fixes.push(f);saveFixes();closeFixPop();afterFixChange(before);});
   {const ua=$('fixPop').querySelector('[data-act="unarea"]');if(ua)ua.onclick=()=>{closeFixPop();S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));
     const before=S.fixes;S.fixes=S.fixes.filter(f=>!areasHere.includes(f));saveFixes();afterFixChange(before);};}
   $('fixPop').querySelector('[data-act="mirror"]').onclick=()=>{closeFixPop();S.mirrorPick={sx,sy,px,py,near};S.fixSel={pt:[px,py]};drawFixLayer();
     setStatus('Now click the line on the other side to copy (Esc to cancel)');};
   $('fixPop').querySelectorAll('[data-act]:not([data-act="mirror"]):not([data-act="unarea"])').forEach(bt=>bt.onclick=()=>{const act=bt.dataset.act;
     {const before=S.fixes.slice();S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));
-    // (a joint sits alongside the other fixes here: pressing it again takes it away)
+    // (each choice replaces only fixes of its own kind here: a joint sits alongside the others and pressing it
+    // again takes it away; Smooth or Straighten replaces a Smooth or Straighten of the same stretch only, so
+    // the stretches on either side of a joint keep theirs; Automatic takes everything here away)
     if(act==='joint'){const had=near.filter(f=>f.mode==='joint');S.fixes=S.fixes.filter(f=>!had.includes(f));if(!had.length)S.fixes.push({sx,sy,mode:'joint'});}
-    else{S.fixes=S.fixes.filter(f=>!near.includes(f));if(act!=='auto')S.fixes.push({sx,sy,mode:act});}saveFixes();closeFixPop();afterFixChange(before);}});}
+    else if(act==='auto')S.fixes=S.fixes.filter(f=>!near.includes(f));
+    else{const kinds=act==='smooth'||act==='straight'?['smooth','straight']:['corner','round','fillet'];
+      const mine=stretchAt(sx,sy),gone=S.fixes.filter(f=>kinds.includes(f.mode)&&(act==='smooth'||act==='straight'?stretchAt(f.sx,f.sy)===mine:near.includes(f)));
+      const f={sx,sy,mode:act};
+      if((act==='smooth'||act==='straight')&&!changesLines(f)){S.undo.pop();closeFixPop();setStatus(act==='smooth'?'That stretch has nothing to smooth (a whole closed loop, or too short).':'That stretch cannot be straightened (a whole closed loop, or too short).',false);return;}
+      S.fixes=S.fixes.filter(x=>!gone.includes(x));S.fixes.push(f);}
+    saveFixes();closeFixPop();afterFixChange(before);}});}
+// (which stretch of which line a spot is on, as a key, in the lines as they are now)
+function stretchAt(sx,sy){if(!S.strokes)return'';const lw=Math.max(2,widthIn()*S.workPPI),[tx,ty]=outPos(...srcToWork(sx,sy)),P=S.strokes,o=S.offs;let bs=-1,bi=-1,bd=3*lw;
+  for(let s=0;s+1<o.length;s++)for(let j=o[s];j<o[s+1];j++){const d=Math.hypot(P[2*j]-tx,P[2*j+1]-ty);if(d<bd){bd=d;bs=s;bi=j;}}
+  if(bs<0)return'';const[i0,i1]=stretchTools(P,o,lw).piece(bs,bi);return bs+':'+i0+':'+i1;}
+// (whether a fix on the finished lines would change them at all)
+function changesLines(f){const P=Float32Array.from(S.strokes);const m=f.mode==='fillet'?applyOneFillet(P,S.offs,f):f.mode==='smooth'||f.mode==='straight'?applyOneSmooth(P,S.offs,f):new Set([1]);return m.size>0;}
 function fixClick(px,py){const sc=layerScale(),lim=16/sc;
   if(S.mirrorPick){const m=S.mirrorPick;S.mirrorPick=null;const q=nearestStroke(px,py,16/sc);S.fixSel=null;
     if(!q){drawFixLayer();setStatus('No line there: mirror cancelled');return;}
@@ -440,7 +457,7 @@ function stretchTools(P,offs,lw){const n=offs.length-1,orig=Float32Array.from(P)
         if(bj<0)continue;const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
         if(fromA<1.5*lw||fromB<1.5*lw)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}}
     // (joints the person added on this line count too)
-    for(const f of S.fixes){if(f.mode!=='joint')continue;const[jx,jy]=outPos(...srcToWork(f.sx,f.sy));let bj=-1,bd=2*lw;
+    for(const f of S.fixes){if(f.mode!=='joint')continue;const[jx,jy]=outPos(...srcToWork(f.sx,f.sy));let bj=-1,bd=1.5*lw;
       for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-jx,orig[2*j+1]-jy);if(d<bd){bd=d;bj=j;}}if(bj<0||bj===i)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}
     return[lo,hi];};
   // how each end of the stretch is held: partway along the line, or where other lines end too (the point of a
@@ -499,6 +516,8 @@ function applyOneSmooth(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*
   let ts=-1,ti=-1,bd=3*lw;for(let s=0;s<n;s++)for(let j=offs[s];j<offs[s+1];j++){const d=Math.hypot(P[2*j]-tx,P[2*j+1]-ty);if(d<bd){bd=d;ts=s;ti=j;}}if(ts<0)return moved;
   const K=stretchTools(P,offs,lw);K.T.ts=ts;const[i0,i1]=K.piece(ts,ti);if(i1-i0<3)return moved;
   let A=[P[2*i0],P[2*i0+1]],B=[P[2*i1],P[2*i1+1]],Q;
+  // (a whole closed loop with no joint on it has no two ends to run between: left as it is)
+  if(Math.hypot(A[0]-B[0],A[1]-B[1])<lw)return moved;
   // (an end that rests on another line close to that line's point, as at the bottom of a V, goes to the point)
   const toTip=(E,on)=>{const a=offs[on],b=offs[on+1];if(b-a<5)return E;const L=[0];for(let j=a+1;j<b;j++)L.push(L[L.length-1]+Math.hypot(P[2*j]-P[2*j-2],P[2*j+1]-P[2*j-1]));
     let jn=a,dn=Infinity;for(let j=a;j<b;j++){const d=Math.hypot(P[2*j]-E[0],P[2*j+1]-E[1]);if(d<dn){dn=d;jn=j;}}
@@ -529,7 +548,8 @@ function applyOneFillet(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*
   let sides=null;
   {const ends=[];for(let s=0;s<n;s++){const a=offs[s],b=offs[s+1];if(b-a<3)continue;for(const e of[a,b-1])if(Math.hypot(P[2*e]-tx,P[2*e+1]-ty)<1.5*lw)ends.push([s,e,e===a?1:-1]);}
     if(ends.length===2&&(ends[0][0]!==ends[1][0]||ends[0][1]!==ends[1][1]))sides=ends.map(([s,e,d])=>({s,run:arcFrom(s,e,d)}));}
-  if(!sides){let bs=-1,bi=-1,bt=0;const lim=3*lw;
+  // (only a real corner: the line turns at least 30 degrees there)
+  if(!sides){let bs=-1,bi=-1,bt=1-Math.cos(30*Math.PI/180);const lim=3*lw;
     for(let s=0;s<n;s++){const a=offs[s],b=offs[s+1];for(let j=a+1;j<b-1;j++){if(Math.hypot(P[2*j]-tx,P[2*j+1]-ty)>lim)continue;
       const f=arcFrom(s,j,-1).find(q=>q[1]>=lw),g=arcFrom(s,j,1).find(q=>q[1]>=lw);if(!f||!g)continue;
       const ux=P[2*j]-P[2*f[0]],uy=P[2*j+1]-P[2*f[0]+1],vx=P[2*g[0]]-P[2*j],vy=P[2*g[0]+1]-P[2*j+1],c=(ux*vx+uy*vy)/((Math.hypot(ux,uy)*Math.hypot(vx,vy))||1),t=1-c;if(t>bt){bt=t;bs=s;bi=j;}}}
@@ -664,7 +684,7 @@ $('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null
 function afterFixChange(before){const key=a=>JSON.stringify(a.filter(f=>!PAGE_FIX.has(f.mode)));if(key(before)!==key(S.fixes))schedule(run,0);else redrawDrags();}
 $('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
 $('fixClear').addEventListener('click',()=>{if(!S.fixes.length)return;const before=S.fixes;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();afterFixChange(before);});
-document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.areaPending&&!/^(INPUT|SELECT|TEXTAREA)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyPending();return;}if(e.key!=='Escape')return;if(S.areaPending){cancelPending();return;}if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.areaPending&&!/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyPending();return;}if(e.key!=='Escape')return;if(S.areaPending){cancelPending();return;}if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
 $('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
 window.addEventListener('resize',()=>{placeFixLayer();});
 
