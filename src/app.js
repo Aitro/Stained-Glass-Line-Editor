@@ -219,7 +219,7 @@ function showStats(geo){const s=S.stats;if(!s||!S.offs||S.offs.length<2){['sThin
 // ---- fix lines: the user's own choices at junctions and along lines ----
 // A fix is kept in the source picture's own pixels, so it stays put when the size or line width changes,
 // and it is remembered in this browser for the same picture.
-const PAGE_FIX=new Set(['drag','mirror']);   // fixes applied to the finished lines (no re-run needed)
+const PAGE_FIX=new Set(['drag','mirror','smooth','straight']);   // fixes applied to the finished lines (no re-run needed)
 const FIXCOL=['#d2392c','#1f6fd1','#e08a00','#7b3fbf','#13917b','#c2185b','#5d6b70'];
 function srcToWork(sx,sy){const cr=S.crop;return[(sx-cr.x+PAD)*S.sx-0.5,(sy-cr.y+PAD)*S.sy-0.5];}   // -> worker's own x,y
 function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)/S.sy+cr.y-PAD];}
@@ -310,6 +310,8 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
   let h=`<h3>This spot on the line</h3><p>Choose how the line should look here.</p>`;
   h+=`<button data-act="corner" aria-pressed="${near.some(f=>f.mode==='corner')}">Sharp corner here</button>`;
   h+=`<button data-act="round" aria-pressed="${near.some(f=>f.mode==='round')}">Smooth curve here (no corner)</button>`;
+  h+=`<button data-act="smooth" aria-pressed="${near.some(f=>f.mode==='smooth')}">Smooth this line (one even curve between its joints)</button>`;
+  h+=`<button data-act="straight" aria-pressed="${near.some(f=>f.mode==='straight')}">Straighten this line (between its joints)</button>`;
   h+=`<button data-act="mirror" aria-pressed="${near.some(f=>f.mode==='mirror')}">Mirror the matching line from the other side…</button>`;
   const areasHere=S.fixes.filter(f=>{if(f.mode!=='area')return false;const b=areaPageBox(f);return px>b[0]&&px<b[2]&&py>b[1]&&py<b[3];});
   if(areasHere.length)h+=`<button data-act="unarea">Remove the mirrored area here</button>`;
@@ -343,7 +345,7 @@ function fixClick(px,py){const sc=layerScale(),lim=16/sc;
 // was moved, and how far along the line the pull reaches. It is applied to the program's finished lines, so
 // it never changes any of the program's own decisions, and redrawing after a drag needs no re-run.
 const REACH={short:5,medium:14,wide:34};           // in line widths
-function reachWork(){return REACH[$('fixReach').value||'medium']*Math.max(2,widthIn()*S.workPPI);}
+function reachWork(){return (REACH[$('fixReach').value]||REACH.medium)*Math.max(2,widthIn()*S.workPPI);}
 function rotVec(vx,vy){if(!S.rot)return[vx,vy];const a=-S.rot*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a);return[vx*ca-vy*sa,vx*sa+vy*ca];}
 function unrotVec(vx,vy){if(!S.rot)return[vx,vy];const a=S.rot*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a);return[vx*ca-vy*sa,vx*sa+vy*ca];}
 const smooth01=x=>x<=0?0:x>=1?1:x*x*(3-2*x);
@@ -367,7 +369,17 @@ function applyOneDrag(P,offs,d){const n=offs.length-1;const[ax,ay]=outPos(...src
     let bs=-1,bi=-1,bd=1.2*lw;for(let s=0;s<n;s++){if(moved.has(s))continue;for(let j=offs[s]+1;j<offs[s+1]-1;j++){const dd=Math.hypot(orig[2*j]-ax,orig[2*j+1]-ay);if(dd<bd){bd=dd;bs=s;bi=j;}}}
     if(bs>=0)pull(bs,bi,vx,vy,R);}
   else{let bs=-1,bi=-1,bd=2*lw;for(let s=0;s<n;s++)for(let j=offs[s];j<offs[s+1];j++){const dd=Math.hypot(P[2*j]-ax,P[2*j+1]-ay);if(dd<bd){bd=dd;bs=s;bi=j;}}
-    if(bs<0)return moved;pull(bs,bi,vx,vy,R);}
+    if(bs<0)return moved;
+    if(d.whole){// the whole stretch between its joints moves as one; past a joint the line eases back, and lines
+      // that meet it at a joint move their ends with it
+      const T=stretchTools(orig,offs,lw),[i0,i1]=T.piece(bs,bi),a=offs[bs],b=offs[bs+1],L=arc(bs),ease=Math.min(R,14*lw);
+      for(let j=a;j<b;j++){const g=j<i0?L[i0-a]-L[j-a]:j>i1?L[j-a]-L[i1-a]:0,w=1-smooth01(g/ease);if(w>0){P[2*j]+=vx*w;P[2*j+1]+=vy*w;}}moved.add(bs);
+      for(const e0 of[i0,i1]){for(let s=0;s<n;s++){if(s===bs)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;
+          for(const e of[sa,sb-1]){if(!(Math.hypot(orig[2*e]-orig[2*e0],orig[2*e0+1]-orig[2*e+1])<1.5*lw)||moved.has(s))continue;
+            // (it turns about its own next joint, so a straight line stays straight)
+            const[p0,p1]=T.piece(s,e),Ls=arc(s),far=e===sa?p1:p0,span=Math.abs(Ls[far-sa]-Ls[e-sa])||1;
+            for(let j=sa;j<sb;j++){const w=1-Math.abs(Ls[j-sa]-Ls[e-sa])/span;if(w>0&&(e===sa?j<=far:j>=far)){P[2*j]+=vx*w;P[2*j+1]+=vy*w;}}moved.add(s);}}}}
+    else pull(bs,bi,vx,vy,R);}
   // lines that end on a moved line stay on it: their end moves with the spot they land on
   const movedNow=[...moved];
   for(let s=0;s<n;s++){if(moved.has(s))continue;const a=offs[s],b=offs[s+1];if(b-a<2)continue;
@@ -387,10 +399,8 @@ function mirrorFn(flip){const A=S.axes&&S.axes[flip==='tb'?'tb':'lr'];
   const cx=patternMidX(),cy=patternMidY();return flip==='tb'?(x,y)=>[x,2*cy-y]:(x,y)=>[2*cx-x,y];}
 function patternMidY(){const P=S.rawStrokes;let lo=Infinity,hi=-Infinity;for(let j=1;j<P.length;j+=2){if(P[j]<lo)lo=P[j];if(P[j]>hi)hi=P[j];}return(lo+hi)/2;}
 function patternMidX(){const P=S.rawStrokes;let lo=Infinity,hi=-Infinity;for(let j=0;j<P.length;j+=2){if(P[j]<lo)lo=P[j];if(P[j]>hi)hi=P[j];}return(lo+hi)/2;}
-function applyOneMirror(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*S.workPPI),moved=new Set(),orig=Float32Array.from(P);
-  const cx=patternMidX(),[tx,ty]=outPos(...srcToWork(m.sx,m.sy)),[qx,qy]=outPos(...srcToWork(m.msx,m.msy));
-  const near=(x,y,lim)=>{let bs=-1,bi=-1,bd=lim;for(let s=0;s<n;s++)for(let j=offs[s];j<offs[s+1];j++){const d=Math.hypot(P[2*j]-x,P[2*j+1]-y);if(d<bd){bd=d;bs=s;bi=j;}}return[bs,bi];};
-  const[ts,ti]=near(tx,ty,3*lw),[ss,si]=near(qx,qy,3*lw);if(ts<0||ss<0)return moved;
+// (shared by the fixes that reshape one stretch of a line between its joints: mirror, smooth, straighten)
+function stretchTools(P,offs,lw){const n=offs.length-1,orig=Float32Array.from(P);
   // each picked line is taken between its joints: its own ends, and the spots where other lines end on it
   const piece=(s0,i)=>{const a=offs[s0],b=offs[s0+1]-1;let lo=a,hi=b;
     for(let s=0;s<n;s++){if(s===s0)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;
@@ -398,24 +408,14 @@ function applyOneMirror(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*
         if(bj<0)continue;const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
         if(fromA<1.5*lw||fromB<1.5*lw)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}}
     return[lo,hi];};
-  const[i0,i1]=piece(ts,ti),[k0,k1]=piece(ss,si);if(i1-i0<3||k1-k0<2||(ts===ss&&!(k1<i0||k0>i1)))return moved;
-  // the line to copy, flipped across the centre, running the same way as the line to change
-  let C=[];for(let j=k0;j<=k1;j++)C.push([2*cx-orig[2*j],orig[2*j+1]]);
-  const dd=(p,j)=>Math.hypot(p[0]-orig[2*j],p[1]-orig[2*j+1]);if(dd(C[0],i0)+dd(C[C.length-1],i1)>dd(C[C.length-1],i0)+dd(C[0],i1))C.reverse();
-  const a=offs[ts],b=offs[ts+1];
-  const LC=[0];for(let k=1;k<C.length;k++)LC.push(LC[k-1]+Math.hypot(C[k][0]-C[k-1][0],C[k][1]-C[k-1][1]));const totC=LC[LC.length-1];if(totC<1)return moved;
   // how each end of the stretch is held: partway along the line, or where other lines end too (the point of a
   // V), it stays exactly where it is; an end that rests on another line slides along the copy to meet that
   // line again; a loose end goes where the copy puts it
   const hold=(e,isEnd)=>{if(!isEnd)return{pin:true};const ex=orig[2*e],ey=orig[2*e+1];let onLine=-1;
-    for(let s=0;s<n;s++){if(s===ts)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;
+    for(let s=0;s<n;s++){if(s===T.ts)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;
       for(const e2 of[sa,sb-1])if(Math.hypot(orig[2*e2]-ex,orig[2*e2+1]-ey)<1.2*lw)return{pin:true};
       for(let j=sa+1;j<sb-1;j++)if(Math.hypot(orig[2*j]-ex,orig[2*j+1]-ey)<1.2*lw){onLine=s;break;}}
     return onLine>=0?{on:onLine}:{};};
-  const h0=hold(i0,i0===a),h1=hold(i1,i1===b-1);
-  const s0=[P[2*i0],P[2*i0+1]],s1=[P[2*i1],P[2*i1+1]],c0=C[0],c1=C[C.length-1];
-  const d0=h0.pin?[s0[0]-c0[0],s0[1]-c0[1]]:[0,0],d1=h1.pin?[s1[0]-c1[0],s1[1]-c1[1]]:[0,0];
-  let Q=C.map((c,k)=>{const t=LC[k]/totC;return[c[0]+d0[0]*(1-t)+d1[0]*t,c[1]+d0[1]*(1-t)+d1[1]*t];});
   // (an end resting on another line: carried on, or cut back, along its own direction to meet that line)
   const meetLine=(Q,s)=>{const E=Q[Q.length-1];let k=Q.length-2;while(k>0&&Math.hypot(Q[k][0]-E[0],Q[k][1]-E[1])<2*lw)k--;
     const dx=E[0]-Q[k][0],dy=E[1]-Q[k][1],dl=Math.hypot(dx,dy);if(dl<1e-6)return Q;let len=0;for(let i=1;i<Q.length;i++)len+=Math.hypot(Q[i][0]-Q[i-1][0],Q[i][1]-Q[i-1][1]);const reach=Math.max(8*lw,0.45*len);const u=[dx/dl,dy/dl];let best=null;
@@ -423,14 +423,12 @@ function applyOneMirror(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*
       const t=((ax-E[0])*ey-(ay-E[1])*ex)/den,r=((ax-E[0])*u[1]-(ay-E[1])*u[0])/den;if(r<0||r>1||Math.abs(t)>reach)continue;if(!best||Math.abs(t)<Math.abs(best[0]))best=[t,[E[0]+t*u[0],E[1]+t*u[1]]];}
     if(!best)return Q;const[t,X]=best;if(t>=0)return[...Q,X];
     const R=Q.slice();let cut=-t;while(R.length>2){const l=Math.hypot(R[R.length-1][0]-R[R.length-2][0],R[R.length-1][1]-R[R.length-2][1]);if(l>cut)break;cut-=l;R.pop();}R[R.length-1]=X;return R;};
-  if(h1.on!=null)Q=meetLine(Q,h1.on);if(h0.on!=null)Q=meetLine(Q.slice().reverse(),h0.on).reverse();
   // (laid back onto a stretch's own points j0..j1, evenly along its length)
   const layBack=(j0,j1,Q)=>{const LQ=[0];for(let k=1;k<Q.length;k++)LQ.push(LQ[k-1]+Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]));const totQ=LQ[LQ.length-1]||1;
     for(let j=j0,k=1;j<=j1;j++){const d=(j-j0)/(j1-j0)*totQ;while(k<Q.length-1&&LQ[k]<d)k++;const f=(d-LQ[k-1])/((LQ[k]-LQ[k-1])||1);
       P[2*j]=Q[k-1][0]+(Q[k][0]-Q[k-1][0])*f;P[2*j+1]=Q[k-1][1]+(Q[k][1]-Q[k-1][1])*f;}};
-  layBack(i0,i1,Q);moved.add(ts);
-  // lines that end on the changed stretch stay on it: carried on, or cut back, along their own direction to meet
-  // it (or, where they can't reach it that way, their end moves with the spot they landed on)
+  // lines that end on the changed stretch stay on it
+  const follow=(ts,i0,i1,moved)=>{
   for(let s=0;s<n;s++){if(s===ts)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;
     for(const e of[sa,sb-1]){let best=-1,bd=0.8*lw;for(let j=i0+1;j<i1;j++){const d=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(d<bd){bd=d;best=j;}}
       if(best<0)continue;const ux=P[2*best]-orig[2*best],uy=P[2*best+1]-orig[2*best+1];if(Math.hypot(ux,uy)<0.05)continue;
@@ -438,7 +436,44 @@ function applyOneMirror(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*
         if(G!==F){layBack(sa,sb-1,e===sa?G.reverse():G);moved.add(s);continue;}}
       const L=[0];for(let j=sa+1;j<sb;j++)L.push(L[j-sa-1]+Math.hypot(P[2*j]-P[2*j-2],P[2*j+1]-P[2*j-1]));const tot=L[L.length-1],reach=Math.min(14*lw,0.6*tot),s0e=L[e-sa];
       for(let j=sa;j<sb;j++){const w=1-smooth01(Math.abs(L[j-sa]-s0e)/reach);if(w>0){P[2*j]+=ux*w;P[2*j+1]+=uy*w;}}moved.add(s);}}
+  };
+  const T={ts:-1};return{orig,piece,hold,meetLine,layBack,follow,T};}
+function applyOneMirror(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*S.workPPI),moved=new Set();
+  const cx=patternMidX(),[tx,ty]=outPos(...srcToWork(m.sx,m.sy)),[qx,qy]=outPos(...srcToWork(m.msx,m.msy));
+  const near=(x,y,lim)=>{let bs=-1,bi=-1,bd=lim;for(let s=0;s<n;s++)for(let j=offs[s];j<offs[s+1];j++){const d=Math.hypot(P[2*j]-x,P[2*j+1]-y);if(d<bd){bd=d;bs=s;bi=j;}}return[bs,bi];};
+  const[ts,ti]=near(tx,ty,3*lw),[ss,si]=near(qx,qy,3*lw);if(ts<0||ss<0)return moved;
+  const K=stretchTools(P,offs,lw),{orig,piece,hold,meetLine,layBack,follow}=K;K.T.ts=ts;
+  const[i0,i1]=piece(ts,ti),[k0,k1]=piece(ss,si);if(i1-i0<3||k1-k0<2||(ts===ss&&!(k1<i0||k0>i1)))return moved;
+  // the line to copy, flipped across the centre, running the same way as the line to change
+  let C=[];for(let j=k0;j<=k1;j++)C.push([2*cx-orig[2*j],orig[2*j+1]]);
+  const dd=(p,j)=>Math.hypot(p[0]-orig[2*j],p[1]-orig[2*j+1]);if(dd(C[0],i0)+dd(C[C.length-1],i1)>dd(C[C.length-1],i0)+dd(C[0],i1))C.reverse();
+  const a=offs[ts],b=offs[ts+1];
+  const LC=[0];for(let k=1;k<C.length;k++)LC.push(LC[k-1]+Math.hypot(C[k][0]-C[k-1][0],C[k][1]-C[k-1][1]));const totC=LC[LC.length-1];if(totC<1)return moved;
+  const h0=hold(i0,i0===a),h1=hold(i1,i1===b-1);
+  const s0=[P[2*i0],P[2*i0+1]],s1=[P[2*i1],P[2*i1+1]],c0=C[0],c1=C[C.length-1];
+  const d0=h0.pin?[s0[0]-c0[0],s0[1]-c0[1]]:[0,0],d1=h1.pin?[s1[0]-c1[0],s1[1]-c1[1]]:[0,0];
+  let Q=C.map((c,k)=>{const t=LC[k]/totC;return[c[0]+d0[0]*(1-t)+d1[0]*t,c[1]+d0[1]*(1-t)+d1[1]*t];});
+  if(h1.on!=null)Q=meetLine(Q,h1.on);if(h0.on!=null)Q=meetLine(Q.slice().reverse(),h0.on).reverse();
+  layBack(i0,i1,Q);moved.add(ts);
+  follow(ts,i0,i1,moved);
   return moved;}
+// ---- smoothing or straightening one stretch of a line ----
+// The stretch between the line's joints is redrawn as one even curve (or a ruler-straight line) between the same
+// two ends; lines that end on it stay on it.
+function applyOneSmooth(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*S.workPPI),moved=new Set();const[tx,ty]=outPos(...srcToWork(m.sx,m.sy));
+  let ts=-1,ti=-1,bd=3*lw;for(let s=0;s<n;s++)for(let j=offs[s];j<offs[s+1];j++){const d=Math.hypot(P[2*j]-tx,P[2*j+1]-ty);if(d<bd){bd=d;ts=s;ti=j;}}if(ts<0)return moved;
+  const K=stretchTools(P,offs,lw);K.T.ts=ts;const[i0,i1]=K.piece(ts,ti);if(i1-i0<3)return moved;
+  const A=[P[2*i0],P[2*i0+1]],B=[P[2*i1],P[2*i1+1]];let Q;
+  if(m.mode==='straight'){const N=Math.max(2,i1-i0);Q=[];for(let k=0;k<=N;k++)Q.push([A[0]+(B[0]-A[0])*k/N,A[1]+(B[1]-A[1])*k/N]);}
+  else{// (one cubic curve through both ends, its two middle handles fitted to the line by least squares)
+    const L=[0];for(let j=i0+1;j<=i1;j++)L.push(L[L.length-1]+Math.hypot(P[2*j]-P[2*j-2],P[2*j+1]-P[2*j-1]));const tot=L[L.length-1]||1;
+    let a11=0,a12=0,a22=0,rx1=0,ry1=0,rx2=0,ry2=0;
+    for(let j=i0;j<=i1;j++){const t=L[j-i0]/tot,u=1-t,b0=u*u*u,b1=3*u*u*t,b2=3*u*t*t,b3=t*t*t,px=P[2*j]-b0*A[0]-b3*B[0],py=P[2*j+1]-b0*A[1]-b3*B[1];
+      a11+=b1*b1;a12+=b1*b2;a22+=b2*b2;rx1+=b1*px;ry1+=b1*py;rx2+=b2*px;ry2+=b2*py;}
+    const det=a11*a22-a12*a12;if(Math.abs(det)<1e-9)return moved;
+    const C1=[(a22*rx1-a12*rx2)/det,(a22*ry1-a12*ry2)/det],C2=[(a11*rx2-a12*rx1)/det,(a11*ry2-a12*ry1)/det],N=Math.max(8,2*(i1-i0));Q=[];
+    for(let k=0;k<=N;k++){const t=k/N,u=1-t,b0=u*u*u,b1=3*u*u*t,b2=3*u*t*t,b3=t*t*t;Q.push([b0*A[0]+b1*C1[0]+b2*C2[0]+b3*B[0],b0*A[1]+b1*C1[1]+b2*C2[1]+b3*B[1]]);}}
+  K.layBack(i0,i1,Q);moved.add(ts);K.follow(ts,i0,i1,moved);return moved;}
 // ---- mirroring an area ----
 // An area fix is a box, kept as two corners in the source picture's pixels. The worker replaces the picture
 // inside it with the matching spot on the other side of the pattern's centre line, flipped, and traces it all
@@ -446,8 +481,8 @@ function applyOneMirror(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*
 function areaWorkBox(f){const c=[[f.x0,f.y0],[f.x1,f.y0],[f.x0,f.y1],[f.x1,f.y1]].map(([x,y])=>outPos(...srcToWork(x,y)));
   return[Math.min(...c.map(q=>q[0])),Math.min(...c.map(q=>q[1])),Math.max(...c.map(q=>q[0])),Math.max(...c.map(q=>q[1]))];}
 function areaPageBox(f){const geo=pageGeom(),b=areaWorkBox(f),p=geo.map(b[0],b[1]),q=geo.map(b[2],b[3]);return[Math.min(p[0],q[0]),Math.min(p[1],q[1]),Math.max(p[0],q[0]),Math.max(p[1],q[1])];}
-function applyDrags(extra){if(!S.rawStrokes)return S.rawStrokes;const B={P:S.rawStrokes};S.offs=S.rawOffs;S.hw=S.rawHw;S.fill=S.rawFill;S.fcurve=S.rawFcurve;const ds=S.fixes.filter(f=>f.mode==='drag'||f.mode==='mirror');if(extra)ds.push(extra);if(!ds.length)return B.P;
-  const P=Float32Array.from(B.P);for(const d of ds){if(d.mode==='mirror')applyOneMirror(P,S.offs,d);else applyOneDrag(P,S.offs,d);}return P;}
+function applyDrags(extra){if(!S.rawStrokes)return S.rawStrokes;const B={P:S.rawStrokes};S.offs=S.rawOffs;S.hw=S.rawHw;S.fill=S.rawFill;S.fcurve=S.rawFcurve;const ds=S.fixes.filter(f=>PAGE_FIX.has(f.mode));if(extra)ds.push(extra);if(!ds.length)return B.P;
+  const P=Float32Array.from(B.P);for(const d of ds){if(d.mode==='mirror')applyOneMirror(P,S.offs,d);else if(d.mode==='smooth'||d.mode==='straight')applyOneSmooth(P,S.offs,d);else applyOneDrag(P,S.offs,d);}return P;}
 function redrawDrags(){if(!S.rawStrokes)return;S.strokes=applyDrags();ptsCache=null;markBorder();render();drawFixLayer();}
 // pointer handling on the layer: a press that doesn't move is a click (menus); one that moves is a drag
 let press=null;
@@ -466,7 +501,7 @@ function junctionMeet(J){const geo=pageGeom(),c=jPage(J),lw=Math.max(2,widthIn()
 function pressDrag(e){const[px,py]=layerPoint(e),geo=pageGeom();if(press.j>=0&&!press.at)press.at=junctionMeet(S.junctions[press.j]);const at=press.j>=0?press.at:press.q;
   const[wx,wy]=pageToWorkInternal(at[0],at[1]);const[sx,sy]=workToSrc(wx,wy);
   const[ox,oy]=unrotVec((px-press.px)/geo.k,(py-press.py)/geo.k);
-  return{mode:'drag',sx,sy,dx:ox/S.sx,dy:oy/S.sy,r:reachWork()/S.sx,j:press.j>=0};}
+  return{mode:'drag',sx,sy,dx:ox/S.sx,dy:oy/S.sy,r:reachWork()/S.sx,j:press.j>=0,whole:press.j<0&&$('fixReach').value==='line'};}
 // (the box being drawn, and the matching box on the other side that it will copy from)
 function areaPreview(px,py){const k=1/layerScale(),geo=pageGeom(),b=[Math.min(press.px,px),Math.min(press.py,py),Math.max(press.px,px),Math.max(press.py,py)];
   const mf=mirrorFn(S.areaFlip),corners=[[b[0],b[1]],[b[2],b[1]],[b[2],b[3]],[b[0],b[3]]].map(([x,y])=>{const o=outPos(...pageToWorkInternal(x,y)),q=mf(o[0],o[1]);return geo.map(q[0],q[1]);});
