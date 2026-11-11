@@ -463,12 +463,22 @@ function applyOneMirror(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*
 function applyOneSmooth(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*S.workPPI),moved=new Set();const[tx,ty]=outPos(...srcToWork(m.sx,m.sy));
   let ts=-1,ti=-1,bd=3*lw;for(let s=0;s<n;s++)for(let j=offs[s];j<offs[s+1];j++){const d=Math.hypot(P[2*j]-tx,P[2*j+1]-ty);if(d<bd){bd=d;ts=s;ti=j;}}if(ts<0)return moved;
   const K=stretchTools(P,offs,lw);K.T.ts=ts;const[i0,i1]=K.piece(ts,ti);if(i1-i0<3)return moved;
-  const A=[P[2*i0],P[2*i0+1]],B=[P[2*i1],P[2*i1+1]];let Q;
+  let A=[P[2*i0],P[2*i0+1]],B=[P[2*i1],P[2*i1+1]],Q;
+  // (an end that rests on another line close to that line's point, as at the bottom of a V, goes to the point)
+  const toTip=(E,on)=>{const a=offs[on],b=offs[on+1];if(b-a<5)return E;const L=[0];for(let j=a+1;j<b;j++)L.push(L[L.length-1]+Math.hypot(P[2*j]-P[2*j-2],P[2*j+1]-P[2*j-1]));
+    let jn=a,dn=Infinity;for(let j=a;j<b;j++){const d=Math.hypot(P[2*j]-E[0],P[2*j+1]-E[1]);if(d<dn){dn=d;jn=j;}}
+    const at=(l)=>{let j=a;while(j<b-1&&L[j-a+1]<l)j++;return j;},h=2*lw;let best=null,bt=Math.sin(45*Math.PI/180);
+    for(let j=a;j<b;j++){if(Math.abs(L[j-a]-L[jn-a])>10*lw||L[j-a]<h||L[j-a]>L[b-a-1]-h)continue;const p=at(L[j-a]-h),q=at(L[j-a]+h);
+      const ux=P[2*j]-P[2*p],uy=P[2*j+1]-P[2*p+1],vx=P[2*q]-P[2*j],vy=P[2*q+1]-P[2*j+1],nu=Math.hypot(ux,uy),nv=Math.hypot(vx,vy);if(nu<1e-6||nv<1e-6)continue;
+      const c=(ux*vx+uy*vy)/(nu*nv),turn=Math.sqrt(Math.max(0,1-Math.min(1,c)*Math.min(1,c)))*(c<0?1:1)+(c<0?1:0);if(turn>bt){bt=turn;best=[P[2*j],P[2*j+1]];}}
+    return best||E;};
+  {const h0=K.hold(i0,i0===offs[ts]),h1=K.hold(i1,i1===offs[ts+1]-1);if(h0.on!=null)A=toTip(A,h0.on);if(h1.on!=null)B=toTip(B,h1.on);}
   if(m.mode==='straight'){const N=Math.max(2,i1-i0);Q=[];for(let k=0;k<=N;k++)Q.push([A[0]+(B[0]-A[0])*k/N,A[1]+(B[1]-A[1])*k/N]);}
   else{// (one cubic curve through both ends, its two middle handles fitted to the line by least squares)
     const L=[0];for(let j=i0+1;j<=i1;j++)L.push(L[L.length-1]+Math.hypot(P[2*j]-P[2*j-2],P[2*j+1]-P[2*j-1]));const tot=L[L.length-1]||1;
     let a11=0,a12=0,a22=0,rx1=0,ry1=0,rx2=0,ry2=0;
-    for(let j=i0;j<=i1;j++){const t=L[j-i0]/tot,u=1-t,b0=u*u*u,b1=3*u*u*t,b2=3*u*t*t,b3=t*t*t,px=P[2*j]-b0*A[0]-b3*B[0],py=P[2*j+1]-b0*A[1]-b3*B[1];
+    const dA=[A[0]-P[2*i0],A[1]-P[2*i0+1]],dB=[B[0]-P[2*i1],B[1]-P[2*i1+1]];
+    for(let j=i0;j<=i1;j++){const t=L[j-i0]/tot,u=1-t,b0=u*u*u,b1=3*u*u*t,b2=3*u*t*t,b3=t*t*t,px=P[2*j]+u*dA[0]+t*dB[0]-b0*A[0]-b3*B[0],py=P[2*j+1]+u*dA[1]+t*dB[1]-b0*A[1]-b3*B[1];
       a11+=b1*b1;a12+=b1*b2;a22+=b2*b2;rx1+=b1*px;ry1+=b1*py;rx2+=b2*px;ry2+=b2*py;}
     const det=a11*a22-a12*a12;if(Math.abs(det)<1e-9)return moved;
     const C1=[(a22*rx1-a12*rx2)/det,(a22*ry1-a12*ry2)/det],C2=[(a11*rx2-a12*rx1)/det,(a11*ry2-a12*ry1)/det],N=Math.max(8,2*(i1-i0));Q=[];
