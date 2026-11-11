@@ -15,9 +15,11 @@ function process(p){
     axes={lr:symAxis(src,'lr'),tb:symAxis(src,'tb')};
     const areaAxes=[];axesOut=axes;axes.areas=areaAxes;
     {for(const a of areas){const G=axes[a.flip==='tb'?'tb':'lr'];areaAxes.push(null);if(!G)continue;
-        const A=refineAxis(src,G,a.flip==='tb'?'tb':'lr',a);areaAxes[areaAxes.length-1]=A;const cx=A.cx,cy=A.cy,u=A.u;
+        const ox=+a.ox||0,oy=+a.oy||0,moved=Math.hypot(ox,oy)>0.5;
+        // (a copy-from box the person moved: their spot is taken as it is, across the outline's centre line)
+        const A=moved?Object.assign({},G):refineAxis(src,G,a.flip==='tb'?'tb':'lr',a);areaAxes[areaAxes.length-1]=A;const cx=A.cx,cy=A.cy,u=A.u;
         // (reflected across the pattern's centre line: through (cx,cy) along u)
-        const mirAt=(x,y)=>{const dx=x-cx,dy=y-cy,k=2*(dx*u[0]+dy*u[1]);return at(cx+k*u[0]-dx,cy+k*u[1]-dy);};let x0=Math.max(1,Math.floor(a.x0)),x1=Math.min(W-2,Math.ceil(a.x1)),y0=Math.max(1,Math.floor(a.y0)),y1=Math.min(H-2,Math.ceil(a.y1));if(x1-x0<4||y1-y0<4)continue;
+        const mirAt=(x,y)=>{const dx=x-cx,dy=y-cy,k=2*(dx*u[0]+dy*u[1]);return at(cx+k*u[0]-dx+ox,cy+k*u[1]-dy+oy);};A.ox=ox;A.oy=oy;let x0=Math.max(1,Math.floor(a.x0)),x1=Math.min(W-2,Math.ceil(a.x1)),y0=Math.max(1,Math.floor(a.y0)),y1=Math.min(H-2,Math.ceil(a.y1));if(x1-x0<4||y1-y0<4)continue;
         // (where lines cross each edge, in the picture and in the copy: the middles of the runs of ink along it)
         const runs=(f,E)=>{const out=[];let st=-1;for(let t=0;t<=E[4]+1;t++){const v=t<=E[4]&&f(E[0]+E[2]*t,E[1]+E[3]*t);if(v&&st<0)st=t;if(!v&&st>=0){out.push([(st+t-1)/2,t-st]);st=-1;}}return out;};
         const edgesOf=()=>[[x0,y0,1,0,x1-x0],[x0,y1,1,0,x1-x0],[x0,y0,0,1,y1-y0],[x1,y0,0,1,y1-y0]];
@@ -36,7 +38,7 @@ function process(p){
         const cross=[];for(const E of edgesOf())cross.push([E,runs(at,E),runs(mirAt,E)]);
         // (each line crossing an edge, with how far the copy must move along the edge to meet it)
         // (a box across the centre line: the part on the side holding most of the box takes the copy, the rest stays)
-        const nv=[u[1],-u[0]],sideOf=(x,y)=>Math.sign((x-cx)*nv[0]+(y-cy)*nv[1]),bs=sideOf((x0+x1)/2,(y0+y1)/2)||1,keep=(x,y)=>sideOf(x,y)===-bs;
+        const nv=[u[1],-u[0]],sideOf=(x,y)=>Math.sign((x-cx)*nv[0]+(y-cy)*nv[1]),bs=sideOf((x0+x1)/2,(y0+y1)/2)||1,keep=(x,y)=>!moved&&sideOf(x,y)===-bs;
         const pins=[];for(const[E,ro,rm]of cross)for(const[i,j]of pair(ro,rm)){const r=ro[i],best=rm[j];if(keep(E[0]+E[2]*r[0],E[1]+E[3]*r[0]))continue;
           pins.push({x:E[0]+E[2]*r[0],y:E[1]+E[3]*r[0],dx:E[2]*(r[0]-best[0]),dy:E[3]*(r[0]-best[0])});}
         const B=Math.max(3*lw,0.4*Math.min(x1-x0,y1-y0)),S2=4*lw,band=Math.max(2,Math.round(0.35*lw));

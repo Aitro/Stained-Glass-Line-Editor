@@ -138,6 +138,11 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .fix-layer .area{fill:color-mix(in srgb,var(--fix) 10%,transparent);stroke:var(--fix)}
 .fix-layer .area.src{fill:none;stroke:var(--fix);opacity:.75}
 .fix-layer.picking-area{cursor:crosshair}
+.fix-layer .area-grip circle{fill:var(--fix);stroke:#fff}
+.fix-layer .area-grip path{stroke:#fff;fill:none}
+.fix-layer .area-grip{cursor:move}
 .mat.picking-area{cursor:crosshair;touch-action:none}
 .fix-layer .seam.ok{fill:#2e9d5a;stroke:#fff}
 .fix-layer .seam.bad{fill:#d4372c;stroke:#fff}
+
+.fix-pop .row-label{align-self:center;font-size:.85rem;margin-right:4px}
