@@ -48,6 +48,7 @@ Optional:
 - **Cleanup → Make straight lines and circles exact** (on by default): lines drawn straight come out perfectly straight and circles perfectly circular.
 - **Cleanup → Square up the panel** (on by default): lines that are nearly level or upright become exactly level or upright, so the borders are square.
 - **Cleanup → Save PNG with a transparent background**.
+- **Save PNG at** (under Pattern size): 300 or 600 px per inch. The preview is always drawn at 300; a 600 PNG is drawn afresh when you save it (about four times the pixels, so it takes a moment). SVG and DXF are lines, so they are sharp at any size.
 
 ### Turning on GitHub Pages (once, by the repository owner)
 

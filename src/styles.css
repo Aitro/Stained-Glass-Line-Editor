@@ -146,3 +146,6 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .fix-layer .seam.bad{fill:#d4372c;stroke:#fff}
 
 .fix-pop .row-label{align-self:center;font-size:.85rem;margin-right:4px}
+
+.field-inline{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:.92rem}
+.field-inline select{flex:0 1 auto;min-width:0}

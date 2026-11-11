@@ -209,7 +209,7 @@ function updateLabels(){const w=widthIn();
   const sm=+$('smooth').value;$('smoothVal').textContent=sm<0.8?'light':sm>1.4?'strong':'normal';
   if(S.crop){const cr=S.crop,z=sizeIn();const stretch=(z.h/z.w)/(cr.h/cr.w);
     const pct=Math.round((stretch-1)*100);
-    $('panelNote').textContent='Source has '+Math.round(Math.max(cr.w/z.w,cr.h/z.h))+' px per inch at this size; output is drawn at 300.'+
+    $('panelNote').textContent='Source has '+Math.round(Math.max(cr.w/z.w,cr.h/z.h))+' px per inch at this size; preview is drawn at 300 px per inch.'+
       (Math.abs(pct)>=1?' Stretched '+Math.abs(pct)+'% '+(pct>0?'taller':'wider')+' than the original.':'');}}
 function showStats(geo){const s=S.stats;if(!s||!S.offs||S.offs.length<2){['sThin','sMid','sThick'].forEach(i=>$(i).textContent='no lines found');return;}
   const f=v=>fmtUnit(Math.max(1,v)/S.workPPI);$('sThin').textContent=f(s.thin);$('sMid').textContent=f(s.mid);$('sThick').textContent=f(s.thick);
@@ -679,7 +679,18 @@ async function save(data,ext){const note=$('note');
   try{const name=fname(ext);await S.dl.save({filename:name,data});note.textContent='Saved '+name+'.';}
   catch(err){const c=err&&err.code;note.textContent=c==='declined'?'Save cancelled.':c==='rate_limited'?'A save prompt is already open. Finish it, then try again.':
     'Saving is not available here. Switch to Result, then right-click (or long-press) the image and choose Save image.';}}
-$('savePng').addEventListener('click',()=>{if(S.resultBlob)save(S.resultBlob,'png');});
+try{const v=localStorage.getItem('pngPPI');if(v==='600'||v==='300')$('pngPPI').value=v;}catch(e){}
+$('pngPPI').addEventListener('change',e=>{try{localStorage.setItem('pngPPI',e.target.value);}catch(_){}});
+// (the preview is drawn at 300 px per inch; a finer PNG is drawn afresh at the chosen resolution when it is saved)
+$('savePng').addEventListener('click',async()=>{if(!S.resultBlob)return;const ppi=+$('pngPPI').value||OUT_PPI;if(ppi===OUT_PPI){save(S.resultBlob,'png');return;}
+  const note=$('note');note.textContent='Drawing the PNG at '+ppi+' px per inch…';await new Promise(r=>setTimeout(r,30));
+  const geo=pageGeom(),f=ppi/OUT_PPI,c=document.createElement('canvas');c.width=Math.round(geo.pw*f);c.height=Math.round(geo.ph*f);const g=c.getContext('2d');
+  if(!g){note.textContent='This browser cannot draw a picture that large. Try 300 px per inch, or Save SVG.';return;}
+  g.setTransform(f,0,0,f,0,0);if(!$('transparent').checked){g.fillStyle='#fff';g.fillRect(0,0,geo.pw,geo.ph);}
+  drawStrokes(g,geo,'#000',widthIn(),borderIn());drawFillets(g,geo,'#000',widthIn());
+  const b=await new Promise(r=>c.toBlob(r,'image/png'));c.width=c.height=0;
+  if(!b){note.textContent='This browser cannot make a PNG that large ('+Math.round(geo.pw*f)+' × '+Math.round(geo.ph*f)+' px). Try 300 px per inch, or Save SVG.';return;}
+  save(await withPPI(b,ppi),'png');});
 $('saveSvg').addEventListener('click',()=>{if(S.svg)save(S.svg,'svg');});
 // ---- cut file for a cutter (Silhouette and the like) ----
 // Every glass piece is the white space between the new lines; its edge is a closed cut line that already sits half
