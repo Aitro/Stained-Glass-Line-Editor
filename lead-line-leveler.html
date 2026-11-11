@@ -148,6 +148,8 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .fix-layer .area{fill:color-mix(in srgb,var(--fix) 10%,transparent);stroke:var(--fix)}
 .fix-layer .area.src{fill:none;stroke:var(--fix);opacity:.75}
 .fix-layer.picking-area{cursor:crosshair}
+.fix-layer .seam.ok{fill:#2e9d5a;stroke:#fff}
+.fix-layer .seam.bad{fill:#d4372c;stroke:#fff}
 </style>
 
 <div class="app">
@@ -339,6 +341,14 @@ function process(p){
   say('Finding lines…');
   const t=p.auto?otsuT:p.threshold;const m=new Uint8Array(W*H);
   for(let i=0;i<W*H;i++)m[i]=p.invert?(gray[i]>=t?1:0):(gray[i]<t?1:0);
+  // mirrored areas (picked by hand): inside each box the picture is replaced by the matching spot on the other side
+  // of the pattern's upright centre line, flipped; along the box's edge both are kept, so lines crossing it join up
+  const areas=Array.isArray(p.areas)?p.areas.filter(a=>a&&[a.x0,a.y0,a.x1,a.y1].every(isFinite)):[];
+  if(areas.length){let lo=W,hi=-1;for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(m[y*W+x]){if(x<lo)lo=x;if(x>hi)hi=x;}
+    if(hi>lo){const c2=lo+hi,band=Math.max(3,Math.round(0.004*Math.max(W,H))),src=m.slice();
+      for(const a of areas){const x0=Math.max(0,Math.floor(a.x0)),x1=Math.min(W-1,Math.ceil(a.x1)),y0=Math.max(0,Math.floor(a.y0)),y1=Math.min(H-1,Math.ceil(a.y1));
+        for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const mx=c2-x;if(mx<0||mx>=W)continue;const v=src[y*W+mx],e=Math.min(x-x0,x1-x,y-y0,y1-y);
+          m[y*W+x]=e<band?(v|src[y*W+x]):v;}}}}
   // estimate typical line thickness from ridge of distance map
   const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;
   let dbg=edt(bg);const ridge=[];
@@ -1585,7 +1595,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker()};}
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker()};}
 let timer=null;
 function schedule(fn,ms){clearTimeout(timer);timer=setTimeout(fn,ms);}
 function run(){if(!S.work)return;if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
@@ -1734,11 +1744,13 @@ function showStats(geo){const s=S.stats;if(!s||!S.offs||S.offs.length<2){['sThin
 // ---- fix lines: the user's own choices at junctions and along lines ----
 // A fix is kept in the source picture's own pixels, so it stays put when the size or line width changes,
 // and it is remembered in this browser for the same picture.
-const PAGE_FIX=new Set(['drag','mirror','area']);   // fixes applied to the finished lines (no re-run needed)
+const PAGE_FIX=new Set(['drag','mirror']);   // fixes applied to the finished lines (no re-run needed)
 const FIXCOL=['#d2392c','#1f6fd1','#e08a00','#7b3fbf','#13917b','#c2185b','#5d6b70'];
 function srcToWork(sx,sy){const cr=S.crop;return[(sx-cr.x+PAD)*S.sx-0.5,(sy-cr.y+PAD)*S.sy-0.5];}   // -> worker's own x,y
 function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)/S.sy+cr.y-PAD];}
-function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)).map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
+function areasForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='area').map(f=>{const c=[[f.x0,f.y0],[f.x1,f.y1]].map(([x,y])=>srcToWork(x,y));
+  return{x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1])};});}
+function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)&&f.mode!=='area').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
 function saveFixes(){try{if(S.fixKey)localStorage.setItem(S.fixKey,JSON.stringify(S.fixes));}catch(e){}updateFixBar();}
 function loadFixes(name,w,h){S.fixKey='lll-fixes:'+name+':'+w+'x'+h;S.fixes=[];S.fixSel=null;S.undo=[];
   try{const v=JSON.parse(localStorage.getItem(S.fixKey)||'[]');if(Array.isArray(v))S.fixes=v.filter(f=>f&&f.mode&&(f.mode==='area'?[f.x0,f.y0,f.x1,f.y1].every(isFinite):isFinite(f.sx)&&isFinite(f.sy)));}catch(e){}
@@ -1767,7 +1779,7 @@ function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view=
   L.removeAttribute('hidden');placeFixLayer();const k=1/layerScale(),r=7*k;let h='';
   const boxes=S.fixes.filter(f=>f.mode==='area').map(areaPageBox);
   for(const b of boxes)h+=`<rect class="area" x="${b[0]}" y="${b[1]}" width="${b[2]-b[0]}" height="${b[3]-b[1]}" style="stroke-width:${2*k}px;stroke-dasharray:${6*k} ${4*k}"/>`;
-  for(let i=0;i<S.junctions.length;i++){const J=S.junctions[i],p=jPage(J),fx=fixAtJunction(J).length>0;if(boxes.some(b=>p[0]>b[0]&&p[0]<b[2]&&p[1]>b[1]&&p[1]<b[3]))continue;
+  for(let i=0;i<S.junctions.length;i++){const J=S.junctions[i],p=jPage(J),fx=fixAtJunction(J).length>0;
     h+=`<circle class="jn${fx?' fixed':''}${S.fixSel&&S.fixSel.j===i?' sel':''}" cx="${p[0]}" cy="${p[1]}" r="${r}" style="stroke-width:${(fx?2:2.5)*k}"/>`;}
   // fixes that sit on a line rather than at a junction
   const geo=pageGeom();
@@ -1829,7 +1841,7 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
   h+=`<button data-act="auto" aria-pressed="${!near.length}">Automatic${near.length?(near.some(f=>PAGE_FIX.has(f.mode))?' (undo my changes here)':' (remove my fix)'):''}</button>`;
   openFixPop(h,px,py);
   {const ua=$('fixPop').querySelector('[data-act="unarea"]');if(ua)ua.onclick=()=>{closeFixPop();S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));
-    S.fixes=S.fixes.filter(f=>!areasHere.includes(f));saveFixes();redrawDrags();setStatus('Mirrored area removed');};}
+    const before=S.fixes;S.fixes=S.fixes.filter(f=>!areasHere.includes(f));saveFixes();afterFixChange(before);};}
   $('fixPop').querySelector('[data-act="mirror"]').onclick=()=>{closeFixPop();S.mirrorPick={sx,sy,px,py,near};S.fixSel={pt:[px,py]};drawFixLayer();
     setStatus('Now click the line on the other side to copy (Esc to cancel)');};
   $('fixPop').querySelectorAll('[data-act]:not([data-act="mirror"]):not([data-act="unarea"])').forEach(bt=>bt.onclick=()=>{const act=bt.dataset.act;
@@ -1947,125 +1959,13 @@ function applyOneMirror(P,offs,m){const n=offs.length-1,lw=Math.max(2,widthIn()*
       for(let j=sa;j<sb;j++){const w=1-smooth01(Math.abs(L[j-sa]-s0e)/reach);if(w>0){P[2*j]+=ux*w;P[2*j+1]+=uy*w;}}moved.add(s);}}
   return moved;}
 // ---- mirroring an area ----
-// An area fix is a box, kept as two corners in the source picture's pixels. Everything inside the box is taken
-// away and replaced by the lines inside the matching box on the other side of the pattern's upright centre
-// line, flipped. Where those lines cross the edge of the box they join up with the lines outside it.
+// An area fix is a box, kept as two corners in the source picture's pixels. The worker replaces the picture
+// inside it with the matching spot on the other side of the pattern's centre line, flipped, and traces it all
+// afresh (see 03-process.js).
 function areaWorkBox(f){const c=[[f.x0,f.y0],[f.x1,f.y0],[f.x0,f.y1],[f.x1,f.y1]].map(([x,y])=>outPos(...srcToWork(x,y)));
   return[Math.min(...c.map(q=>q[0])),Math.min(...c.map(q=>q[1])),Math.max(...c.map(q=>q[0])),Math.max(...c.map(q=>q[1]))];}
 function areaPageBox(f){const geo=pageGeom(),b=areaWorkBox(f),p=geo.map(b[0],b[1]),q=geo.map(b[2],b[3]);return[Math.min(p[0],q[0]),Math.min(p[1],q[1]),Math.max(p[0],q[0]),Math.max(p[1],q[1])];}
-function areaBase(){const areas=S.fixes.filter(f=>f.mode==='area'),key=JSON.stringify(areas);
-  if(!S.areaCache||S.areaCache.raw!==S.rawStrokes||S.areaCache.key!==key){
-    let B={P:S.rawStrokes,offs:S.rawOffs,hw:S.rawHw,fill:S.rawFill,fcurve:S.rawFcurve};
-    for(const f of areas)B=applyOneArea(B,f);S.areaCache={raw:S.rawStrokes,key,B};}
-  const B=S.areaCache.B;S.offs=B.offs;S.hw=B.hw;S.fill=B.fill;S.fcurve=B.fcurve;return B;}
-function applyOneArea(B,f){const{P,offs,hw}=B,n=offs.length-1,lw=Math.max(2,widthIn()*S.workPPI),cx=patternMidX();
-  const T=areaWorkBox(f),M=[2*cx-T[2],T[1],2*cx-T[0],T[3]],box=Math.min(T[2]-T[0],T[3]-T[1]);
-  const inB=(x,y,b)=>x>b[0]&&x<b[2]&&y>b[1]&&y<b[3];
-  const hyp=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1]);
-  // (where the segment from p to q, one end inside box b and one outside, crosses its edge)
-  const cross=(p,q,b)=>{let lo=0,hi=1;const ip=inB(p[0],p[1],b);for(let k=0;k<30;k++){const t=(lo+hi)/2,x=p[0]+(q[0]-p[0])*t,y=p[1]+(q[1]-p[1])*t;if(inB(x,y,b)===ip)lo=t;else hi=t;}return(lo+hi)/2;};
-  // the pieces of every line that lie outside the box (kept), and inside the matching box (copied, flipped);
-  // a copied piece remembers where its line carries on outside the matching box
-  const runs=[];
-  const take=(want,b,copy)=>{for(let s=0;s<n;s++){let cur=null;const a=offs[s],e=offs[s+1];
-    for(let j=a;j<e;j++){const p=[P[2*j],P[2*j+1]],ok=want(p);
-      if(ok){if(!cur){cur={pts:[],hw:[],edge:[false,false],copy,cont:[null,null]};
-          if(j>a){const q=[P[2*j-2],P[2*j-1]],t=cross(q,p,b);cur.pts.push([q[0]+(p[0]-q[0])*t,q[1]+(p[1]-q[1])*t]);cur.hw.push(hw[j-1]+(hw[j]-hw[j-1])*t);cur.edge[0]=true;cur.cont[0]={s,j:j-1,dir:-1};}}
-        cur.pts.push(p);cur.hw.push(hw[j]);}
-      else if(cur){const q=[P[2*j-2],P[2*j-1]],t=cross(q,p,b);cur.pts.push([q[0]+(p[0]-q[0])*t,q[1]+(p[1]-q[1])*t]);cur.hw.push(hw[j-1]+(hw[j]-hw[j-1])*t);cur.edge[1]=true;cur.cont[1]={s,j,dir:1};runs.push(cur);cur=null;}}
-    if(cur)runs.push(cur);}};
-  take(p=>!inB(p[0],p[1],T),T,false);
-  const before=runs.length;take(p=>inB(p[0],p[1],M),M,true);
-  for(let r=before;r<runs.length;r++)runs[r].pts=runs[r].pts.map(p=>[2*cx-p[0],p[1]]);
-  for(let r=runs.length-1;r>=0;r--)if(runs[r].pts.length<2)runs.splice(r,1);
-  const endPt=(R,at)=>at?R.pts[R.pts.length-1]:R.pts[0];
-  // (the nearest point on a run to p, and how far)
-  const nearRun=(R,p)=>{let best=null,bd=Infinity;for(let i=0;i+1<R.pts.length;i++){const a=R.pts[i],b=R.pts[i+1],ab=[b[0]-a[0],b[1]-a[1]],l2=ab[0]*ab[0]+ab[1]*ab[1]||1;
-      const t=Math.max(0,Math.min(1,((p[0]-a[0])*ab[0]+(p[1]-a[1])*ab[1])/l2)),q=[a[0]+ab[0]*t,a[1]+ab[1]*t],d=hyp(p,q);if(d<bd){bd=d;best=q;}}return[best,bd];};
-  // lines that end on another line (outside the box): remembered, so they can be put back on it afterwards
-  const lands=[];runs.forEach((R,r)=>{for(const at of[0,1]){if(R.edge[at])continue;const e=endPt(R,at);let bt=-1,bd=1.2*lw;
-    runs.forEach((R2,r2)=>{if(r2===r)return;const[,d]=nearRun(R2,e);if(d<bd&&hyp(e,endPt(R2,0))>1.5*lw&&hyp(e,endPt(R2,1))>1.5*lw){bd=d;bt=r2;}});if(bt>=0)lands.push({r,at,to:bt,d0:bd});}});
-  // each cut end with the direction it was heading as it reached the edge
-  const dirAt=(R,at)=>{const m=R.pts.length,e=endPt(R,at);let b=e,L=0;for(let i=1;i<m&&L<2*lw;i++){const q=at?R.pts[m-1-i]:R.pts[i];L+=hyp(q,b);b=q;}const dl=hyp(e,b)||1;return[(e[0]-b[0])/dl,(e[1]-b[1])/dl];};
-  const ends=[];runs.forEach((R,r)=>{for(const at of[0,1])if(R.edge[at])ends.push({r,at,p:endPt(R,at).slice(),d:dirAt(R,at),used:false});});
-  // move a run's end to q, easing the run in over the given length
-  const moveEnd=(R,at,q,reach)=>{const pts=R.pts,m=pts.length,e=at?m-1:0,d=[q[0]-pts[e][0],q[1]-pts[e][1]];if(Math.hypot(d[0],d[1])<1e-6)return;
-    let L=0;for(let i=0;i<m;i++){const k=at?m-1-i:i;if(i>0){const kp=at?k+1:k-1;L+=hyp(pts[k],pts[kp]);}const w=1-smooth01(L/reach);if(w<=0)break;pts[k]=[pts[k][0]+d[0]*w,pts[k][1]+d[1]*w];}};
-  const runLen=R=>{let L=0;for(let i=1;i<R.pts.length;i++)L+=hyp(R.pts[i],R.pts[i-1]);return L;};
-  // copied ends and kept ends that carry on from each other are joined
-  const cE=ends.filter(e=>runs[e.r].copy),kE=ends.filter(e=>!runs[e.r].copy),link=new Map();
-  const pairs=[];for(const c of cE)for(const k of kE){const d=hyp(c.p,k.p),dot=c.d[0]*k.d[0]+c.d[1]*k.d[1];
-    if(d<Math.max(4*lw,0.25*box)&&dot<-Math.cos(50*Math.PI/180))pairs.push([d+lw*(1+dot),c,k]);}
-  pairs.sort((a,b)=>a[0]-b[0]);
-  // (a line that only passes through the box, where the two sides place it more than about a line width apart,
-  // keeps its own course: copying it would make a step at its edges)
-  {const pick=new Map();for(const[,c,k]of pairs){if(pick.has('c'+c.r+':'+c.at)||pick.has('k'+k.r+':'+k.at))continue;pick.set('c'+c.r+':'+c.at,k);pick.set('k'+k.r+':'+k.at,c);}
-    for(let r=before;r<runs.length;r++){const R=runs[r];if(!R.copy||!R.edge[0]||!R.edge[1])continue;const k0=pick.get('c'+r+':0'),k1=pick.get('c'+r+':1');if(!k0||!k1)continue;
-      const o0=hyp(R.pts[0],k0.p),o1=hyp(R.pts[R.pts.length-1],k1.p);if(Math.max(o0,o1)<1.2*lw)continue;
-      const a=runs[k0.r].cont[k0.at],b=runs[k1.r].cont[k1.at];if(!a||!b||a.s!==b.s)continue;
-      const lo=Math.min(a.j,b.j),hi=Math.max(a.j,b.j);let ok=true;for(let j=lo;j<=hi;j++)if(!inB(P[2*j],P[2*j+1],T)){ok=false;break;}if(!ok||hi-lo>500)continue;
-      const pts=[],hws=[];for(let j=a.j;a.j<=b.j?j<=b.j:j>=b.j;j+=a.j<=b.j?1:-1){pts.push([P[2*j],P[2*j+1]]);hws.push(hw[j]);}
-      R.pts=[k0.p.slice(),...pts,k1.p.slice()];R.hw=[hws[0],...hws,hws[hws.length-1]];R.copy=false;R.cont=[null,null];}}
-  for(const[,c,k]of pairs){if(c.used||k.used)continue;c.used=k.used=true;const RC=runs[c.r],RK=runs[k.r];
-    // (the copied line carries on, outside the box, as far as the spot where it comes closest to the kept line:
-    // the join goes there, so the copy inside the box stays exact and the join is as small as it can be)
-    const ct=RC.cont[c.at];if(ct){const Cc=[],Ch=[];let L=0,prev=endPt(RC,c.at);
-      for(let j=ct.j;j>=offs[ct.s]&&j<offs[ct.s+1];j+=ct.dir){const q=[2*cx-P[2*j],P[2*j+1]];L+=hyp(q,prev);prev=q;Cc.push(q);Ch.push(hw[j]);if(L>0.6*box)break;}
-      const K=at=>at?RK.pts.slice().reverse():RK.pts.slice(),Kp=K(k.at),Klen=runLen(RK);
-      if(Cc.length>=2){const CR={pts:[endPt(RC,c.at),...Cc]};let best=null,bc=Infinity,L2=0;
-        for(let i=0;i<Kp.length;i++){if(i>0)L2+=hyp(Kp[i],Kp[i-1]);if(L2>Math.min(0.6*box,Klen-1.5*lw))break;const[q,d]=nearRun(CR,Kp[i]);const cost=d+0.02*L2;if(cost<bc){bc=cost;best={i,q,d};}}
-        const d0=nearRun(CR,Kp[0])[1];
-        if(best&&best.i>0&&best.d<0.8*d0){
-          // (copied line: carried on along its own continuation up to the matching point)
-          let u=0,ud=Infinity;for(let x=0;x<Cc.length;x++){const d=hyp(Cc[x],best.q);if(d<ud){ud=d;u=x;}}
-          const addP=Cc.slice(0,u+1),addH=Ch.slice(0,u+1);
-          if(c.at){RC.pts.push(...addP);RC.hw.push(...addH);}else{RC.pts.unshift(...addP.reverse());RC.hw.unshift(...addH.reverse());}
-          // (kept line: cut back to there)
-          if(k.at){RK.pts.splice(RK.pts.length-best.i,best.i);RK.hw.splice(RK.hw.length-best.i,best.i);}else{RK.pts.splice(0,best.i);RK.hw.splice(0,best.i);}}}}
-    const q=endPt(RC,c.at).slice(),off=hyp(q,endPt(RK,k.at));
-    moveEnd(RK,k.at,q,Math.min(Math.max(4*lw,10*off),0.5*runLen(RK)));   // (only the kept line eases in)
-    link.set(c.r+':'+c.at,[k.r,k.at]);link.set(k.r+':'+k.at,[c.r,c.at]);}
-  // a cut end left over carries on, or is cut back, along its own direction to meet the nearest line; failing
-  // that it moves onto the nearest line
-  const meet=(R,at,r0)=>{const e=endPt(R,at),u=dirAt(R,at),lim=Math.max(4*lw,0.3*box);let best=null,bt=Infinity;
-    runs.forEach((R2,r2)=>{if(r2===r0)return;for(let i=0;i+1<R2.pts.length;i++){const a=R2.pts[i],b=R2.pts[i+1],ex=b[0]-a[0],ey=b[1]-a[1],den=u[0]*ey-u[1]*ex;if(Math.abs(den)<1e-9)continue;
-      const t=((a[0]-e[0])*ey-(a[1]-e[1])*ex)/den,s=((a[0]-e[0])*u[1]-(a[1]-e[1])*u[0])/den;if(s<0||s>1||t<-2*lw||t>lim)continue;if(Math.abs(t)<Math.abs(bt)){bt=t;best=[e[0]+t*u[0],e[1]+t*u[1]];}}});
-    if(!best){let bd=4*lw;runs.forEach((R2,r2)=>{if(r2===r0)return;const[q,d]=nearRun(R2,e);if(q&&d<bd){bd=d;best=q;}});}
-    if(!best)return;if(bt>0&&bt<Infinity){if(at)R.pts.push(best);else R.pts.unshift(best);if(at)R.hw.push(R.hw[R.hw.length-1]);else R.hw.unshift(R.hw[0]);}
-    else moveEnd(R,at,best,4*lw);};
-  for(const e of ends)if(!e.used)meet(runs[e.r],e.at,e.r);
-  // lines that ended on a line that has since moved are put back on it
-  for(const L of lands){const R=runs[L.r],e=endPt(R,L.at),[q,d]=nearRun(runs[L.to],e);if(q&&d>L.d0+0.3*lw)moveEnd(R,L.at,q,Math.max(4*lw,6*d));}
-  // joined pieces become one line, with only the slightest smoothing right at each join
-  const done=new Set(),chains=[];
-  const walk=(r0,at0)=>{const pts=[],hws=[],joins=[];let r=r0,from=at0;
-    for(let guard=0;guard<runs.length+1&&!done.has(r);guard++){done.add(r);const R=runs[r];let P2=R.pts,H2=R.hw;if(from===1){P2=P2.slice().reverse();H2=H2.slice().reverse();}
-      if(pts.length){joins.push(pts.length-1);P2=P2.slice(1);H2=H2.slice(1);}pts.push(...P2.map(q=>q.slice()));hws.push(...H2);
-      const out=from===1?0:1,nx=link.get(r+':'+out);if(!nx)break;r=nx[0];from=nx[1];}
-    return{pts,hw:hws,joins};};
-  for(let r=0;r<runs.length;r++){if(done.has(r))continue;let r0=r,at0=0;
-    for(let guard=0,cr=r,ca=0;guard<runs.length;guard++){const nx=link.get(cr+':'+ca);if(!nx)break;cr=nx[0];ca=1-nx[1];if(cr===r)break;r0=cr;at0=ca;}
-    chains.push(walk(r0,at0));}
-  for(const C of chains){if(!C.joins.length)continue;const pts=C.pts,m=pts.length,Ls=[0];for(let i=1;i<m;i++)Ls.push(Ls[i-1]+hyp(pts[i],pts[i-1]));
-    const sig=1.5*lw,win=5*lw,src=pts.map(q=>q.slice());
-    for(const jn of C.joins){const s0=Ls[jn];for(let i=0;i<m;i++){const dd=Math.abs(Ls[i]-s0);if(dd>win)continue;const b=(1-smooth01(dd/win))*smooth01(Math.min(Ls[i],Ls[m-1]-Ls[i])/(2*lw));
-        let sx=0,sy=0,sw=0;for(let k=i;k>=0&&Ls[i]-Ls[k]<3*sig;k--){const w=Math.exp(-((Ls[i]-Ls[k])**2)/(2*sig*sig));sx+=src[k][0]*w;sy+=src[k][1]*w;sw+=w;}
-        for(let k=i+1;k<m&&Ls[k]-Ls[i]<3*sig;k++){const w=Math.exp(-((Ls[k]-Ls[i])**2)/(2*sig*sig));sx+=src[k][0]*w;sy+=src[k][1]*w;sw+=w;}
-        pts[i]=[pts[i][0]+(sx/sw-pts[i][0])*b,pts[i][1]+(sy/sw-pts[i][1])*b];}}}
-  // the result, laid out like the program's own lines
-  let tot=0;for(const R of chains)tot+=R.pts.length;const NP=new Float32Array(2*tot),NH=new Float32Array(tot),NO=[0];let j=0;
-  for(const R of chains){for(let i=0;i<R.pts.length;i++){NP[2*j]=R.pts[i][0];NP[2*j+1]=R.pts[i][1];NH[j]=R.hw[i];j++;}NO.push(j);}
-  // the corner fillings go the same way: those in the box are dropped, those in the matching box are copied
-  let fill=B.fill,fcurve=B.fcurve;
-  if(fill&&fcurve){const fp=[],fo=[0],cp=[],co=[0];
-    for(let i=0;i<fill.offs.length-1;i++){let sx=0,sy=0,c=0;for(let k=fill.offs[i];k<fill.offs[i+1];k++){sx+=fill.pts[2*k];sy+=fill.pts[2*k+1];c++;}if(!c)continue;sx/=c;sy/=c;
-      const keep=!inB(sx,sy,T),copy=inB(sx,sy,M);
-      for(const fl of keep&&copy?[false,true]:keep?[false]:copy?[true]:[]){
-        for(let k=fill.offs[i];k<fill.offs[i+1];k++)fp.push(fl?2*cx-fill.pts[2*k]:fill.pts[2*k],fill.pts[2*k+1]);fo.push(fp.length/2);
-        for(let k=fcurve.offs[i];k<fcurve.offs[i+1];k++)cp.push(fl?2*cx-fcurve.pts[2*k]:fcurve.pts[2*k],fcurve.pts[2*k+1]);co.push(cp.length/2);}}
-    fill={pts:Float32Array.from(fp),offs:fo};fcurve={pts:Float32Array.from(cp),offs:co};}
-  return{P:NP,offs:NO,hw:NH,fill,fcurve};}
-function applyDrags(extra){if(!S.rawStrokes)return S.rawStrokes;const B=areaBase();const ds=S.fixes.filter(f=>f.mode==='drag'||f.mode==='mirror');if(extra)ds.push(extra);if(!ds.length)return B.P;
+function applyDrags(extra){if(!S.rawStrokes)return S.rawStrokes;const B={P:S.rawStrokes};S.offs=S.rawOffs;S.hw=S.rawHw;S.fill=S.rawFill;S.fcurve=S.rawFcurve;const ds=S.fixes.filter(f=>f.mode==='drag'||f.mode==='mirror');if(extra)ds.push(extra);if(!ds.length)return B.P;
   const P=Float32Array.from(B.P);for(const d of ds){if(d.mode==='mirror')applyOneMirror(P,S.offs,d);else applyOneDrag(P,S.offs,d);}return P;}
 function redrawDrags(){if(!S.rawStrokes)return;S.strokes=applyDrags();ptsCache=null;markBorder();render();drawFixLayer();}
 // pointer handling on the layer: a press that doesn't move is a click (menus); one that moves is a drag
@@ -2090,7 +1990,22 @@ function pressDrag(e){const[px,py]=layerPoint(e),geo=pageGeom();if(press.j>=0&&!
 function areaPreview(px,py){const k=1/layerScale(),geo=pageGeom(),b=[Math.min(press.px,px),Math.min(press.py,py),Math.max(press.px,px),Math.max(press.py,py)];
   const cxp=geo.map(patternMidX(),0)[0],m=[2*cxp-b[2],b[1],2*cxp-b[0],b[3]];
   return`<rect class="area" x="${b[0]}" y="${b[1]}" width="${b[2]-b[0]}" height="${b[3]-b[1]}" style="stroke-width:${2*k}px"/>`+
-    `<rect class="area src" x="${m[0]}" y="${m[1]}" width="${m[2]-m[0]}" height="${m[3]-m[1]}" style="stroke-width:${2*k}px;stroke-dasharray:${6*k} ${4*k}"/>`;}
+    `<rect class="area src" x="${m[0]}" y="${m[1]}" width="${m[2]-m[0]}" height="${m[3]-m[1]}" style="stroke-width:${2*k}px;stroke-dasharray:${6*k} ${4*k}"/>`+seamDots(b,k);}
+// (where lines cross the edge of the box: green where the copy will line up with the line outside, red where the
+// two sides draw it apart or only one side has it, so the edge is better moved)
+function seamDots(b,k){if(!S.strokes||!S.offs)return'';const geo=pageGeom(),cx=patternMidX(),lw=Math.max(2,widthIn()*S.workPPI);
+  const c=[[b[0],b[1]],[b[2],b[3]]].map(([x,y])=>outPos(...pageToWorkInternal(x,y)));
+  const T=[Math.min(c[0][0],c[1][0]),Math.min(c[0][1],c[1][1]),Math.max(c[0][0],c[1][0]),Math.max(c[0][1],c[1][1])],M=[2*cx-T[2],T[1],2*cx-T[0],T[3]];
+  const inB=(x,y,q)=>x>q[0]&&x<q[2]&&y>q[1]&&y<q[3];
+  const crossings=(q,flip)=>{const out=[],P=S.strokes,o=S.offs;for(let s=0;s+1<o.length;s++)for(let j=o[s];j+1<o[s+1];j++){const ax=P[2*j],ay=P[2*j+1],bx=P[2*j+2],by=P[2*j+3];
+      if(inB(ax,ay,q)===inB(bx,by,q))continue;let lo=0,hi=1;const ia=inB(ax,ay,q);for(let t=0;t<20;t++){const mid=(lo+hi)/2;if(inB(ax+(bx-ax)*mid,ay+(by-ay)*mid,q)===ia)lo=mid;else hi=mid;}
+      const x=ax+(bx-ax)*lo,y=ay+(by-ay)*lo;out.push(flip?[2*cx-x,y]:[x,y]);}return out;};
+  const mine=crossings(T,false),theirs=crossings(M,true);let h='';
+  const dot=(p,good)=>{const q=geo.map(p[0],p[1]);h+=`<circle class="seam ${good?'ok':'bad'}" cx="${q[0]}" cy="${q[1]}" r="${5*k}" style="stroke-width:${1.5*k}px"/>`;};
+  const used=new Set();
+  for(const p of mine){let bi=-1,bd=Infinity;theirs.forEach((q,i)=>{const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd){bd=d;bi=i;}});if(bd<3*lw)used.add(bi);dot(p,bd<0.8*lw);}
+  theirs.forEach((q,i)=>{if(!used.has(i))dot(q,false);});
+  return h;}
 $('fixLayer').addEventListener('pointermove',e=>{if(!press)return;
   if(press.area){if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)>=5)press.dragging=true;if(!press.dragging)return;const[px,py]=layerPoint(e);drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',areaPreview(px,py));return;}
   if(!press.dragging){if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)<5||(press.j<0&&!press.q))return;press.dragging=true;closeFixPop();}
@@ -2104,13 +2019,13 @@ $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
   if(p.area){press=null;const[px,py]=layerPoint(e),sc=layerScale();if(!p.dragging||Math.abs(px-p.px)<8/sc||Math.abs(py-p.py)<8/sc){drawFixLayer();return;}
     const c=[[Math.min(p.px,px),Math.min(p.py,py)],[Math.max(p.px,px),Math.max(p.py,py)]].map(([x,y])=>workToSrc(...pageToWorkInternal(x,y)));
     const f={mode:'area',x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1])};
-    S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();S.fixes.push(f);saveFixes();setAreaMode(false);redrawDrags();setStatus('Area mirrored');return;}
+    S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=S.fixes.slice();S.fixes.push(f);saveFixes();setAreaMode(false);afterFixChange(before);return;}
   if(!p.dragging){press=null;fixClick(p.px,p.py);return;}
   const d=pressDrag(e);press=null;if(Math.hypot(d.dx,d.dy)<0.3){drawFixLayer();return;}
   S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();S.fixes.push(d);saveFixes();redrawDrags();});
 $('fixLayer').addEventListener('pointercancel',()=>{press=null;drawFixLayer();});
 function setAreaMode(on){S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixLayer').classList.toggle('picking-area',on);
-  $('fixHelp').textContent=on?'Drag a box around the spot to replace. The dashed box shows the spot on the other side it will be copied from (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
+  $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
 $('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;setAreaMode(!S.areaMode);});
 $('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
   if(S.fixMode&&S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));showView();}

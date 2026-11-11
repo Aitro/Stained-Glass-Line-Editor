@@ -5,6 +5,14 @@ function process(p){
   say('Finding lines…');
   const t=p.auto?otsuT:p.threshold;const m=new Uint8Array(W*H);
   for(let i=0;i<W*H;i++)m[i]=p.invert?(gray[i]>=t?1:0):(gray[i]<t?1:0);
+  // mirrored areas (picked by hand): inside each box the picture is replaced by the matching spot on the other side
+  // of the pattern's upright centre line, flipped; along the box's edge both are kept, so lines crossing it join up
+  const areas=Array.isArray(p.areas)?p.areas.filter(a=>a&&[a.x0,a.y0,a.x1,a.y1].every(isFinite)):[];
+  if(areas.length){let lo=W,hi=-1;for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(m[y*W+x]){if(x<lo)lo=x;if(x>hi)hi=x;}
+    if(hi>lo){const c2=lo+hi,band=Math.max(3,Math.round(0.004*Math.max(W,H))),src=m.slice();
+      for(const a of areas){const x0=Math.max(0,Math.floor(a.x0)),x1=Math.min(W-1,Math.ceil(a.x1)),y0=Math.max(0,Math.floor(a.y0)),y1=Math.min(H-1,Math.ceil(a.y1));
+        for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const mx=c2-x;if(mx<0||mx>=W)continue;const v=src[y*W+mx],e=Math.min(x-x0,x1-x,y-y0,y1-y);
+          m[y*W+x]=e<band?(v|src[y*W+x]):v;}}}}
   // estimate typical line thickness from ridge of distance map
   const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;
   let dbg=edt(bg);const ridge=[];
