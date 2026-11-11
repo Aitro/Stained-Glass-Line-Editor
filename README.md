@@ -21,9 +21,11 @@ Then:
 
 1. Click **Open pattern image** (or drag an image onto the green mat, or paste one).
 2. Set **Width × Height** in inches. With **Keep the pattern's proportions** on, changing one updates the other. Turn it off to stretch the pattern to an exact size; the stretch happens before the lines are redrawn, so every line still comes out the same width.
-3. Set **Line width** in inches, points or millimetres (3 pt = 0.0417 in).
-4. Check the **Overlay** view, which shows the new lines in red over your original.
-5. Click **Save PNG** or **Save SVG**. For a cutter (Silhouette and the like), click **Save DXF for cutter**: every glass piece becomes its own closed cut line, sitting half a line width back from each line, so the cut pieces keep the chosen gap between them. It opens in every edition of Silhouette Studio; units are inches.
+3. Under **Picture**, the program says whether it found a line pattern or **filled shapes** (a logo, a silhouette, clip art); change it if it guessed wrong. For filled shapes, lead runs along the edges between dark and light, and a dark or light stroke too thin to be a piece of glass becomes a single line.
+   Tick **Add break lines to pieces that are hard to cut** to have the program add straight lines (shown dashed teal in Fix lines): from the bottom of each deep inside curve on through the piece, from a hole in a ring-shaped piece to its outside edge, and across any piece bigger than the size you pick (the shortest line that leaves at least a quarter each side). **How many**: *only where needed* follows the Check pieces rule for a deep inside curve; *more* adds them for shallower curves too. Click a break line in Fix lines to remove it.
+4. Set **Line width** in inches, points or millimetres (3 pt = 0.0417 in).
+5. Check the **Overlay** view, which shows the new lines in red over your original.
+6. Click **Save PNG** or **Save SVG**. For a cutter (Silhouette and the like), click **Save DXF for cutter**: every glass piece becomes its own closed cut line, sitting half a line width back from each line, so the cut pieces keep the chosen gap between them. It opens in every edition of Silhouette Studio; units are inches.
 
 Fixing a spot by hand:
 - Click **Fix lines** above the preview. Every junction gets a dot.
@@ -34,6 +36,7 @@ Fixing a spot by hand:
 - **Smooth this line** / **Straighten this line**: click a line and pick one. The stretch between its joints becomes one even curve, or a ruler-straight line, between the same ends; an end resting near the point of another line (the bottom of a V) moves onto that point. Set **Drag reach** to **whole line** to drag a whole stretch between its joints as one piece.
 - **Add a joint here**: click a line and add a joint; Smooth and Straighten then stop at it, so you can smooth a short section. Click the joint again to remove it.
 - **Make symmetric…**: copies one half of the whole pattern onto the other, flipped. Pick left onto right, right onto left, top onto bottom or bottom onto top; the half that will be replaced is shaded and the dashed centre line is where the program found the drawing's middle. If it's off, drag the line (or its **+**) sideways first, then **Apply**. Lines running along the centre line stay whole. Press **Make symmetric…** again to change or remove it, or use Undo.
+- **Draw a line**: drag from one line to another to add a straight lead line (shown dashed violet). An end near a line snaps onto it. Click the line later to remove it; Esc stops drawing.
 - **Check pieces**: marks the glass pieces that are hard to cut, in orange: points sharper than 30°, inside curves deeper than they are wide, slivers under 1/4 inch wide, and pieces too small to hold while grinding. Fix them with the line tools; the marks update as you go. Press it again to hide them.
 - **Rounded corner** (small, medium or large): click a sharp corner in a line, or a dot where two lines meet, and pick a size. The point is replaced by an even curve.
 - Hovering over the picture highlights what a click or drag will take: one stretch of line, or a joint's dot (and with it every line meeting there). A drag takes a joint only when it starts right on its dot.
@@ -61,7 +64,7 @@ On GitHub, open the repository's **Settings → Pages**. Under **Build and deplo
 ## How it works
 
 1. The drawing is cropped and enlarged to print resolution.
-2. Dark pixels become lines. On a colored pattern, only pixels that are dark in every color count, so dark blue or green glass is not mistaken for lead lines. On black-and-white drawings, small gaps inside a line (a hollow or skipping marker stroke) are closed; specks are dropped.
+2. Dark pixels become lines. (For a picture of filled shapes, the edges between dark and light become the lines first, and lines drawn by hand and break lines are added before tracing.) On a colored pattern, only pixels that are dark in every color count, so dark blue or green glass is not mistaken for lead lines. On black-and-white drawings, small gaps inside a line (a hollow or skipping marker stroke) are closed; specks are dropped.
 3. The centre of every line is traced and turned into a network of lines and junctions.
 4. Junctions are rebuilt the way a pattern is drawn:
    - a line that runs through a junction stays one continuous curve;

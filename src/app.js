@@ -13,7 +13,7 @@ worker.onmessage=e=>{const m=e.data;
   else if(m.type==='loaded'){if(m.id!==S.loadId)return;S.otsu=m.otsu;if($('threshAuto').checked)$('thresh').value=m.otsu;updateLabels();S.running=false;run();}
   else if(m.type==='done'){S.running=false;
     if(S.pending){S.pending=false;run();return;}
-    S.rawStrokes=m.pts;S.rawOffs=m.offs;S.rawHw=m.hw;S.rawFill=m.fill;S.rawFcurve=m.fcurve;S.areaCache=null;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;if(m.axes)S.axes=m.axes;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];S.strokes=applyDrags();markBorder();render();drawFixLayer();
+    S.rawStrokes=m.pts;S.rawOffs=m.offs;S.rawHw=m.hw;S.rawFill=m.fill;S.rawFcurve=m.fcurve;S.areaCache=null;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;if(m.axes)S.axes=m.axes;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];S.breaks=m.breaks||[];S.shapes=!!m.shapes;S.round=!!m.round;showPicHint();S.strokes=applyDrags();markBorder();render();drawFixLayer();
     if(S.symWaiting&&S.symPending){S.symWaiting=false;if(symAxisOf(S.symPending)){drawFixLayer();symMenu();}}
     setStatus('Done in '+(m.ms/1000).toFixed(1)+' s',false);}
   else if(m.type==='error'){S.running=false;setStatus('Could not process this image: '+m.message,false);}};
@@ -46,7 +46,7 @@ function loadImage(img,name,isSample){
   if(known&&known.w>0&&known.h>0){$('lockRatio').checked=!!known.lock;$('sizeW').value=fit2(known.w);$('sizeH').value=fit2(known.h);updateLabels();}
   else if(!isSample||$('lockRatio').checked){$('lockRatio').checked=true;const z=sizeIn(),L=Math.max(z.w,z.h);const r=S.crop.h/S.crop.w;
     if(r>=1){$('sizeH').value=fit2(L);$('sizeW').value=fit2(L/r);}else{$('sizeW').value=fit2(L);$('sizeH').value=fit2(L*r);}}
-  prepare();}
+  restorePic();showPicHint();prepare();}
 function findCrop(){const c=S.src,d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;const inv=$('invert').checked;
   let x0=c.width,y0=c.height,x1=-1,y1=-1;
   for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){const i=4*(y*c.width+x);const l=d[i+3]<128?(inv?0:255):Math.min(.299*d[i]+.587*d[i+1]+.114*d[i+2],Math.max(d[i],d[i+1],d[i+2])+40);
@@ -73,7 +73,8 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half')};}
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
+  ppi:S.workPPI,picture:$('picType').value,breaks:$('breaksOn').checked,breakLevel:$('breakLevel').value,breakMax:+$('breakMax').value,lines:linesForWorker(),noBreaks:noBreaksForWorker()};}
 let timer=null;
 function schedule(fn,ms){clearTimeout(timer);timer=setTimeout(fn,ms);}
 function run(){if(!S.work)return;if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
@@ -238,10 +239,12 @@ function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)
 function areasForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='area').map(f=>{const c=[[f.x0,f.y0],[f.x1,f.y1]].map(([x,y])=>srcToWork(x,y));
   return{x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1]),flip:f.flip||'lr',ox:(f.ox||0)*S.sx,oy:(f.oy||0)*S.sy};});}
 function halvesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='half').map(f=>({flip:f.flip,keep:f.keep,off:(f.off||0)*(f.flip==='tb'?S.sy:S.sx)}));}
-function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)&&f.mode!=='area'&&f.mode!=='half').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
+function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)&&f.mode!=='area'&&f.mode!=='half'&&f.mode!=='line'&&f.mode!=='nobreak').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
+function linesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='line').map(f=>{const a=srcToWork(f.ax,f.ay),b=srcToWork(f.bx,f.by);return{ax:a[0],ay:a[1],bx:b[0],by:b[1]};});}
+function noBreaksForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='nobreak').map(f=>srcToWork(f.sx,f.sy));}
 function saveFixes(){try{if(S.fixKey)localStorage.setItem(S.fixKey,JSON.stringify(S.fixes));}catch(e){}updateFixBar();}
 function loadFixes(name,w,h){S.fixKey='lll-fixes:'+name+':'+w+'x'+h;S.fixes=[];S.fixSel=null;S.undo=[];
-  try{const v=JSON.parse(localStorage.getItem(S.fixKey)||'[]');if(Array.isArray(v))S.fixes=v.filter(f=>f&&f.mode&&(f.mode==='half'?(f.flip==='lr'||f.flip==='tb'):f.mode==='area'?[f.x0,f.y0,f.x1,f.y1].every(isFinite):isFinite(f.sx)&&isFinite(f.sy)));}catch(e){}
+  try{const v=JSON.parse(localStorage.getItem(S.fixKey)||'[]');if(Array.isArray(v))S.fixes=v.filter(f=>f&&f.mode&&(f.mode==='half'?(f.flip==='lr'||f.flip==='tb'):f.mode==='area'?[f.x0,f.y0,f.x1,f.y1].every(isFinite):f.mode==='line'?[f.ax,f.ay,f.bx,f.by].every(isFinite):isFinite(f.sx)&&isFinite(f.sy)));}catch(e){}
   closeFixPop();updateFixBar();}
 function updateFixBar(){const n=S.fixes.length;$('fixCount').textContent=n?n+(n===1?' fix':' fixes'):'';
   $('fixClear').disabled=!n;$('fixUndo').disabled=!(S.undo&&S.undo.length);}
@@ -284,6 +287,7 @@ function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view=
       if(S.symPending)h+=`<g class="area-grip" transform="translate(${ln.mid[0]} ${ln.mid[1]})"><circle r="${12*k}" style="stroke-width:${2*k}px"/><path d="M${-7*k},0H${7*k}M0,${-7*k}V${7*k}" style="stroke-width:${2*k}px"/></g>`;}}}
   // (pieces that are hard to cut in glass)
   if(S.checkOn&&S.checkMarks)h+=checkMarkup(k);
+  h+=addedLinesMarkup(k);
   for(let i=0;i<S.junctions.length;i++){const J=S.junctions[i],p=jPage(J),fx=fixAtJunction(J).length>0;
     h+=`<circle class="jn${fx?' fixed':''}${S.fixSel&&S.fixSel.j===i?' sel':''}" cx="${p[0]}" cy="${p[1]}" r="${r}" style="stroke-width:${(fx?2:2.5)*k}"/>`;}
   // fixes that sit on a line rather than at a junction
@@ -395,6 +399,7 @@ function fixClick(px,py){const sc=layerScale(),lim=16/sc;
   // still be picked; failing both, a joint a little further off)
   let bi=-1,bd=lim;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;bi=i;}});
   if(bi>=0&&bd<7/sc){junctionMenu(bi);return;}
+  {const ln=addedLineAt(px,py,10/sc);if(ln){addedLineMenu(ln,px,py);return;}}
   const q=nearestStroke(px,py,12/sc);if(q){pointMenu(q[0],q[1]);return;}
   if(bi>=0){junctionMenu(bi);return;}
   closeFixPop();}
@@ -599,6 +604,7 @@ $('fixLayer').addEventListener('pointerdown',e=>{if(e.button!==0)return;const[px
     return;}
   if(S.areaPending){const f=S.areaPending,poly=areaSrcPoly(f,-1),g=gripAt(poly);if(inPoly(poly,px,py)||Math.hypot(g[0]-px,g[1]-py)<14/sc){closeFixPop();
       press={grip:f,pending:true,px,py,x0:e.clientX,y0:e.clientY,d:[0,0],dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}
+  if(S.drawMode){closeFixPop();S.drawLine={a:snapEnd(px,py),b:null};press={draw:true,x0:e.clientX,y0:e.clientY};$('fixLayer').setPointerCapture(e.pointerId);return;}
   if(S.areaMode){if(S.areaPending)cancelPending();closeFixPop();press={area:true,px,py,x0:e.clientX,y0:e.clientY,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}
   {const af=S.fixes.filter(f=>f.mode==='area');for(let i=0;i<af.length;i++){const g=gripAt(areaSrcPoly(af[i],i));if(Math.hypot(g[0]-px,g[1]-py)<14/sc){closeFixPop();
       press={grip:af[i],px,py,x0:e.clientX,y0:e.clientY,d:[0,0],dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}}
@@ -643,7 +649,7 @@ function seamDots(b,k,f,d){if(!S.strokes||!S.offs)return'';const geo=pageGeom(),
   return h;}
 // (hovering shows what a click or drag will take: the dot of a joint, or the one stretch of line between its joints)
 let hoverRaf=0;
-function showHover(px,py){const L=$('fixLayer'),old=L.querySelector('#hoverMark');if(old)old.remove();if(!S.fixMode||S.areaMode||!S.strokes||press)return;
+function showHover(px,py){const L=$('fixLayer'),old=L.querySelector('#hoverMark');if(old)old.remove();if(!S.fixMode||S.areaMode||S.drawMode||!S.strokes||press)return;
   const sc=layerScale(),k=1/sc,geo=pageGeom();let h='';
   let bj=-1,bd=7/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;bj=i;}});
   if(bj>=0){const p=jPage(S.junctions[bj]);h=`<circle cx="${p[0]}" cy="${p[1]}" r="${11*k}" fill="none" stroke="var(--fix)" stroke-width="${3*k}"/>`;}
@@ -657,6 +663,7 @@ $('fixLayer').addEventListener('pointerleave',()=>{const m=$('fixLayer').querySe
 $('fixLayer').addEventListener('pointermove',e=>{if(!press){if(e.pointerType==='mouse'){const[px,py]=layerPoint(e);cancelAnimationFrame(hoverRaf);hoverRaf=requestAnimationFrame(()=>showHover(px,py));}return;}
   if(press.sym){const[px,py]=layerPoint(e),geo=pageGeom(),A=symAxisOf(S.symPending);if(!A)return;const[wx,wy]=unrotVec((px-press.px)/geo.k,(py-press.py)/geo.k);
     press.off=wx*A.u[1]-wy*A.u[0];press.dragging=true;drawFixLayer();return;}
+  if(press.draw){const[px,py]=layerPoint(e);S.drawLine.b=snapEnd(px,py);drawFixLayer();return;}
   if(press.grip){const[px,py]=layerPoint(e);press.d=[px-press.px,py-press.py];if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)>=3)press.dragging=true;drawFixLayer();return;}
   if(press.area){if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)>=5)press.dragging=true;if(!press.dragging)return;const[px,py]=layerPoint(e);drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',areaPreview(px,py));return;}
   if(!press.dragging){if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)<5||(press.j<0&&!press.q))return;press.dragging=true;closeFixPop();}
@@ -667,6 +674,8 @@ $('fixLayer').addEventListener('pointermove',e=>{if(!press){if(e.pointerType==='
     h+=`<path d="${pth}" fill="none" stroke="var(--fix)" stroke-width="${3*k}" stroke-linecap="round" opacity=".9"/>`;}
   drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',h);});
 $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
+  if(p.draw){press=null;const d=S.drawLine;S.drawLine=null;if(!d||!d.b||Math.hypot(d.b[0]-d.a[0],d.b[1]-d.a[1])<10/layerScale()){drawFixLayer();return;}
+    const[ax,ay]=workToSrc(...pageToWorkInternal(d.a[0],d.a[1])),[bx,by]=workToSrc(...pageToWorkInternal(d.b[0],d.b[1]));changeFixes(()=>S.fixes.push({mode:'line',ax,ay,bx,by}));return;}
   if(p.sym){press=null;const hv=S.symPending;if(hv&&p.dragging)hv.off=(hv.off||0)+p.off/(hv.flip==='tb'?S.sy:S.sx);drawFixLayer();symMenu();return;}
   if(p.grip&&p.pending){press=null;const f=p.grip;if(p.dragging){const geo=pageGeom(),[wx,wy]=unrotVec(p.d[0]/geo.k,p.d[1]/geo.k);f.ox+=wx/S.sx;f.oy+=wy/S.sy;}drawFixLayer();pendingMenu();return;}
   if(p.grip){press=null;if(!p.dragging){drawFixLayer();return;}const geo=pageGeom(),[wx,wy]=unrotVec(p.d[0]/geo.k,p.d[1]/geo.k),f=p.grip;
@@ -712,10 +721,49 @@ function symMenu(){const hv=S.symPending;if(!hv)return;const ln=symLine(hv);cons
   pop.querySelector('[data-act="cancel"]').onclick=cancelSym;pop.querySelector('.close').onclick=cancelSym;
   const rm=pop.querySelector('[data-act="remove"]');if(rm)rm.onclick=()=>{S.symPending=null;$('fixPop').hidden=true;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));const before=S.fixes.slice();S.fixes=S.fixes.filter(x=>x.mode!=='half');saveFixes();afterFixChange(before);};}
 function cancelSym(){S.symPending=null;S.wantInk=false;$('fixPop').hidden=true;drawFixLayer();}
-function openSym(){if(!S.strokes)return;setAreaMode(false);closeFixPop();const cur=S.fixes.find(f=>f.mode==='half');S.symPending=cur?{flip:cur.flip,keep:cur.keep,off:cur.off||0}:{flip:'lr',keep:-1,off:0};
+function openSym(){if(!S.strokes)return;setAreaMode(false);if(S.drawMode)setDrawMode(false);closeFixPop();const cur=S.fixes.find(f=>f.mode==='half');S.symPending=cur?{flip:cur.flip,keep:cur.keep,off:cur.off||0}:{flip:'lr',keep:-1,off:0};
   if(!symAxisOf(S.symPending)){S.wantInk=true;S.symWaiting=true;setStatus('Finding the centre line…',true);schedule(run,0);return;}
   drawFixLayer();symMenu();}
 $('fixSym').addEventListener('click',openSym);
+
+// ---- picture type, break lines, lines drawn by hand ----
+// A filled picture (a logo, a silhouette) gets its lead along the edges between dark and light. Break lines are added
+// by the program across pieces too hard to cut; each can be removed. Lines drawn by hand run straight from one point
+// to another, and the program treats them like the picture's own lines.
+function showPicHint(){const v=$('picType').value,n=(S.breaks||[]).length;
+  $('picHint').textContent=(v==='auto'?(S.shapes?'Found filled shapes: lead runs along the edges between dark and light.'+(S.round?' The round outline is completed where shapes break it.':''):'Found a line pattern: lines are traced down their middles.')
+    :v==='shapes'?'Lead runs along the edges between dark and light. Strokes too thin for glass become single lines.':'Lines are traced down their middles.')+
+    ($('breaksOn').checked?' '+(n?n+' break line'+(n>1?'s':'')+' added.':'No break lines needed.'):'');}
+function picKey(){return 'lll-pic:'+S.name+':'+(S.src?S.src.width+'x'+S.src.height:'');}
+function rememberPic(){if(!S.src||S.sample)return;try{localStorage.setItem(picKey(),JSON.stringify({type:$('picType').value,breaks:$('breaksOn').checked,level:$('breakLevel').value,max:$('breakMax').value}));}catch(e){}}
+function restorePic(){let v=null;try{v=JSON.parse(localStorage.getItem(picKey())||'null');}catch(e){}v=v||{};
+  $('picType').value=['auto','lines','shapes'].includes(v.type)?v.type:'auto';$('breaksOn').checked=!!v.breaks;
+  $('breakLevel').value=v.level==='more'?'more':'min';$('breakMax').value=['0','9','16','25','36'].includes(String(v.max))?String(v.max):'25';$('breakOpts').hidden=!$('breaksOn').checked;}
+['picType','breaksOn','breakLevel','breakMax'].forEach(id=>$(id).addEventListener('change',()=>{$('breakOpts').hidden=!$('breaksOn').checked;rememberPic();
+  if(S.checkOn){S.checkOn=false;S.checkMarks=null;$('fixCheck').setAttribute('aria-pressed','false');}showPicHint();setStatus('Working…',true);schedule(run,0);}));
+// (on the preview: the break lines the program added, and the lines drawn by hand)
+function addedLines(){const geo=pageGeom(),P=(x,y)=>{const q=outPos(x,y);return geo.map(q[0],q[1]);},out=[];
+  (S.breaks||[]).forEach(b=>out.push({kind:'break',a:P(b.ax,b.ay),b:P(b.bx,b.by),why:b.why,key:workToSrc(b.kx,b.ky)}));
+  S.fixes.forEach(f=>{if(f.mode!=='line')return;out.push({kind:'hand',a:P(...srcToWork(f.ax,f.ay)),b:P(...srcToWork(f.bx,f.by)),fix:f});});
+  return out;}
+function addedLinesMarkup(k){let h='';for(const L of addedLines())h+=`<line class="added-line ${L.kind}" x1="${L.a[0]}" y1="${L.a[1]}" x2="${L.b[0]}" y2="${L.b[1]}" style="stroke-width:${3*k}px;stroke-dasharray:${8*k} ${5*k}"/>`;
+  if(S.drawLine&&S.drawLine.b){const d=S.drawLine;h+=`<line class="added-line hand drawing" x1="${d.a[0]}" y1="${d.a[1]}" x2="${d.b[0]}" y2="${d.b[1]}" style="stroke-width:${4*k}px"/>`+
+    [d.a,d.b].map(q=>`<circle class="draw-end${q.snap?' snap':''}" cx="${q[0]}" cy="${q[1]}" r="${6*k}" style="stroke-width:${2*k}px"/>`).join('');}
+  return h;}
+// (a click on the middle part of an added line picks it; near its ends the click goes to the joint there)
+function addedLineAt(px,py,lim){let best=null,bd=lim;for(const L of addedLines()){const dx=L.b[0]-L.a[0],dy=L.b[1]-L.a[1],l2=dx*dx+dy*dy;if(l2<1)continue;
+    const t=((px-L.a[0])*dx+(py-L.a[1])*dy)/l2;if(t<0.15||t>0.85)continue;const d=Math.hypot(L.a[0]+t*dx-px,L.a[1]+t*dy-py);if(d<bd){bd=d;best=L;}}return best;}
+const WHY={'inside curve':'across a deep inside curve','ring':'so a ring-shaped piece can be cut','large piece':'to split a big piece'};
+function addedLineMenu(L,px,py){S.fixSel={pt:[px,py]};drawFixLayer();
+  openFixPop(L.kind==='break'?`<h3>Break line</h3><p>Added ${WHY[L.why]||''}.</p><button data-act="rm">Remove this break line</button><button data-act="other">Other fixes for this spot</button>`
+    :`<h3>Line you drew</h3><button data-act="rm">Remove this line</button><button data-act="other">Other fixes for this spot</button>`,px,py);
+  const pop=$('fixPop');pop.querySelector('[data-act="rm"]').onclick=()=>changeFixes(()=>{if(L.kind==='break')S.fixes.push({mode:'nobreak',sx:L.key[0],sy:L.key[1]});else S.fixes=S.fixes.filter(f=>f!==L.fix);});
+  pop.querySelector('[data-act="other"]').onclick=()=>{const q=nearestStroke(px,py,30/layerScale());if(q)pointMenu(q[0],q[1]);else closeFixPop();};}
+// (drawing: drag from one point to another; an end near a line snaps onto it)
+function setDrawMode(on){S.drawMode=on;S.drawLine=null;$('fixDraw').setAttribute('aria-pressed',String(on));$('fixLayer').classList.toggle('picking-area',on);
+  $('fixHelp').textContent=on?'Drag from one line to another to add a straight lead line. Ends near a line snap onto it (Esc to stop).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
+function snapEnd(px,py){const q=nearestStroke(px,py,14/layerScale());if(q){const r=[q[0],q[1]];r.snap=true;return r;}return[px,py];}
+$('fixDraw').addEventListener('click',()=>{closeFixPop();setAreaMode(false);S.symPending=null;setDrawMode(!S.drawMode);drawFixLayer();});
 
 // ---- checking the pieces for glass cutting ----
 // Every glass piece (the white space between lines) is looked at for what is hard to cut or likely to break:
@@ -767,15 +815,15 @@ $('fixCheck').addEventListener('click',()=>{S.checkOn=!S.checkOn;$('fixCheck').s
 function setAreaMode(on){if(!on&&S.areaPending)S.areaPending=null;S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixAreaFlip').hidden=!on;$('fixLayer').classList.toggle('picking-area',on);$('mat').classList.toggle('picking-area',on);
   $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
 S.areaFlip='lr';$('fixAreaFlip').addEventListener('change',e=>{S.areaFlip=e.target.value;});
-$('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;S.symPending=null;setAreaMode(!S.areaMode);});
-$('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
+$('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;S.symPending=null;if(S.drawMode)setDrawMode(false);setAreaMode(!S.areaMode);});
+$('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);setDrawMode(false);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
   if(S.fixMode&&S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));showView();}
   closeFixPop();drawFixLayer();updateFixBar();});
 // (only drags changed: redraw straight away; anything else: the program runs again)
 function afterFixChange(before){const key=a=>JSON.stringify(a.filter(f=>!PAGE_FIX.has(f.mode)));if(key(before)!==key(S.fixes))schedule(run,0);else redrawDrags();}
 $('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
 $('fixClear').addEventListener('click',()=>{if(!S.fixes.length)return;const before=S.fixes;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();afterFixChange(before);});
-document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.areaPending&&!/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyPending();return;}if(e.key!=='Escape')return;if(S.symPending){cancelSym();return;}if(S.areaPending){cancelPending();return;}if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.areaPending&&!/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyPending();return;}if(e.key!=='Escape')return;if(S.drawMode){press=null;setDrawMode(false);drawFixLayer();return;}if(S.symPending){cancelSym();return;}if(S.areaPending){cancelPending();return;}if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
 $('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
 window.addEventListener('resize',()=>{placeFixLayer();});
 

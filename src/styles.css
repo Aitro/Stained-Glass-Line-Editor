@@ -158,3 +158,11 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .fix-layer .check-piece{fill:rgba(240,130,0,.18);stroke:#e07800}
 .fix-layer .check-dot{fill:#e07800;stroke:#fff}
 .fix-layer .check-label{fill:#8a4300;stroke:#fff;paint-order:stroke;font-family:system-ui,sans-serif;font-weight:600}
+/* break lines the program added (teal) and lines drawn by hand (violet), over the lead they became */
+.fix-layer .added-line{fill:none;stroke-linecap:round;opacity:.9;pointer-events:none}
+.fix-layer .added-line.break{stroke:#0f9a83}
+.fix-layer .added-line.hand{stroke:#7b3fbf}
+.fix-layer .added-line.drawing{stroke-dasharray:none;opacity:.75}
+.fix-layer .draw-end{fill:#fff;stroke:#7b3fbf}
+.fix-layer .draw-end.snap{fill:#7b3fbf}
+.break-opts{display:flex;flex-direction:column;gap:10px;margin:2px 0 4px 26px;font-size:.92rem}
