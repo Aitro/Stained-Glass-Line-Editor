@@ -21,11 +21,9 @@ Then:
 
 1. Click **Open pattern image** (or drag an image onto the green mat, or paste one).
 2. Set **Width × Height** in inches. With **Keep the pattern's proportions** on, changing one updates the other. Turn it off to stretch the pattern to an exact size; the stretch happens before the lines are redrawn, so every line still comes out the same width.
-3. Under **Picture**, the program says whether it found a line pattern or **filled shapes** (a logo, a silhouette, clip art); change it if it guessed wrong. For filled shapes, lead runs along the edges between dark and light, and a dark or light stroke too thin to be a piece of glass becomes a single line.
-   Tick **Add break lines to pieces that are hard to cut** to have the program add straight lines (shown dashed teal in Fix lines): from the bottom of each deep inside curve on through the piece, from a hole in a ring-shaped piece to its outside edge, and across any piece bigger than the size you pick (the shortest line that leaves at least a quarter each side). **How many**: *only where needed* follows the Check pieces rule for a deep inside curve; *more* adds them for shallower curves too. Click a break line in Fix lines to remove it.
-4. Set **Line width** in inches, points or millimetres (3 pt = 0.0417 in).
-5. Check the **Overlay** view, which shows the new lines in red over your original.
-6. Click **Save PNG** or **Save SVG**. For a cutter (Silhouette and the like), click **Save DXF for cutter**: every glass piece becomes its own closed cut line, sitting half a line width back from each line, so the cut pieces keep the chosen gap between them. It opens in every edition of Silhouette Studio; units are inches.
+3. Set **Line width** in inches, points or millimetres (3 pt = 0.0417 in).
+4. Check the **Overlay** view, which shows the new lines in red over your original.
+5. Click **Save PNG** or **Save SVG**. For a cutter (Silhouette and the like), click **Save DXF for cutter**: every glass piece becomes its own closed cut line, sitting half a line width back from each line, so the cut pieces keep the chosen gap between them. It opens in every edition of Silhouette Studio; units are inches.
 
 Fixing a spot by hand:
 - Click **Fix lines** above the preview. Every junction gets a dot.
@@ -64,7 +62,7 @@ On GitHub, open the repository's **Settings → Pages**. Under **Build and deplo
 ## How it works
 
 1. The drawing is cropped and enlarged to print resolution.
-2. Dark pixels become lines. (For a picture of filled shapes, the edges between dark and light become the lines first, and lines drawn by hand and break lines are added before tracing.) On a colored pattern, only pixels that are dark in every color count, so dark blue or green glass is not mistaken for lead lines. On black-and-white drawings, small gaps inside a line (a hollow or skipping marker stroke) are closed; specks are dropped.
+2. Dark pixels become lines. On a colored pattern, only pixels that are dark in every color count, so dark blue or green glass is not mistaken for lead lines. On black-and-white drawings, small gaps inside a line (a hollow or skipping marker stroke) are closed; specks are dropped.
 3. The centre of every line is traced and turned into a network of lines and junctions.
 4. Junctions are rebuilt the way a pattern is drawn:
    - a line that runs through a junction stays one continuous curve;

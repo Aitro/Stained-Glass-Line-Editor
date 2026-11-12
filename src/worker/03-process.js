@@ -5,9 +5,6 @@ function process(p){
   say('Finding lines…');
   const t=p.auto?otsuT:p.threshold;const m=new Uint8Array(W*H);
   for(let i=0;i<W*H;i++)m[i]=p.invert?(gray[i]>=t?1:0):(gray[i]<t?1:0);
-  // a picture of filled shapes (a logo, a silhouette): the edges between dark and light become the lines
-  const ppi=+p.ppi||300,shapes=p.picture==='shapes'||(p.picture!=='lines'&&looksFilled(m,ppi));let drawW=0,round=false;
-  if(shapes){say('Turning the shapes into lines…');const r=shapesToLines(m,ppi);m.set(r.m);drawW=r.lw;round=r.circle||false;}
   // mirrored areas (picked by hand): inside each box the picture is replaced by the matching spot on the other side
   // of the pattern's centre line (upright, or level for top-to-bottom; see symAxis), flipped. Where a line crosses the box's edge, the two sides may draw it a
   // little apart: near the edge the copy is shifted so each line meets its own line outside exactly, easing back to
@@ -62,10 +59,9 @@ function process(p){
         for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){if(keep(x,y))continue;const e=Math.min(x-x0,x1-x,y-y0,y1-y);let sx=0,sy=0;
           if(pins.length){let sw=0;for(const q of pins){const w=1/((x-q.x)**2+(y-q.y)**2+1e-3);sw+=w;sx+=w*q.dx;sy+=w*q.dy;}sx/=sw;sy/=sw;}
           const v=mirAt(x-sx,y-sy);m[y*W+x]=e<band?(v|src[y*W+x]):v;}}}}
-  // lines drawn by hand, then break lines across pieces too hard to cut
-  let breaks=[];const lines=Array.isArray(p.lines)?p.lines.filter(L=>L&&[L.ax,L.ay,L.bx,L.by].every(isFinite)):[];
-  if(lines.length||p.breaks){if(!drawW)drawW=inkWidth(m);for(const L of lines)drawSeg(m,L.ax,L.ay,L.bx,L.by,drawW/2);
-    if(p.breaks){say('Adding break lines…');breaks=addBreaks(m,ppi,drawW,p);}}
+  // lines drawn by hand, as wide as the picture's own lines
+  const lines=Array.isArray(p.lines)?p.lines.filter(L=>L&&[L.ax,L.ay,L.bx,L.by].every(isFinite)):[];
+  if(lines.length){const lw=inkWidth(m);for(const L of lines)drawSeg(m,L.ax,L.ay,L.bx,L.by,lw/2);}
   // estimate typical line thickness from ridge of distance map
   const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;
   let dbg=edt(bg);const ridge=[];
@@ -109,11 +105,6 @@ function process(p){
   say('Tracing curves…');
   const dmap=new Float32Array(W*H);for(let i=0;i<W*H;i++)dmap[i]=Math.sqrt(dbg2[i]);dbg2=null;
   const built=buildStrokes(sk,u,med,dmap,p.smooth,say,p);const strokes=built.strokes;
-  // (a round panel: points on the rim go exactly onto the circle, so joints there don't dent it; the pull fades out
-  // over about a line width further in, so a line leaving the rim bends away from it smoothly)
-  if(round){const{cx,cy,r}=round,a=1.3*drawW,b=2.8*drawW;
-    const pull=q=>{const dx=q[1]-cx,dy=q[0]-cy,dd=Math.hypot(dx,dy)||1,e=Math.abs(dd-r);if(e>=b)return;const t=e<=a?1:1-(e-a)/(b-a),w=t*t*(3-2*t);q[1]+=(cx+dx*r/dd-q[1])*w;q[0]+=(cy+dy*r/dd-q[0])*w;};
-    for(const S of strokes)for(const q of S)pull(q);for(const J of built.junctions||[])pull(J.p);}
   const fl=[],fo=[0],cl=[],co=[0];for(const f of built.fillets){for(const q of f.fill)fl.push(q[1]+0.5,q[0]+0.5);fo.push(fl.length/2);for(const q of f.curve)cl.push(q[1]+0.5,q[0]+0.5);co.push(cl.length/2);}
   const flat=[],offs=[0],hwf=[];
   // the original line's half-width at each point (largest distance-to-paper nearby), with a running
@@ -123,7 +114,7 @@ function process(p){
     const hw=raw.map((_,i)=>{const a=raw.slice(Math.max(0,i-75),Math.min(raw.length,i+76)).sort((p,q)=>p-q);return a[Math.floor(a.length*0.4)];});
     S.forEach((q,i)=>{flat.push(q[1]+0.5,q[0]+0.5);hwf.push(hw[i]);});offs.push(flat.length/2);}
   const junctions=(built.junctions||[]).map(J=>({x:J.p[1]+0.5,y:J.p[0]+0.5,wx:J.q[1],wy:J.q[0],arms:J.arms,pairs:J.pairs,fixed:J.fixed}));
-  return{breaks,shapes,round:!!round,axes:axesOut,junctions,pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
+  return{axes:axesOut,junctions,pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
 
 // ===================================================================== curve stage
 // Trace the centerline into a graph of lines and junctions, rebuild junctions the way a

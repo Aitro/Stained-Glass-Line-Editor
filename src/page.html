@@ -37,24 +37,6 @@
     </section>
 
     <section class="group">
-      <div class="label">Picture</div>
-      <div class="field-col">
-        <label for="picType">The picture is</label>
-        <select id="picType">
-          <option value="auto" selected>Found automatically</option>
-          <option value="lines">A line pattern</option>
-          <option value="shapes">Filled shapes (logo, silhouette, clip art)</option>
-        </select>
-        <p class="hint" id="picHint">Lines are traced down their middles. Filled shapes get lead along their edges.</p>
-      </div>
-      <label class="check"><input id="breaksOn" type="checkbox"><span>Add break lines to pieces that are hard to cut<br><span class="hint">Across deep inside curves, rings with a hole in them, and pieces bigger than the size below. Remove any you don't want in Fix lines.</span></span></label>
-      <div class="break-opts" id="breakOpts" hidden>
-        <label class="field-col" for="breakLevel">How many<select id="breakLevel"><option value="min" selected>Only where needed</option><option value="more">More, for easier cutting</option></select></label>
-        <label class="field-col" for="breakMax">Split pieces bigger than<select id="breakMax"><option value="0">no limit</option><option value="9">9 sq in (3″ × 3″)</option><option value="16">16 sq in (4″ × 4″)</option><option value="25" selected>25 sq in (5″ × 5″)</option><option value="36">36 sq in (6″ × 6″)</option></select></label>
-      </div>
-    </section>
-
-    <section class="group">
       <div class="label">Line width</div>
       <div class="big-width">
         <input id="widthNum" type="number" min="0.001" step="0.001" value="0.042" aria-label="Line width">

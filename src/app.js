@@ -13,7 +13,7 @@ worker.onmessage=e=>{const m=e.data;
   else if(m.type==='loaded'){if(m.id!==S.loadId)return;S.otsu=m.otsu;if($('threshAuto').checked)$('thresh').value=m.otsu;updateLabels();S.running=false;run();}
   else if(m.type==='done'){S.running=false;
     if(S.pending){S.pending=false;run();return;}
-    S.rawStrokes=m.pts;S.rawOffs=m.offs;S.rawHw=m.hw;S.rawFill=m.fill;S.rawFcurve=m.fcurve;S.areaCache=null;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;if(m.axes)S.axes=m.axes;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];S.breaks=m.breaks||[];S.shapes=!!m.shapes;S.round=!!m.round;showPicHint();S.strokes=applyDrags();markBorder();render();drawFixLayer();
+    S.rawStrokes=m.pts;S.rawOffs=m.offs;S.rawHw=m.hw;S.rawFill=m.fill;S.rawFcurve=m.fcurve;S.areaCache=null;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;if(m.axes)S.axes=m.axes;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];S.strokes=applyDrags();markBorder();render();drawFixLayer();
     if(S.symWaiting&&S.symPending){S.symWaiting=false;if(symAxisOf(S.symPending)){drawFixLayer();symMenu();}}
     setStatus('Done in '+(m.ms/1000).toFixed(1)+' s',false);}
   else if(m.type==='error'){S.running=false;setStatus('Could not process this image: '+m.message,false);}};
@@ -46,7 +46,7 @@ function loadImage(img,name,isSample){
   if(known&&known.w>0&&known.h>0){$('lockRatio').checked=!!known.lock;$('sizeW').value=fit2(known.w);$('sizeH').value=fit2(known.h);updateLabels();}
   else if(!isSample||$('lockRatio').checked){$('lockRatio').checked=true;const z=sizeIn(),L=Math.max(z.w,z.h);const r=S.crop.h/S.crop.w;
     if(r>=1){$('sizeH').value=fit2(L);$('sizeW').value=fit2(L/r);}else{$('sizeW').value=fit2(L);$('sizeH').value=fit2(L*r);}}
-  restorePic();showPicHint();prepare();}
+  prepare();}
 function findCrop(){const c=S.src,d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;const inv=$('invert').checked;
   let x0=c.width,y0=c.height,x1=-1,y1=-1;
   for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++){const i=4*(y*c.width+x);const l=d[i+3]<128?(inv?0:255):Math.min(.299*d[i]+.587*d[i+1]+.114*d[i+2],Math.max(d[i],d[i+1],d[i+2])+40);
@@ -74,7 +74,7 @@ function prepare(){if(!S.src)return;
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
 function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
-  ppi:S.workPPI,picture:$('picType').value,breaks:$('breaksOn').checked,breakLevel:$('breakLevel').value,breakMax:+$('breakMax').value,lines:linesForWorker(),noBreaks:noBreaksForWorker()};}
+  lines:linesForWorker()};}
 let timer=null;
 function schedule(fn,ms){clearTimeout(timer);timer=setTimeout(fn,ms);}
 function run(){if(!S.work)return;if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
@@ -239,9 +239,8 @@ function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)
 function areasForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='area').map(f=>{const c=[[f.x0,f.y0],[f.x1,f.y1]].map(([x,y])=>srcToWork(x,y));
   return{x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1]),flip:f.flip||'lr',ox:(f.ox||0)*S.sx,oy:(f.oy||0)*S.sy};});}
 function halvesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='half').map(f=>({flip:f.flip,keep:f.keep,off:(f.off||0)*(f.flip==='tb'?S.sy:S.sx)}));}
-function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)&&f.mode!=='area'&&f.mode!=='half'&&f.mode!=='line'&&f.mode!=='nobreak').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
+function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)&&f.mode!=='area'&&f.mode!=='half'&&f.mode!=='line').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
 function linesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='line').map(f=>{const a=srcToWork(f.ax,f.ay),b=srcToWork(f.bx,f.by);return{ax:a[0],ay:a[1],bx:b[0],by:b[1]};});}
-function noBreaksForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='nobreak').map(f=>srcToWork(f.sx,f.sy));}
 function saveFixes(){try{if(S.fixKey)localStorage.setItem(S.fixKey,JSON.stringify(S.fixes));}catch(e){}updateFixBar();}
 function loadFixes(name,w,h){S.fixKey='lll-fixes:'+name+':'+w+'x'+h;S.fixes=[];S.fixSel=null;S.undo=[];
   try{const v=JSON.parse(localStorage.getItem(S.fixKey)||'[]');if(Array.isArray(v))S.fixes=v.filter(f=>f&&f.mode&&(f.mode==='half'?(f.flip==='lr'||f.flip==='tb'):f.mode==='area'?[f.x0,f.y0,f.x1,f.y1].every(isFinite):f.mode==='line'?[f.ax,f.ay,f.bx,f.by].every(isFinite):isFinite(f.sx)&&isFinite(f.sy)));}catch(e){}
@@ -726,24 +725,10 @@ function openSym(){if(!S.strokes)return;setAreaMode(false);if(S.drawMode)setDraw
   drawFixLayer();symMenu();}
 $('fixSym').addEventListener('click',openSym);
 
-// ---- picture type, break lines, lines drawn by hand ----
-// A filled picture (a logo, a silhouette) gets its lead along the edges between dark and light. Break lines are added
-// by the program across pieces too hard to cut; each can be removed. Lines drawn by hand run straight from one point
-// to another, and the program treats them like the picture's own lines.
-function showPicHint(){const v=$('picType').value,n=(S.breaks||[]).length;
-  $('picHint').textContent=(v==='auto'?(S.shapes?'Found filled shapes: lead runs along the edges between dark and light.'+(S.round?' The round outline is completed where shapes break it.':''):'Found a line pattern: lines are traced down their middles.')
-    :v==='shapes'?'Lead runs along the edges between dark and light. Strokes too thin for glass become single lines.':'Lines are traced down their middles.')+
-    ($('breaksOn').checked?' '+(n?n+' break line'+(n>1?'s':'')+' added.':'No break lines needed.'):'');}
-function picKey(){return 'lll-pic:'+S.name+':'+(S.src?S.src.width+'x'+S.src.height:'');}
-function rememberPic(){if(!S.src||S.sample)return;try{localStorage.setItem(picKey(),JSON.stringify({type:$('picType').value,breaks:$('breaksOn').checked,level:$('breakLevel').value,max:$('breakMax').value}));}catch(e){}}
-function restorePic(){let v=null;try{v=JSON.parse(localStorage.getItem(picKey())||'null');}catch(e){}v=v||{};
-  $('picType').value=['auto','lines','shapes'].includes(v.type)?v.type:'auto';$('breaksOn').checked=!!v.breaks;
-  $('breakLevel').value=v.level==='more'?'more':'min';$('breakMax').value=['0','9','16','25','36'].includes(String(v.max))?String(v.max):'25';$('breakOpts').hidden=!$('breaksOn').checked;}
-['picType','breaksOn','breakLevel','breakMax'].forEach(id=>$(id).addEventListener('change',()=>{$('breakOpts').hidden=!$('breaksOn').checked;rememberPic();
-  if(S.checkOn){S.checkOn=false;S.checkMarks=null;$('fixCheck').setAttribute('aria-pressed','false');}showPicHint();setStatus('Working…',true);schedule(run,0);}));
-// (on the preview: the break lines the program added, and the lines drawn by hand)
+// ---- lines drawn by hand ----
+// A line drawn by hand runs straight from one point to another; the program treats it like the picture's own lines.
+// (on the preview: the lines drawn by hand)
 function addedLines(){const geo=pageGeom(),P=(x,y)=>{const q=outPos(x,y);return geo.map(q[0],q[1]);},out=[];
-  (S.breaks||[]).forEach(b=>out.push({kind:'break',a:P(b.ax,b.ay),b:P(b.bx,b.by),why:b.why,key:workToSrc(b.kx,b.ky)}));
   S.fixes.forEach(f=>{if(f.mode!=='line')return;out.push({kind:'hand',a:P(...srcToWork(f.ax,f.ay)),b:P(...srcToWork(f.bx,f.by)),fix:f});});
   return out;}
 function addedLinesMarkup(k){let h='';for(const L of addedLines())h+=`<line class="added-line ${L.kind}" x1="${L.a[0]}" y1="${L.a[1]}" x2="${L.b[0]}" y2="${L.b[1]}" style="stroke-width:${3*k}px;stroke-dasharray:${8*k} ${5*k}"/>`;
@@ -753,11 +738,9 @@ function addedLinesMarkup(k){let h='';for(const L of addedLines())h+=`<line clas
 // (a click on the middle part of an added line picks it; near its ends the click goes to the joint there)
 function addedLineAt(px,py,lim){let best=null,bd=lim;for(const L of addedLines()){const dx=L.b[0]-L.a[0],dy=L.b[1]-L.a[1],l2=dx*dx+dy*dy;if(l2<1)continue;
     const t=((px-L.a[0])*dx+(py-L.a[1])*dy)/l2;if(t<0.15||t>0.85)continue;const d=Math.hypot(L.a[0]+t*dx-px,L.a[1]+t*dy-py);if(d<bd){bd=d;best=L;}}return best;}
-const WHY={'inside curve':'across a deep inside curve','ring':'so a ring-shaped piece can be cut','large piece':'to split a big piece'};
 function addedLineMenu(L,px,py){S.fixSel={pt:[px,py]};drawFixLayer();
-  openFixPop(L.kind==='break'?`<h3>Break line</h3><p>Added ${WHY[L.why]||''}.</p><button data-act="rm">Remove this break line</button><button data-act="other">Other fixes for this spot</button>`
-    :`<h3>Line you drew</h3><button data-act="rm">Remove this line</button><button data-act="other">Other fixes for this spot</button>`,px,py);
-  const pop=$('fixPop');pop.querySelector('[data-act="rm"]').onclick=()=>changeFixes(()=>{if(L.kind==='break')S.fixes.push({mode:'nobreak',sx:L.key[0],sy:L.key[1]});else S.fixes=S.fixes.filter(f=>f!==L.fix);});
+  openFixPop(`<h3>Line you drew</h3><button data-act="rm">Remove this line</button><button data-act="other">Other fixes for this spot</button>`,px,py);
+  const pop=$('fixPop');pop.querySelector('[data-act="rm"]').onclick=()=>changeFixes(()=>{S.fixes=S.fixes.filter(f=>f!==L.fix);});
   pop.querySelector('[data-act="other"]').onclick=()=>{const q=nearestStroke(px,py,30/layerScale());if(q)pointMenu(q[0],q[1]);else closeFixPop();};}
 // (drawing: drag from one point to another; an end near a line snaps onto it)
 function setDrawMode(on){S.drawMode=on;S.drawLine=null;$('fixDraw').setAttribute('aria-pressed',String(on));$('fixLayer').classList.toggle('picking-area',on);
