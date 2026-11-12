@@ -1,4 +1,4 @@
-// Even width only: the lines exactly as drawn, just redrawn at one width.
+// Change width only: the lines exactly as drawn, just redrawn at one width.
 // ------------------------------------------------------------------------------------------------
 // The middle of every line is followed pixel by pixel and kept where it is: no curve smoothing beyond taking out
 // the pixel staircase, no joints rebuilt, nothing made exactly straight or round, the panel not squared up. Only
@@ -49,5 +49,15 @@ function traceAsDrawn(sk,u,dmap,p){
     const dy=P[e][0]-P[k][0],dx=P[e][1]-P[k][1],dl=Math.hypot(dy,dx);if(dl<1e-6)return;const ext=Math.max(-0.8*dl,rAt(P[e])-rNew);P[e]=[P[e][0]+dy/dl*ext,P[e][1]+dx/dl*ext];};
   const deg=new Map();for(const c of ch)for(const k of[c.a,c.b])if(k!=null)deg.set(k,(deg.get(k)||0)+1);
   const strokes=[];for(const c of ch){const Q=ease(c.P);if(c.b==null||(free.has(c.b)&&deg.get(c.b)===1))reach(Q,false);if(free.has(c.a)&&deg.get(c.a)===1)reach(Q,true);strokes.push(Q);}
+  // (two loose ends facing each other across a hairline gap, a break in the scan rather than in the drawing, are
+  // joined: lead with a gap in it would let two pieces run together)
+  const ends=[];strokes.forEach((Q,s)=>{if(Q.length<3)return;const looseA=free.has(ch[s]&&ch[s].a)&&deg.get(ch[s].a)===1,looseB=ch[s]&&(ch[s].b==null||(free.has(ch[s].b)&&deg.get(ch[s].b)===1));
+    for(const[at,ok]of[[0,looseA],[Q.length-1,looseB]]){if(!ok)continue;const dir=at===0?1:-1;let k=at,L=0;while(k+dir>=0&&k+dir<Q.length&&L<2*u){L+=Math.hypot(Q[k+dir][0]-Q[k][0],Q[k+dir][1]-Q[k][1]);k+=dir;}
+      const dy=Q[at][0]-Q[k][0],dx=Q[at][1]-Q[k][1],dl=Math.hypot(dy,dx);if(dl>1e-6)ends.push({p:Q[at],out:[dy/dl,dx/dl]});}});
+  const used=new Set();
+  for(let a=0;a<ends.length;a++)for(let b=a+1;b<ends.length;b++){if(used.has(a)||used.has(b))continue;const A=ends[a],B=ends[b],v=[B.p[0]-A.p[0],B.p[1]-A.p[1]],dl=Math.hypot(v[0],v[1]);
+    if(dl>2.5*u)continue;if(A.out[0]*B.out[0]+A.out[1]*B.out[1]>-Math.cos(35*Math.PI/180))continue;
+    if(dl>0.5&&(v[0]*A.out[0]+v[1]*A.out[1])/dl<Math.cos(45*Math.PI/180))continue;
+    strokes.push([A.p.slice(),B.p.slice()]);used.add(a);used.add(b);}
   for(const P of loops)strokes.push(ease(P));
   return{strokes,fillets:[],junctions:[],rot:0};}

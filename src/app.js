@@ -78,12 +78,12 @@ function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').val
   lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
 // A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
-// and circles); Even width only keeps every line exactly as drawn and just changes its width. Fix lines works
-// with either, and on a picture not yet redrawn it uses Even width only. Either can be switched to at any time;
+// and circles); Change width only keeps every line exactly as drawn and just changes its width. Fix lines works
+// with either, and on a picture not yet redrawn it uses Change width only. Either can be switched to at any time;
 // from then on every change to the settings or fixes redraws it as before.
 function waitForGo(){S.view='original';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='original')));
   showMode();['savePng','saveSvg','saveDxf'].forEach(id=>$(id).disabled=true);showView();
-  setStatus('Ready: choose Level lines or Even width only',false);}
+  setStatus('Ready: choose Level lines or Change width only',false);}
 function showMode(){$('levelBtn').setAttribute('aria-pressed',String(S.go&&S.mode==='level'));$('drawnBtn').setAttribute('aria-pressed',String(S.go&&S.mode==='drawn'));
   const off=S.go&&S.mode==='drawn';['smooth','exactShapes','squareUp'].forEach(id=>{$(id).disabled=off;const r=$(id).closest('.slider-row,.check');if(r)r.classList.toggle('is-off',off);});}
 function setMode(mode){const was=S.go&&S.mode;S.go=true;S.mode=mode;showMode();if(was===mode)return;
@@ -656,6 +656,8 @@ var press=null;
 function layerPoint(e){const L=$('fixLayer'),r=L.getBoundingClientRect(),sc=layerScale(),img=$('view');
   const offx=(r.width-img.naturalWidth*sc)/2,offy=(r.height-img.naturalHeight*sc)/2;return[(e.clientX-r.left-offx)/sc,(e.clientY-r.top-offy)/sc];}
 $('fixLayer').addEventListener('pointerdown',e=>{if(e.button!==0)return;const[px,py]=layerPoint(e),sc=layerScale();
+  // (while Tidy all lines is showing its changes, a press only leaves a line out or puts it back; nothing is dragged)
+  if(S.tidy){const c=tidyAt(px,py,12/sc);if(c){c.on=!c.on;drawFixLayer();tidyMenu();}return;}
   if(S.symPending){const ln=symLine(S.symPending);if(ln){const dx=ln.b[0]-ln.a[0],dy=ln.b[1]-ln.a[1],dd=Math.abs((px-ln.a[0])*dy-(py-ln.a[1])*dx)/(Math.hypot(dx,dy)||1);
       if(dd<14/sc||Math.hypot(ln.mid[0]-px,ln.mid[1]-py)<16/sc){closeFixPop();press={sym:true,px,py,x0:e.clientX,y0:e.clientY,off:0,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}
     return;}
@@ -898,7 +900,11 @@ $('fixBtn').addEventListener('click',()=>{if(!S.go&&!S.fixMode)setMode('drawn');
 // (only drags changed: redraw straight away; anything else: the program runs again)
 function afterFixChange(before){const key=a=>JSON.stringify(a.filter(f=>!PAGE_FIX.has(f.mode)));if(key(before)!==key(S.fixes))schedule(run,0);else redrawDrags();}
 $('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
-$('fixClear').addEventListener('click',()=>{if(!S.fixes.length)return;const before=S.fixes;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();afterFixChange(before);});
+// (clearing asks first, naming how many fixes go; Cancel is the default, and Undo can still bring them back)
+$('fixClear').addEventListener('click',()=>{const n=S.fixes.length;if(!n)return;
+  openFixPop(`<h3>Clear all fixes?</h3><p>All ${n} fix${n===1?'':'es'} on ${S.name.replace(/[<>&"]/g,'')} will be taken out. Undo can bring them back.</p><div class="row"><button data-act="clear" class="danger">Clear ${n} fix${n===1?'':'es'}</button><button data-act="cancel">Cancel</button></div>`,24,24);
+  const pop=$('fixPop');pop.querySelector('[data-act="cancel"]').onclick=closeFixPop;pop.querySelector('[data-act="cancel"]').focus();
+  pop.querySelector('[data-act="clear"]').onclick=()=>{const before=S.fixes;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();afterFixChange(before);$('fixClear').focus();};});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.areaPending&&!/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyPending();return;}if(e.key==='Enter'&&S.tidy&&!/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyTidy();return;}if(e.key!=='Escape')return;if(S.tidy){cancelTidy();return;}if(S.drawMode){press=null;setDrawMode(false);drawFixLayer();return;}if(S.symPending){cancelSym();return;}if(S.areaPending){cancelPending();return;}if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
 $('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
 window.addEventListener('resize',()=>{placeFixLayer();});

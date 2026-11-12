@@ -189,3 +189,5 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 /* the two ways to redraw the lines, side by side */
 .mode-pair{display:inline-flex;gap:6px}
 .slider-row.is-off,.check.is-off{opacity:.45}
+.danger{background:#b3261e;color:#fff;border-color:#b3261e}
+.danger:hover{background:#951f19;border-color:#951f19}

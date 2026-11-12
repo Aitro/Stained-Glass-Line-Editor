@@ -72,7 +72,7 @@ function process(p){
   // close gaps narrower than ~2/3 of a line width (hollow or skipping marker strokes),
   // using distance maps: grow the lines by r, then shrink them back by r
   // (not for colored patterns: they are clean drawings where every gap, however thin, is glass)
-  // (and not for Even width only: lines are kept as drawn, gaps and all)
+  // (and not for Change width only: lines are kept as drawn, gaps and all)
   if(!colorIn&&!p.asDrawn){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
     for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
