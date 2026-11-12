@@ -34,6 +34,7 @@
       <label class="check"><input id="lockRatio" type="checkbox" checked><span>Keep the pattern's proportions</span></label>
       <p class="hint" id="panelNote">—</p>
       <label class="field-inline">Save PNG at <select id="pngPPI"><option value="300" selected>300 px per inch</option><option value="600">600 px per inch</option></select></label>
+      <label class="check"><input id="exactSize" type="checkbox"><span>Save at exactly this size<br><span class="hint">No margin: the outside edge of the lead lands exactly on the width and height above, in the PNG, SVG and DXF. Otherwise ¼″ of blank margin goes round it.</span></span></label>
     </section>
 
     <section class="group">
@@ -105,6 +106,7 @@
         <button data-view="result" aria-pressed="true">Result</button>
         <button data-view="original" aria-pressed="false">Original</button>
         <button data-view="overlay" aria-pressed="false">Overlay</button>
+        <button data-view="compare" aria-pressed="false" title="Drag across the picture to compare the original with the new lines">Compare</button>
       </div>
       <button id="fixBtn" class="fix-btn" aria-pressed="false" title="Click a junction or a spot on a line to choose how it should look">Fix lines</button>
       <div class="status" id="status"><span class="dot"></span><span id="statusText">Ready</span></div>
@@ -118,6 +120,7 @@
       <div class="sample-tag" id="sampleTag">Example pattern · open or drop your own</div>
       <div class="stage"><img id="view" alt="Pattern preview"></div>
       <svg id="fixLayer" class="fix-layer" hidden aria-label="Junctions you can fix"></svg>
+      <div id="cmpLayer" class="cmp-layer" hidden><img id="cmpImg" alt="Original pattern, on the left of the divider"><div class="cmp-bar" id="cmpBar"><span class="cmp-tag left">Original</span><span class="cmp-knob" aria-hidden="true"></span><span class="cmp-tag right">New</span></div></div>
       <div id="fixPop" class="fix-pop" role="dialog" aria-label="Fix this spot" hidden></div>
     </div>
     <div class="fix-bar" id="fixBar" hidden>
@@ -125,6 +128,7 @@
       <label class="fix-reach">Drag reach <select id="fixReach"><option value="short">short</option><option value="medium" selected>medium</option><option value="wide">wide</option><option value="line">whole line</option></select></label>
       <button id="fixArea" aria-pressed="false" title="Drag a box around a spot to replace it with a mirror of the same spot on the other side">Mirror an area</button>
       <select id="fixAreaFlip" hidden aria-label="Copy from"><option value="lr">from the other side (left ↔ right)</option><option value="tb">from the other end (top ↔ bottom)</option></select>
+      <button id="fixTidy" title="Straighten every nearly straight line and smooth every nearly smooth curve, after you check them">Tidy all lines…</button>
       <button id="fixDraw" aria-pressed="false" title="Drag from one line to another to add a straight lead line">Draw a line</button>
       <button id="fixSym" title="Copy one half of the pattern onto the other, flipped, so both sides match">Make symmetric…</button>
       <button id="fixCheck" aria-pressed="false" title="Mark pieces that are hard to cut in glass: sharp points, deep inside curves, slivers, tiny pieces">Check pieces</button>

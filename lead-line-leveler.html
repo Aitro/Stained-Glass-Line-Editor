@@ -174,6 +174,28 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .fix-layer .added-line.drawing{stroke-dasharray:none;opacity:.75}
 .fix-layer .draw-end{fill:#fff;stroke:#7b3fbf}
 .fix-layer .draw-end.snap{fill:#7b3fbf}
+/* before and after: the original on the left of a draggable divider */
+.cmp-layer{position:absolute;left:0;top:0;z-index:2;cursor:ew-resize;touch-action:none}
+.cmp-layer img{position:absolute;display:block;background:#fff;pointer-events:none;user-select:none}
+.cmp-bar{position:absolute;width:0;pointer-events:none}
+.cmp-bar::before{content:"";position:absolute;left:-1.5px;top:0;bottom:0;width:3px;background:#1f5fbf;box-shadow:0 0 0 1px rgba(255,255,255,.8)}
+.cmp-knob{position:absolute;left:-15px;top:calc(50% - 15px);width:30px;height:30px;border-radius:50%;background:#1f5fbf;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.35)}
+.cmp-knob::before,.cmp-knob::after{content:"";position:absolute;top:9px;border:6px solid transparent}
+.cmp-knob::before{left:-1px;border-right-color:#fff}
+.cmp-knob::after{right:-1px;border-left-color:#fff}
+.cmp-tag{position:absolute;top:8px;font-size:12px;font-weight:600;color:#fff;background:rgba(20,40,70,.75);padding:3px 8px;border-radius:4px;white-space:nowrap}
+.cmp-tag.left{right:10px}
+.cmp-tag.right{left:10px}
+.cmp-layer:focus-visible{outline:2px solid #1f5fbf;outline-offset:2px}
+/* tidy all lines: straightened (green) and smoothed (blue) lines shown before they are applied */
+.fix-layer .tidy-line{fill:none;stroke-linecap:round;stroke-linejoin:round;opacity:.85}
+.fix-layer .tidy-line.straight{stroke:#14905a}
+.fix-layer .tidy-line.smooth{stroke:#1f5fbf}
+.fix-layer .tidy-line.off{stroke:#8a8f98;stroke-dasharray:6 6;opacity:.6}
+.tidy-key{display:inline-block;width:18px;height:4px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.tidy-key.straight{background:#14905a}
+.tidy-key.smooth{background:#1f5fbf}
+.tidy-key.off{background:#8a8f98}
 </style>
 
 <div class="app">
@@ -200,6 +222,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
       <label class="check"><input id="lockRatio" type="checkbox" checked><span>Keep the pattern's proportions</span></label>
       <p class="hint" id="panelNote">—</p>
       <label class="field-inline">Save PNG at <select id="pngPPI"><option value="300" selected>300 px per inch</option><option value="600">600 px per inch</option></select></label>
+      <label class="check"><input id="exactSize" type="checkbox"><span>Save at exactly this size<br><span class="hint">No margin: the outside edge of the lead lands exactly on the width and height above, in the PNG, SVG and DXF. Otherwise ¼″ of blank margin goes round it.</span></span></label>
     </section>
 
     <section class="group">
@@ -271,6 +294,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
         <button data-view="result" aria-pressed="true">Result</button>
         <button data-view="original" aria-pressed="false">Original</button>
         <button data-view="overlay" aria-pressed="false">Overlay</button>
+        <button data-view="compare" aria-pressed="false" title="Drag across the picture to compare the original with the new lines">Compare</button>
       </div>
       <button id="fixBtn" class="fix-btn" aria-pressed="false" title="Click a junction or a spot on a line to choose how it should look">Fix lines</button>
       <div class="status" id="status"><span class="dot"></span><span id="statusText">Ready</span></div>
@@ -284,6 +308,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
       <div class="sample-tag" id="sampleTag">Example pattern · open or drop your own</div>
       <div class="stage"><img id="view" alt="Pattern preview"></div>
       <svg id="fixLayer" class="fix-layer" hidden aria-label="Junctions you can fix"></svg>
+      <div id="cmpLayer" class="cmp-layer" hidden><img id="cmpImg" alt="Original pattern, on the left of the divider"><div class="cmp-bar" id="cmpBar"><span class="cmp-tag left">Original</span><span class="cmp-knob" aria-hidden="true"></span><span class="cmp-tag right">New</span></div></div>
       <div id="fixPop" class="fix-pop" role="dialog" aria-label="Fix this spot" hidden></div>
     </div>
     <div class="fix-bar" id="fixBar" hidden>
@@ -291,6 +316,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
       <label class="fix-reach">Drag reach <select id="fixReach"><option value="short">short</option><option value="medium" selected>medium</option><option value="wide">wide</option><option value="line">whole line</option></select></label>
       <button id="fixArea" aria-pressed="false" title="Drag a box around a spot to replace it with a mirror of the same spot on the other side">Mirror an area</button>
       <select id="fixAreaFlip" hidden aria-label="Copy from"><option value="lr">from the other side (left ↔ right)</option><option value="tb">from the other end (top ↔ bottom)</option></select>
+      <button id="fixTidy" title="Straighten every nearly straight line and smooth every nearly smooth curve, after you check them">Tidy all lines…</button>
       <button id="fixDraw" aria-pressed="false" title="Drag from one line to another to add a straight lead line">Draw a line</button>
       <button id="fixSym" title="Copy one half of the pattern onto the other, flipped, so both sides match">Make symmetric…</button>
       <button id="fixCheck" aria-pressed="false" title="Mark pieces that are hard to cut in glass: sharp points, deep inside curves, slivers, tiny pieces">Check pieces</button>
@@ -1774,6 +1800,21 @@ function run(){if(!S.work)return;if(S.running){S.pending=true;return;}S.running=
 function pageGeom(){const cr=S.crop;const k=OUT_PPI/S.workPPI;const m=MARGIN_IN*OUT_PPI;const ox=PAD*S.sx,oy=PAD*S.sy;
   const pw=Math.round(cr.w*S.sx*k+2*m),ph=Math.round(cr.h*S.sy*k+2*m);
   return{k,m,pw,ph,map:(x,y)=>[(x-ox)*k+m,(y-oy)*k+m]};}
+// ---- saving at exactly the pattern's size ----
+// The saved page is exactly the width and height typed in, with no margin, and the lines are spread or drawn in
+// a hair (well under 1% as a rule) so the outside edge of the outermost lead lands exactly on the page's edge.
+// The lead keeps its width; only where the lines run moves. The preview on screen keeps its margin.
+function exactGeo(){const base=pageGeom(),wIn=widthIn(),bIn=borderIn(),useB=$('borderOn').checked&&S.hasBorder,P=allStrokePts(base,wIn,bIn);
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity,hL=0,hR=0,hT=0,hB=0;
+  P.forEach((L,s)=>{const h=((useB&&S.borderFlags[s])?bIn:wIn)*OUT_PPI/2;for(const p of L){if(p[0]-h<x0){x0=p[0]-h;hL=h;}if(p[0]+h>x1){x1=p[0]+h;hR=h;}if(p[1]-h<y0){y0=p[1]-h;hT=h;}if(p[1]+h>y1){y1=p[1]+h;hB=h;}}});
+  const Wt=base.pw-2*base.m,Ht=base.ph-2*base.m;if(!isFinite(x0)||x1-x0<1||y1-y0<1)return Object.assign(base,{sx:1,sy:1});
+  const cL=x0+hL,cR=x1-hR,cT=y0+hT,cB=y1-hB,sx=(Wt-hL-hR)/Math.max(1,cR-cL),sy=(Ht-hT-hB)/Math.max(1,cB-cT);
+  return{k:base.k*(sx+sy)/2,m:0,pw:Math.round(Wt),ph:Math.round(Ht),sx,sy,map:(x,y)=>{const q=base.map(x,y);return[hL+(q[0]-cL)*sx,hT+(q[1]-cT)*sy];}};}
+const exactOn=()=>$('exactSize').checked;
+function saveGeom(){return exactOn()?exactGeo():pageGeom();}
+function drawPage(geo,f){const c=document.createElement('canvas');c.width=Math.round(geo.pw*f);c.height=Math.round(geo.ph*f);const g=c.getContext('2d');if(!g)return null;
+  g.setTransform(f,0,0,f,0,0);if(!$('transparent').checked){g.fillStyle='#fff';g.fillRect(0,0,geo.pw,geo.ph);}
+  drawStrokes(g,geo,'#000',widthIn(),borderIn());drawFillets(g,geo,'#000',widthIn());return c;}
 function markBorder(){const pts=S.strokes,offs=S.offs,n=offs.length-1;const flags=new Uint8Array(n);
   if(!n){S.borderFlags=flags;return;}
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;for(let i=0;i<pts.length;i+=2){x0=Math.min(x0,pts[i]);x1=Math.max(x1,pts[i]);y0=Math.min(y0,pts[i+1]);y1=Math.max(y1,pts[i+1]);}
@@ -1858,9 +1899,33 @@ function render(){if(!S.strokes)return;const geo=pageGeom();
   $('borderWarn').hidden=!($('borderOn').checked&&!S.hasBorder);
   c.toBlob(async b=>{S.resultBlob=await withPPI(b,OUT_PPI);if(S.resultURL)URL.revokeObjectURL(S.resultURL);S.resultURL=URL.createObjectURL(S.resultBlob);
     if(S.overlayURL){URL.revokeObjectURL(S.overlayURL);S.overlayURL=null;}
+    if(S.origPageURL&&S.origPageKey!==origPageKey()){URL.revokeObjectURL(S.origPageURL);S.origPageURL=null;}
     $('savePng').disabled=false;$('saveSvg').disabled=false;$('saveDxf').disabled=false;showView();if(S.checkOn)runCheck();},'image/png');
   S.svg=buildSVG(geo);showStats(geo);}
 
+// ---- before and after: the original on the left of a divider, the new lines on the right ----
+// The original is drawn on a page of its own exactly like the result's page (same size and margin), so the two
+// line up; dragging anywhere on the picture moves the divider.
+const origPageKey=()=>{const g=pageGeom(),c=S.crop;return[g.pw,g.ph,S.rot||0,S.name,c.x,c.y,c.w,c.h,S.src&&S.src.width].join(':');};
+function makeOrigPage(cb){S.origPageKey=origPageKey();const geo=pageGeom(),c=document.createElement('canvas');c.width=geo.pw;c.height=geo.ph;const g=c.getContext('2d');
+  g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.imageSmoothingQuality='high';const cr=S.crop;g.save();
+  if(S.rot){const q=geo.map(S.work.w/2,S.work.h/2);g.translate(q[0],q[1]);g.rotate(-S.rot*Math.PI/180);g.translate(-q[0],-q[1]);}
+  g.drawImage(S.src,cr.x,cr.y,cr.w,cr.h,geo.m,geo.m,geo.pw-2*geo.m,geo.ph-2*geo.m);g.restore();
+  c.toBlob(b=>{if(S.origPageURL)URL.revokeObjectURL(S.origPageURL);S.origPageURL=URL.createObjectURL(b);cb();});}
+S.cmp=0.5;
+function placeCompare(){const L=$('cmpLayer'),img=$('view');if(L.hidden||!img.naturalWidth)return;
+  L.style.left=img.offsetLeft+'px';L.style.top=img.offsetTop+'px';L.style.width=img.offsetWidth+'px';L.style.height=img.offsetHeight+'px';
+  const sc=layerScale(),dw=img.naturalWidth*sc,dh=img.naturalHeight*sc,ox=(img.offsetWidth-dw)/2,oy=(img.offsetHeight-dh)/2,x=ox+S.cmp*dw;
+  const ci=$('cmpImg');ci.style.left=ox+'px';ci.style.top=oy+'px';ci.style.width=dw+'px';ci.style.height=dh+'px';ci.style.clipPath=`inset(0 ${(1-S.cmp)*dw}px 0 0)`;
+  const bar=$('cmpBar');bar.style.left=x+'px';bar.style.top=oy+'px';bar.style.height=dh+'px';}
+{let drag=false;const L=$('cmpLayer'),at=e=>{const img=$('view'),r=L.getBoundingClientRect(),sc=layerScale(),dw=img.naturalWidth*sc,ox=(r.width-dw)/2;
+    S.cmp=Math.max(0,Math.min(1,(e.clientX-r.left-ox)/(dw||1)));placeCompare();};
+  L.addEventListener('pointerdown',e=>{if(e.button!==0)return;drag=true;L.setPointerCapture(e.pointerId);at(e);e.preventDefault();});
+  L.addEventListener('pointermove',e=>{if(drag)at(e);});
+  L.addEventListener('pointerup',()=>{drag=false;});L.addEventListener('pointercancel',()=>{drag=false;});
+  L.tabIndex=0;L.setAttribute('role','slider');L.setAttribute('aria-label','Divider between the original and the new lines');
+  L.addEventListener('keydown',e=>{const d=e.key==='ArrowLeft'?-0.05:e.key==='ArrowRight'?0.05:0;if(!d)return;e.preventDefault();S.cmp=Math.max(0,Math.min(1,S.cmp+d));placeCompare();});}
+window.addEventListener('resize',()=>placeCompare());
 function makeOverlay(cb){const geo=pageGeom();const c=document.createElement('canvas');c.width=geo.pw;c.height=geo.ph;const g=c.getContext('2d');
   g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.globalAlpha=.45;g.imageSmoothingQuality='high';
   const cr=S.crop;g.save();if(S.rot){const c=geo.map(S.work.w/2,S.work.h/2);g.translate(c[0],c[1]);g.rotate(-S.rot*Math.PI/180);g.translate(-c[0],-c[1]);}
@@ -1894,12 +1959,14 @@ async function withPPI(blob,ppi){try{const buf=new Uint8Array(await blob.arrayBu
   return new Blob([out],{type:'image/png'});}catch(e){return blob;}}
 
 function showView(){const img=$('view');
-  if(!S.fixMode||S.view==='original')$('fixLayer').setAttribute('hidden','');
+  if(!S.fixMode||S.view==='original'||S.view==='compare')$('fixLayer').setAttribute('hidden','');
+  $('cmpLayer').hidden=S.view!=='compare';
   if(S.view==='original'){if(S.origURL)img.src=S.origURL;img.alt='Original pattern';}
   else if(S.view==='overlay'){if(!S.strokes)return;if(!S.overlayURL){makeOverlay(showView);return;}img.src=S.overlayURL;img.alt='New lines in red over the original';}
+  else if(S.view==='compare'){if(!S.strokes)return;if(!S.origPageURL){makeOrigPage(showView);return;}if(S.resultURL)img.src=S.resultURL;img.alt='Pattern with even line width';$('cmpImg').src=S.origPageURL;}
   else{if(S.resultURL)img.src=S.resultURL;img.alt='Pattern with even line width';}
   applyZoom();}
-function applyZoom(){requestAnimationFrame(placeFixLayer);const mat=$('mat'),img=$('view');mat.classList.toggle('fit',S.zoom==='fit');
+function applyZoom(){requestAnimationFrame(()=>{placeFixLayer();placeCompare();});const mat=$('mat'),img=$('view');mat.classList.toggle('fit',S.zoom==='fit');
   if(S.zoom==='fit'){img.style.width='';img.style.height='';}
   else{const z=+S.zoom;img.onload=()=>{if(S.zoom!=='fit'){img.style.width=img.naturalWidth*z+'px';img.style.height=img.naturalHeight*z+'px';}};
     if(img.complete&&img.naturalWidth){img.style.width=img.naturalWidth*z+'px';img.style.height=img.naturalHeight*z+'px';}}}
@@ -1916,7 +1983,7 @@ function updateLabels(){const w=widthIn();
       (Math.abs(pct)>=1?' Stretched '+Math.abs(pct)+'% '+(pct>0?'taller':'wider')+' than the original.':'');}}
 function showStats(geo){const s=S.stats;if(!s||!S.offs||S.offs.length<2){['sThin','sMid','sThick'].forEach(i=>$(i).textContent='no lines found');return;}
   const f=v=>fmtUnit(Math.max(1,v)/S.workPPI);$('sThin').textContent=f(s.thin);$('sMid').textContent=f(s.mid);$('sThick').textContent=f(s.thick);
-  $('sOut').textContent=(geo.pw/OUT_PPI).toFixed(2)+' × '+(geo.ph/OUT_PPI).toFixed(2)+' in';}
+  $('sOut').textContent=exactOn()?((geo.pw-2*geo.m)/OUT_PPI).toFixed(2)+' × '+((geo.ph-2*geo.m)/OUT_PPI).toFixed(2)+' in':(geo.pw/OUT_PPI).toFixed(2)+' × '+(geo.ph/OUT_PPI).toFixed(2)+' in';}
 
 
 // ---- fix lines: the user's own choices at junctions and along lines ----
@@ -1955,7 +2022,7 @@ function placeFixLayer(){const L=$('fixLayer'),img=$('view');if(L.hasAttribute('
   L.setAttribute('viewBox','0 0 '+img.naturalWidth+' '+img.naturalHeight);L.setAttribute('preserveAspectRatio','xMidYMid meet');}
 function layerScale(){const img=$('view');return img.naturalWidth?Math.min(img.offsetWidth/img.naturalWidth,img.offsetHeight/img.naturalHeight):1;}
 function fixAtJunction(J){return S.fixes.filter(f=>{const[x,y]=srcToWork(f.sx,f.sy);return Math.hypot(x-J.wx,y-J.wy)<8;});}
-function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view==='original'){L.setAttribute('hidden','');return;}
+function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view==='original'||S.view==='compare'){L.setAttribute('hidden','');return;}
   L.removeAttribute('hidden');placeFixLayer();const k=1/layerScale(),r=7*k;let h='';
   const areaFx=S.fixes.filter(f=>f.mode==='area');
   areaFx.forEach((f,i)=>{const b=areaPageBox(f);h+=`<rect class="area" x="${b[0]}" y="${b[1]}" width="${b[2]-b[0]}" height="${b[3]-b[1]}" style="stroke-width:${2*k}px"/>`;
@@ -1976,7 +2043,7 @@ function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view=
       if(S.symPending)h+=`<g class="area-grip" transform="translate(${ln.mid[0]} ${ln.mid[1]})"><circle r="${12*k}" style="stroke-width:${2*k}px"/><path d="M${-7*k},0H${7*k}M0,${-7*k}V${7*k}" style="stroke-width:${2*k}px"/></g>`;}}}
   // (pieces that are hard to cut in glass)
   if(S.checkOn&&S.checkMarks)h+=checkMarkup(k);
-  h+=addedLinesMarkup(k);
+  h+=addedLinesMarkup(k);h+=tidyMarkup(k);
   for(let i=0;i<S.junctions.length;i++){const J=S.junctions[i],p=jPage(J),fx=fixAtJunction(J).length>0;
     h+=`<circle class="jn${fx?' fixed':''}${S.fixSel&&S.fixSel.j===i?' sel':''}" cx="${p[0]}" cy="${p[1]}" r="${r}" style="stroke-width:${(fx?2:2.5)*k}"/>`;}
   // fixes that sit on a line rather than at a junction
@@ -1995,7 +2062,7 @@ function outPos(x,y){if(!S.rot)return[x+0.5,y+0.5];const a=-S.rot*Math.PI/180,ca
 function nearestStroke(px,py,lim){let best=null,bd=lim;const pts=S.strokes,geo=pageGeom();
   for(let j=0;j<pts.length/2;j++){const p=geo.map(pts[2*j],pts[2*j+1]);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;best=p;}}return best;}
 
-function closeFixPop(){$('fixPop').hidden=true;S.fixSel=null;if(S.fixMode)drawFixLayer();}
+function closeFixPop(){$('fixPop').hidden=true;S.fixSel=null;S.tidy=null;if(S.fixMode)drawFixLayer();}
 function openFixPop(html,px,py,left){const pop=$('fixPop'),img=$('view'),mat=$('mat'),sc=layerScale();
   // (the picture may be letterboxed inside its box; the layer sits exactly on that box)
   const L={offsetLeft:img.offsetLeft+(img.offsetWidth-img.naturalWidth*sc)/2,offsetTop:img.offsetTop+(img.offsetHeight-img.naturalHeight*sc)/2};
@@ -2088,6 +2155,7 @@ function fixClick(px,py){const sc=layerScale(),lim=16/sc;
   // still be picked; failing both, a joint a little further off)
   let bi=-1,bd=lim;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;bi=i;}});
   if(bi>=0&&bd<7/sc){junctionMenu(bi);return;}
+  if(S.tidy){const c=tidyAt(px,py,12/sc);if(c){c.on=!c.on;drawFixLayer();tidyMenu();}return;}
   {const ln=addedLineAt(px,py,10/sc);if(ln){addedLineMenu(ln,px,py);return;}}
   const q=nearestStroke(px,py,12/sc);if(q){pointMenu(q[0],q[1]);return;}
   if(bi>=0){junctionMenu(bi);return;}
@@ -2415,6 +2483,41 @@ function openSym(){if(!S.strokes)return;setAreaMode(false);if(S.drawMode)setDraw
   drawFixLayer();symMenu();}
 $('fixSym').addEventListener('click',openSym);
 
+// ---- tidying every line at once ----
+// Each stretch of line between its joints is looked at: one that is nearly straight (it never strays more than
+// about half a lead width from the ruler line between its ends) is straightened; one that is nearly one even
+// curve (smoothing would move it a little, but less than a lead width) is smoothed. Lines with real shape to them
+// are left alone, as are stretches already straightened or smoothed. Every change is shown first, in color, and
+// any can be left out; the rest go in together as ordinary Straighten and Smooth fixes, so one Undo takes them out.
+const TIDY={straight:0.6,minLen:6,smoothMin:0.12,smoothMax:0.7};
+function tidyCandidates(){const P=S.strokes,o=S.offs,n=o.length-1,lw=Math.max(2,widthIn()*S.workPPI),geo=pageGeom(),K=stretchTools(P,o,lw),out=[];
+  const have=new Set(S.fixes.filter(f=>f.mode==='smooth'||f.mode==='straight').map(f=>stretchAt(f.sx,f.sy)));
+  for(let s=0;s<n;s++){const a=o[s],b=o[s+1]-1;if(b-a<6)continue;let i=a+1,guard=0;
+    while(i<b&&guard++<500){const[lo,hi]=K.piece(s,i);i=Math.max(i+1,hi+1);if(hi-lo<6||have.has(s+':'+lo+':'+hi))continue;
+      const A=[P[2*lo],P[2*lo+1]],B=[P[2*hi],P[2*hi+1]],L=Math.hypot(B[0]-A[0],B[1]-A[1]);if(L<2*lw)continue;
+      let dev=0;for(let j=lo;j<=hi;j++){const d=Math.abs((B[0]-A[0])*(A[1]-P[2*j+1])-(A[0]-P[2*j])*(B[1]-A[1]))/L;if(d>dev)dev=d;}
+      const mid=(lo+hi)>>1,[sx,sy]=workToSrc(...pageToWorkInternal(...geo.map(P[2*mid],P[2*mid+1])));
+      const tryMode=mode=>{const T=Float32Array.from(P);if(!applyOneSmooth(T,o,{sx,sy,mode}).size)return null;let mv=0;for(let j=lo;j<=hi;j++)mv=Math.max(mv,Math.hypot(T[2*j]-P[2*j],T[2*j+1]-P[2*j+1]));
+        const pts=[];for(let j=lo;j<=hi;j++)pts.push(geo.map(T[2*j],T[2*j+1]));return{mv,pts};};
+      let pick=null;
+      if(L>=TIDY.minLen*lw&&dev<=TIDY.straight*lw){if(dev>TIDY.smoothMin*lw){const r=tryMode('straight');if(r&&r.mv>TIDY.smoothMin*lw)pick={mode:'straight',...r};}}
+      else{const r=tryMode('smooth');if(r&&r.mv>TIDY.smoothMin*lw&&r.mv<=TIDY.smoothMax*lw)pick={mode:'smooth',...r};}
+      if(pick)out.push({sx,sy,mode:pick.mode,pts:pick.pts,on:true});}}
+  return out;}
+function tidyMarkup(k){if(!S.tidy)return'';let h='';for(const c of S.tidy){const d=c.pts.map((p,j)=>(j?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1)).join('');
+    h+=`<path class="tidy-line ${c.on?c.mode:'off'}" d="${d}" style="stroke-width:${(c.on?5:3)*k}px"/>`;}return h;}
+function tidyAt(px,py,lim){let best=null,bd=lim;for(const c of S.tidy||[])for(const p of c.pts){const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;best=c;}}return best;}
+function tidyMenu(){const T=S.tidy,ns=T.filter(c=>c.on&&c.mode==='straight').length,nm=T.filter(c=>c.on&&c.mode==='smooth').length,off=T.filter(c=>!c.on).length;
+  const keep=S.tidy;openFixPop(`<h3>Tidy all lines</h3><p><span class="tidy-key straight"></span>${ns} to straighten &nbsp; <span class="tidy-key smooth"></span>${nm} to smooth${off?` &nbsp; <span class="tidy-key off"></span>${off} left out`:''}</p><p>Click a colored line to leave it out, or click it again to put it back.</p><div class="row"><button data-act="apply" class="primary"${ns+nm?'':' disabled'}>Apply ${ns+nm} change${ns+nm===1?'':'s'}</button><button data-act="cancel">Cancel</button></div>`,24,24);S.tidy=keep;
+  const pop=$('fixPop');pop.querySelector('[data-act="apply"]').onclick=applyTidy;pop.querySelector('[data-act="cancel"]').onclick=cancelTidy;
+  pop.querySelector('.close').onclick=cancelTidy;}
+function applyTidy(){const on=(S.tidy||[]).filter(c=>c.on);if(!on.length){cancelTidy();return;}changeFixes(()=>{for(const c of on)S.fixes.push({sx:c.sx,sy:c.sy,mode:c.mode});});setStatus('Tidied '+on.length+' line'+(on.length===1?'':'s'),true);}
+function cancelTidy(){S.tidy=null;closeFixPop();drawFixLayer();setStatus('Tidy cancelled: nothing changed',false);}
+$('fixTidy').addEventListener('click',()=>{if(!S.strokes)return;closeFixPop();setAreaMode(false);if(S.drawMode)setDrawMode(false);S.symPending=null;
+  setStatus('Looking over every line…',true);setTimeout(()=>{const c=tidyCandidates();
+    if(!c.length){setStatus('Nothing to tidy: every line is already straight, smooth, or shaped on purpose.',false);return;}
+    S.tidy=c;drawFixLayer();tidyMenu();setStatus(c.length+' line'+(c.length===1?'':'s')+' to tidy: check them, then Apply',false);},30);});
+
 // ---- lines drawn by hand ----
 // A line drawn by hand runs straight from one point to another; the program treats it like the picture's own lines.
 // (on the preview: the lines drawn by hand)
@@ -2496,7 +2599,7 @@ $('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null
 function afterFixChange(before){const key=a=>JSON.stringify(a.filter(f=>!PAGE_FIX.has(f.mode)));if(key(before)!==key(S.fixes))schedule(run,0);else redrawDrags();}
 $('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
 $('fixClear').addEventListener('click',()=>{if(!S.fixes.length)return;const before=S.fixes;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));S.fixes=[];saveFixes();closeFixPop();afterFixChange(before);});
-document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.areaPending&&!/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyPending();return;}if(e.key!=='Escape')return;if(S.drawMode){press=null;setDrawMode(false);drawFixLayer();return;}if(S.symPending){cancelSym();return;}if(S.areaPending){cancelPending();return;}if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.areaPending&&!/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyPending();return;}if(e.key==='Enter'&&S.tidy&&!/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test((e.target||{}).tagName||'')){e.preventDefault();applyTidy();return;}if(e.key!=='Escape')return;if(S.tidy){cancelTidy();return;}if(S.drawMode){press=null;setDrawMode(false);drawFixLayer();return;}if(S.symPending){cancelSym();return;}if(S.areaPending){cancelPending();return;}if(S.areaMode){setAreaMode(false);press=null;drawFixLayer();}if(S.mirrorPick){S.mirrorPick=null;S.fixSel=null;drawFixLayer();setStatus('Mirror cancelled');}if(!$('fixPop').hidden)closeFixPop();});
 $('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
 window.addEventListener('resize',()=>{placeFixLayer();});
 
@@ -2555,24 +2658,24 @@ async function save(data,ext){const note=$('note');
     'Saving is not available here. Switch to Result, then right-click (or long-press) the image and choose Save image.';}}
 try{const v=localStorage.getItem('pngPPI');if(v==='600'||v==='300')$('pngPPI').value=v;}catch(e){}
 $('pngPPI').addEventListener('change',e=>{try{localStorage.setItem('pngPPI',e.target.value);}catch(_){}});
+try{$('exactSize').checked=localStorage.getItem('exactSize')==='1';}catch(e){}
+$('exactSize').addEventListener('change',e=>{try{localStorage.setItem('exactSize',e.target.checked?'1':'0');}catch(_){}if(S.strokes)showStats(pageGeom());});
 // (the preview is drawn at 300 px per inch; a finer PNG is drawn afresh at the chosen resolution when it is saved)
-$('savePng').addEventListener('click',async()=>{if(!S.resultBlob)return;const ppi=+$('pngPPI').value||OUT_PPI;if(ppi===OUT_PPI){save(S.resultBlob,'png');return;}
+$('savePng').addEventListener('click',async()=>{if(!S.resultBlob)return;const ppi=+$('pngPPI').value||OUT_PPI;if(ppi===OUT_PPI&&!exactOn()){save(S.resultBlob,'png');return;}
   const note=$('note');note.textContent='Drawing the PNG at '+ppi+' px per inch…';await new Promise(r=>setTimeout(r,30));
-  const geo=pageGeom(),f=ppi/OUT_PPI,c=document.createElement('canvas');c.width=Math.round(geo.pw*f);c.height=Math.round(geo.ph*f);const g=c.getContext('2d');
-  if(!g){note.textContent='This browser cannot draw a picture that large. Try 300 px per inch, or Save SVG.';return;}
-  g.setTransform(f,0,0,f,0,0);if(!$('transparent').checked){g.fillStyle='#fff';g.fillRect(0,0,geo.pw,geo.ph);}
-  drawStrokes(g,geo,'#000',widthIn(),borderIn());drawFillets(g,geo,'#000',widthIn());
+  const geo=saveGeom(),f=ppi/OUT_PPI,c=drawPage(geo,f);
+  if(!c){note.textContent='This browser cannot draw a picture that large. Try 300 px per inch, or Save SVG.';return;}
   const b=await new Promise(r=>c.toBlob(r,'image/png'));c.width=c.height=0;
   if(!b){note.textContent='This browser cannot make a PNG that large ('+Math.round(geo.pw*f)+' × '+Math.round(geo.ph*f)+' px). Try 300 px per inch, or Save SVG.';return;}
   save(await withPPI(b,ppi),'png');});
-$('saveSvg').addEventListener('click',()=>{if(S.svg)save(S.svg,'svg');});
+$('saveSvg').addEventListener('click',()=>{if(!S.svg)return;save(exactOn()?buildSVG(exactGeo()):S.svg,'svg');});
 // ---- cut file for a cutter (Silhouette and the like) ----
 // Every glass piece is the white space between the new lines; its edge is a closed cut line that already sits half
 // a lead width back from each line, so the cut pieces keep the chosen gap between them. The result picture is read
 // back, the white pieces are told apart (the white all round the panel is not a piece), and the edges between white
 // and line are followed at the half-way grey, so they are smooth rather than stepped. Written as DXF (R12), which
 // every edition of Silhouette Studio opens; units are inches.
-async function cutLoops(){const img=new Image();img.src=S.resultURL;await img.decode();
+async function cutLoops(full,url){const img=new Image();img.src=url||S.resultURL;await img.decode();
   const ppi=Math.min(OUT_PPI,Math.max(100,Math.floor(Math.sqrt(16e6/(img.naturalWidth*img.naturalHeight))*OUT_PPI)));   // (as fine as about 16 million pixels allows)
   const W=Math.round(img.naturalWidth*ppi/OUT_PPI),H=Math.round(img.naturalHeight*ppi/OUT_PPI),c=document.createElement('canvas');c.width=W+2;c.height=H+2;
   const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W+2,H+2);x.drawImage(img,1,1,W,H);const d=x.getImageData(0,0,W+2,H+2).data,GW=W+2,GH=H+2;
@@ -2615,7 +2718,8 @@ function dxfFile(cut){const o=['0','SECTION','2','HEADER','9','$ACADVER','1','AC
     for(const[x,y]of L)o.push('0','VERTEX','8','PIECES','10',x.toFixed(4),'20',(cut.h-y).toFixed(4),'30','0');o.push('0','SEQEND','8','PIECES');}
   o.push('0','ENDSEC','0','EOF');return o.join('\r\n')+'\r\n';}
 $('saveDxf').addEventListener('click',async()=>{if(!S.resultURL)return;$('note').textContent='Making the cut file…';
-  try{const cut=await cutLoops();save(dxfFile(cut),'dxf');$('note').textContent+=' '+cut.loops.length+' cut lines.';}catch(err){$('note').textContent='Could not make the cut file: '+(err&&err.message||err);}});
+  try{let url=null;if(exactOn()){const c=drawPage(exactGeo(),1);const b=await new Promise(r=>c.toBlob(r,'image/png'));url=URL.createObjectURL(b);}
+    const cut=await cutLoops(false,url);if(url)URL.revokeObjectURL(url);save(dxfFile(cut),'dxf');$('note').textContent+=' '+cut.loops.length+' cut lines.';}catch(err){$('note').textContent='Could not make the cut file: '+(err&&err.message||err);}});
 (async()=>{try{S.dl=await (window.claude&&window.claude.use?window.claude.use('downloads'):null);}catch(e){S.dl=null;}})();
 
 // example pattern with deliberately uneven lines

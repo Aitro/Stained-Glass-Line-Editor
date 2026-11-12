@@ -34,7 +34,9 @@ Fixing a spot by hand:
 - **Smooth this line** / **Straighten this line**: click a line and pick one. The stretch between its joints becomes one even curve, or a ruler-straight line, between the same ends; an end resting near the point of another line (the bottom of a V) moves onto that point. Set **Drag reach** to **whole line** to drag a whole stretch between its joints as one piece.
 - **Add a joint here**: click a line and add a joint; Smooth and Straighten then stop at it, so you can smooth a short section. Click the joint again to remove it.
 - **Make symmetric…**: copies one half of the whole pattern onto the other, flipped. Pick left onto right, right onto left, top onto bottom or bottom onto top; the half that will be replaced is shaded and the dashed centre line is where the program found the drawing's middle. If it's off, drag the line (or its **+**) sideways first, then **Apply**. Lines running along the centre line stay whole. Press **Make symmetric…** again to change or remove it, or use Undo.
+- **Tidy all lines…**: looks over every stretch of line between its joints. Nearly straight ones (never more than about half a lead width off the ruler line) are marked green to straighten; nearly even curves (smoothing would move them less than a lead width) are marked blue to smooth. Lines with real shape, and stretches you already straightened or smoothed, are left alone. Click a marked line to leave it out, then **Apply** (or Enter); Esc or Cancel changes nothing. They go in as ordinary Straighten and Smooth fixes, so one Undo takes them all out.
 - **Draw a line**: drag from one line to another to add a straight lead line (shown dashed violet). An end near a line snaps onto it. Click the line later to remove it; Esc stops drawing.
+- **Compare** (view): the original on the left of a divider and the new lines on the right; drag anywhere on the picture (or use the arrow keys) to move it.
 - **Check pieces**: marks the glass pieces that are hard to cut, in orange: points sharper than 30°, inside curves deeper than they are wide, slivers under 1/4 inch wide, and pieces too small to hold while grinding. Fix them with the line tools; the marks update as you go. Press it again to hide them.
 - **Rounded corner** (small, medium or large): click a sharp corner in a line, or a dot where two lines meet, and pick a size. The point is replaced by an even curve.
 - Hovering over the picture highlights what a click or drag will take: one stretch of line, or a joint's dot (and with it every line meeting there). A drag takes a joint only when it starts right on its dot.
@@ -54,6 +56,7 @@ Optional:
 - **Cleanup → Save PNG with a transparent background**.
 - The pattern size is remembered for each picture in this browser, and a saved PNG carries the size it was made at, so opening it here again keeps that size.
 - **Save PNG at** (under Pattern size): 300 or 600 px per inch. The preview is always drawn at 300; a 600 PNG is drawn afresh when you save it (about four times the pixels, so it takes a moment). SVG and DXF are lines, so they are sharp at any size.
+- **Save at exactly this size** (under Pattern size): the saved PNG, SVG and DXF are exactly the width and height typed in, with no margin; the lines are spread or drawn in a hair (well under 1% as a rule) so the outside edge of the outermost lead lands exactly on the edge. The lead keeps its width. Off, ¼″ of blank margin goes round the pattern. The preview keeps its margin either way.
 
 ### Turning on GitHub Pages (once, by the repository owner)
 

@@ -164,3 +164,25 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .fix-layer .added-line.drawing{stroke-dasharray:none;opacity:.75}
 .fix-layer .draw-end{fill:#fff;stroke:#7b3fbf}
 .fix-layer .draw-end.snap{fill:#7b3fbf}
+/* before and after: the original on the left of a draggable divider */
+.cmp-layer{position:absolute;left:0;top:0;z-index:2;cursor:ew-resize;touch-action:none}
+.cmp-layer img{position:absolute;display:block;background:#fff;pointer-events:none;user-select:none}
+.cmp-bar{position:absolute;width:0;pointer-events:none}
+.cmp-bar::before{content:"";position:absolute;left:-1.5px;top:0;bottom:0;width:3px;background:#1f5fbf;box-shadow:0 0 0 1px rgba(255,255,255,.8)}
+.cmp-knob{position:absolute;left:-15px;top:calc(50% - 15px);width:30px;height:30px;border-radius:50%;background:#1f5fbf;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.35)}
+.cmp-knob::before,.cmp-knob::after{content:"";position:absolute;top:9px;border:6px solid transparent}
+.cmp-knob::before{left:-1px;border-right-color:#fff}
+.cmp-knob::after{right:-1px;border-left-color:#fff}
+.cmp-tag{position:absolute;top:8px;font-size:12px;font-weight:600;color:#fff;background:rgba(20,40,70,.75);padding:3px 8px;border-radius:4px;white-space:nowrap}
+.cmp-tag.left{right:10px}
+.cmp-tag.right{left:10px}
+.cmp-layer:focus-visible{outline:2px solid #1f5fbf;outline-offset:2px}
+/* tidy all lines: straightened (green) and smoothed (blue) lines shown before they are applied */
+.fix-layer .tidy-line{fill:none;stroke-linecap:round;stroke-linejoin:round;opacity:.85}
+.fix-layer .tidy-line.straight{stroke:#14905a}
+.fix-layer .tidy-line.smooth{stroke:#1f5fbf}
+.fix-layer .tidy-line.off{stroke:#8a8f98;stroke-dasharray:6 6;opacity:.6}
+.tidy-key{display:inline-block;width:18px;height:4px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.tidy-key.straight{background:#14905a}
+.tidy-key.smooth{background:#1f5fbf}
+.tidy-key.off{background:#8a8f98}
