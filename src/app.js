@@ -11,7 +11,7 @@ const worker=new Worker(URL.createObjectURL(new Blob([$('worker-src').textConten
 worker.onmessage=e=>{const m=e.data;
   if(m.type==='progress')setStatus(m.text,true);
   else if(m.type==='loaded'){if(m.id!==S.loadId)return;S.otsu=m.otsu;if($('threshAuto').checked)$('thresh').value=m.otsu;updateLabels();S.running=false;run();}
-  else if(m.type==='done'){S.running=false;
+  else if(m.type==='done'){S.running=false;if(!S.go){S.pending=false;return;}
     if(S.pending){S.pending=false;run();return;}
     S.rawStrokes=m.pts;S.rawOffs=m.offs;S.rawHw=m.hw;S.rawFill=m.fill;S.rawFcurve=m.fcurve;S.areaCache=null;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;if(m.axes)S.axes=m.axes;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];S.strokes=applyDrags();markBorder();render();drawFixLayer();
     if(S.symWaiting&&S.symPending){S.symWaiting=false;if(symAxisOf(S.symPending)){drawFixLayer();symMenu();}}
@@ -35,7 +35,8 @@ function syncSize(changed){if(!S.crop||!$('lockRatio').checked)return;const r=S.
 function loadImage(img,name,isSample){
   const c=document.createElement('canvas');c.width=img.width||img.naturalWidth;c.height=img.height||img.naturalHeight;
   const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0);
-  S.src=c;S.name=name;S.sample=isSample;
+  S.src=c;S.name=name;S.sample=isSample;S.go=false;S.strokes=null;if(S.resultURL)URL.revokeObjectURL(S.resultURL);S.resultURL=null;S.resultBlob=null;S.svg=null;
+  if(S.fixMode)$('fixBtn').click();closeFixPop();waitForGo();
   loadFixes(name,c.width,c.height);
   $('fileName').textContent=name;$('sampleTag').hidden=!isSample;$('sSize').textContent=c.width+' × '+c.height+' px';
   if(S.origURL)URL.revokeObjectURL(S.origURL);c.toBlob(b=>{S.origURL=URL.createObjectURL(b);if(S.view==='original')showView();});
@@ -76,8 +77,15 @@ function prepare(){if(!S.src)return;
 function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
   lines:linesForWorker()};}
 let timer=null;
+function waitForGo(){S.view='original';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='original')));
+  $('levelBtn').hidden=false;$('fixBtn').disabled=true;['savePng','saveSvg','saveDxf'].forEach(id=>$(id).disabled=true);showView();
+  setStatus('Ready: press Level lines',false);}
+$('levelBtn').addEventListener('click',()=>{S.go=true;$('levelBtn').hidden=true;$('fixBtn').disabled=false;S.view='result';
+  document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));run();});
 function schedule(fn,ms){clearTimeout(timer);timer=setTimeout(fn,ms);}
-function run(){if(!S.work)return;if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
+// (a new picture is only shown at first; nothing is redrawn until Level lines is pressed, and from then on every
+// change to the settings or fixes redraws it as before)
+function run(){if(!S.work)return;if(!S.go){waitForGo();return;}if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
   worker.postMessage({type:'run',id:S.runId,params:params()});}
 
 // ---- geometry: work px -> output px on the page ----
@@ -243,6 +251,7 @@ async function withPPI(blob,ppi){try{const buf=new Uint8Array(await blob.arrayBu
   return new Blob([out],{type:'image/png'});}catch(e){return blob;}}
 
 function showView(){const img=$('view');
+  if(!S.go&&S.view!=='original'){S.view='original';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='original')));}
   if(!S.fixMode||S.view==='original'||S.view==='compare')$('fixLayer').setAttribute('hidden','');
   $('cmpLayer').hidden=S.view!=='compare';
   if(S.view==='original'){if(S.origURL)img.src=S.origURL;img.alt='Original pattern';}

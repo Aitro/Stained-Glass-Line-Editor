@@ -19,11 +19,12 @@ Open a pattern image (a scan, a photo, a downloaded pattern, or a colored patter
 
 Then:
 
-1. Click **Open pattern image** (or drag an image onto the green mat, or paste one).
+1. Click **Open pattern image** (or drag an image onto the green mat, or paste one). It is shown as it is; nothing is redrawn yet.
 2. Set **Width × Height** in inches. With **Keep the pattern's proportions** on, changing one updates the other. Turn it off to stretch the pattern to an exact size; the stretch happens before the lines are redrawn, so every line still comes out the same width.
 3. Set **Line width** in inches, points or millimetres (3 pt = 0.0417 in).
-4. Check the **Overlay** view, which shows the new lines in red over your original.
-5. Click **Save PNG** or **Save SVG**. For a cutter (Silhouette and the like), click **Save DXF for cutter**: every glass piece becomes its own closed cut line, sitting half a line width back from each line, so the cut pieces keep the chosen gap between them. It opens in every edition of Silhouette Studio; units are inches.
+4. Press **Level lines** to redraw every line at that width. From then on, changing any setting or fix redraws it straight away. (Each new picture waits for Level lines again.)
+5. Check the **Overlay** view, which shows the new lines in red over your original.
+6. Click **Save PNG** or **Save SVG**. For a cutter (Silhouette and the like), click **Save DXF for cutter**: every glass piece becomes its own closed cut line, sitting half a line width back from each line, so the cut pieces keep the chosen gap between them. It opens in every edition of Silhouette Studio; units are inches.
 
 Fixing a spot by hand:
 - Click **Fix lines** above the preview. Every junction gets a dot.
