@@ -186,3 +186,6 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .tidy-key.straight{background:#14905a}
 .tidy-key.smooth{background:#1f5fbf}
 .tidy-key.off{background:#8a8f98}
+/* the two ways to redraw the lines, side by side */
+.mode-pair{display:inline-flex;gap:6px}
+.slider-row.is-off,.check.is-off{opacity:.45}

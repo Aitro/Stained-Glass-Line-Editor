@@ -196,6 +196,9 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
 .tidy-key.straight{background:#14905a}
 .tidy-key.smooth{background:#1f5fbf}
 .tidy-key.off{background:#8a8f98}
+/* the two ways to redraw the lines, side by side */
+.mode-pair{display:inline-flex;gap:6px}
+.slider-row.is-off,.check.is-off{opacity:.45}
 </style>
 
 <div class="app">
@@ -296,7 +299,10 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
         <button data-view="overlay" aria-pressed="false">Overlay</button>
         <button data-view="compare" aria-pressed="false" title="Drag across the picture to compare the original with the new lines">Compare</button>
       </div>
-      <button id="levelBtn" class="primary" title="Redraw the lines at one even width">Level lines</button>
+      <div class="mode-pair" role="group" aria-label="How to redraw the lines">
+        <button id="levelBtn" class="fix-btn" aria-pressed="false" title="Redraw every line at one even width, smoothing curves, tidying joints and making straight lines and circles exact">Level lines</button>
+        <button id="drawnBtn" class="fix-btn" aria-pressed="false" title="Keep every line exactly where and how it was drawn, and only change its width">Even width only</button>
+      </div>
       <button id="fixBtn" class="fix-btn" aria-pressed="false" title="Click a junction or a spot on a line to choose how it should look">Fix lines</button>
       <div class="status" id="status"><span class="dot"></span><span id="statusText">Ready</span></div>
       <div class="seg" role="group" aria-label="Zoom">
@@ -465,7 +471,8 @@ function process(p){
   // close gaps narrower than ~2/3 of a line width (hollow or skipping marker strokes),
   // using distance maps: grow the lines by r, then shrink them back by r
   // (not for colored patterns: they are clean drawings where every gap, however thin, is glass)
-  if(!colorIn){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
+  // (and not for Even width only: lines are kept as drawn, gaps and all)
+  if(!colorIn&&!p.asDrawn){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
     for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
     // pixels outside the image count as paper so the outer border is not pulled inward
@@ -497,7 +504,7 @@ function process(p){
 
   say('Tracing curves…');
   const dmap=new Float32Array(W*H);for(let i=0;i<W*H;i++)dmap[i]=Math.sqrt(dbg2[i]);dbg2=null;
-  const built=buildStrokes(sk,u,med,dmap,p.smooth,say,p);const strokes=built.strokes;
+  const built=p.asDrawn?traceAsDrawn(sk,u,dmap,p):buildStrokes(sk,u,med,dmap,p.smooth,say,p);const strokes=built.strokes;
   const fl=[],fo=[0],cl=[],co=[0];for(const f of built.fillets){for(const q of f.fill)fl.push(q[1]+0.5,q[0]+0.5);fo.push(fl.length/2);for(const q of f.curve)cl.push(q[1]+0.5,q[0]+0.5);co.push(cl.length/2);}
   const flat=[],offs=[0],hwf=[];
   // the original line's half-width at each point (largest distance-to-paper nearby), with a running
@@ -1713,6 +1720,57 @@ function drawSeg(m,ax,ay,bx,by,r){const x0=Math.max(0,Math.floor(Math.min(ax,bx)
 // The typical width of the lines, in pixels (the middle run of dark across a line).
 function inkWidth(m){const r=[];for(let y=1;y<H-1;y+=3)for(let x=1;x<W-1;x+=3){const i=y*W+x;if(m[i]&&!m[i-1])for(let k=1;k<200;k++){if(x+k>=W||!m[i+k]){r.push(k);break;}}}
   r.sort((a,b)=>a-b);return r.length?Math.max(2,r[r.length>>1]):4;}
+// The middle of every line is followed pixel by pixel and kept where it is: no curve smoothing beyond taking out
+// the pixel staircase, no joints rebuilt, nothing made exactly straight or round, the panel not squared up. Only
+// tiny bumps (a branch shorter than about four line widths ending in nothing, which is a speck or a burr on the
+// ink, not a line) are left out, and a loose end is carried on to where the ink ended, so short lines keep their
+// length at the new width.
+function traceAsDrawn(sk,u,dmap,p){
+  const N8=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+  const nb=i=>{const y=(i/W)|0,x=i%W,o=[];for(const[dy,dx]of N8){const yy=y+dy,xx=x+dx;if(yy>=0&&yy<H&&xx>=0&&xx<W&&sk[yy*W+xx])o.push(yy*W+xx);}return o;};
+  const cnt=new Uint8Array(W*H),node=new Uint8Array(W*H);for(let i=0;i<W*H;i++)if(sk[i]){cnt[i]=nb(i).length;if(cnt[i]!==2)node[i]=1;}
+  // (joints: touching joint pixels are one joint, at their middle)
+  const lab=new Int32Array(W*H),cent=[null],free=new Set();
+  {let nl=0;const st=[];for(let i=0;i<W*H;i++){if(!node[i]||lab[i])continue;nl++;let sy=0,sx=0,n=0,loose=false;st.push(i);lab[i]=nl;
+    while(st.length){const k=st.pop();sy+=(k/W)|0;sx+=k%W;n++;if(cnt[k]<=1)loose=true;for(const j of nb(k))if(node[j]&&!lab[j]){lab[j]=nl;st.push(j);}}
+    cent.push([sy/n,sx/n]);if(loose)free.add(nl);}}
+  // (the lines between joints, and closed loops with none)
+  const seen=new Uint8Array(W*H),pt=i=>[(i/W)|0,i%W];let ch=[];const links=new Set();
+  for(let p0=0;p0<W*H;p0++){if(!node[p0])continue;const a=lab[p0];
+    for(const q of nb(p0)){
+      if(node[q]){const b=lab[q];const key=Math.min(a,b)+'-'+Math.max(a,b);if(b!==a&&!links.has(key)){links.add(key);ch.push({P:[cent[a].slice(),cent[b].slice()],a,b});}continue;}
+      if(seen[q])continue;const P=[cent[a].slice()];let prev=p0,cur=q,end=null;
+      for(;;){seen[cur]=1;P.push(pt(cur));const ns=nb(cur),nodes=ns.filter(n=>node[n]&&n!==prev),nxt=ns.filter(n=>n!==prev&&!seen[n]&&!node[n]);
+        if(nodes.length&&(P.length>2||lab[nodes[0]]!==a||!nxt.length)){end=lab[nodes[0]];P.push(cent[end].slice());break;}
+        if(!nxt.length)break;prev=cur;cur=nxt[0];}
+      ch.push({P,a,b:end});}}
+  const loops=[];for(let p0=0;p0<W*H;p0++){if(!sk[p0]||seen[p0]||node[p0])continue;const P=[];let prev=-1,cur=p0;
+    for(;;){seen[cur]=1;P.push(pt(cur));const nxt=nb(cur).filter(n=>n!==prev&&!seen[n]);if(!nxt.length)break;prev=cur;cur=nxt[0];}if(P.length>3){P.push(P[0].slice());loops.push(P);}}
+  const len=P=>{let L=0;for(let i=1;i<P.length;i++)L+=Math.hypot(P[i][0]-P[i-1][0],P[i][1]-P[i-1][1]);return L;};
+  // (burrs: short branches ending in nothing; taken off a few times over, as taking one off can leave another)
+  for(let pass=0;pass<3;pass++){const deg=new Map();for(const c of ch)for(const k of[c.a,c.b])if(k!=null)deg.set(k,(deg.get(k)||0)+1);
+    const before=ch.length;ch=ch.filter(c=>{const looseEnd=c.b==null||(free.has(c.a)&&deg.get(c.a)===1)||(free.has(c.b)&&deg.get(c.b)===1);
+      const other=c.b==null?deg.get(c.a):Math.max(deg.get(c.a)||0,deg.get(c.b)||0);return!(looseEnd&&other>1&&len(c.P)<4*u);});
+    if(ch.length===before)break;}
+  // (two lines meeting at a joint with nothing else there are one line)
+  for(let guard=0;guard<ch.length*2;guard++){const deg=new Map();ch.forEach((c,i)=>{for(const k of[c.a,c.b])if(k!=null){if(!deg.has(k))deg.set(k,[]);deg.get(k).push(i);}});
+    let done=true;for(const[k,L]of deg){if(L.length!==2||L[0]===L[1])continue;const[i,j]=L,A=ch[i],B=ch[j];
+      const a=A.b===k?A.P:A.P.slice().reverse(),b=B.a===k?B.P:B.P.slice().reverse(),ea=A.b===k?A.a:A.b,eb=B.a===k?B.b:B.a;
+      ch[i]={P:a.concat(b.slice(1)),a:ea,b:eb};ch.splice(j,1);done=false;break;}
+    if(done)break;}
+  // (the pixel staircase taken out: each point averaged with its near neighbors, the ends held still)
+  const ease=P=>{const closed=P.length>3&&Math.hypot(P[0][0]-P[P.length-1][0],P[0][1]-P[P.length-1][1])<0.5;let Q=P.map(q=>q.slice());const n=Q.length,R=2;
+    for(let pass=0;pass<2;pass++){const T=Q.map(q=>q.slice());for(let i=0;i<n;i++){if(!closed&&(i===0||i===n-1))continue;let sy=0,sx=0,w=0;
+        for(let k=-R;k<=R;k++){let j=i+k;if(closed){j=((j%(n-1))+(n-1))%(n-1);}else if(j<0||j>=n)continue;const ww=R+1-Math.abs(k);sy+=ww*Q[j][0];sx+=ww*Q[j][1];w+=ww;}
+        T[i]=[sy/w,sx/w];}if(closed)T[n-1]=T[0].slice();Q=T;}return Q;};
+  // (a loose end carried on to where the ink ended, less the new lead's own round end)
+  const rNew=Math.max(0.5,+p.newHalf||u),rAt=q=>{let mx=0;const yy=Math.round(q[0]),xx=Math.round(q[1]);for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const y=yy+dy,x=xx+dx;if(y>=0&&x>=0&&y<H&&x<W)mx=Math.max(mx,dmap[y*W+x]);}return mx;};
+  const reach=(P,atStart)=>{if(P.length<3)return;const e=atStart?0:P.length-1,dir=atStart?1:-1;let k=e,L=0;while(k+dir>=0&&k+dir<P.length&&L<2*u){L+=Math.hypot(P[k+dir][0]-P[k][0],P[k+dir][1]-P[k][1]);k+=dir;}
+    const dy=P[e][0]-P[k][0],dx=P[e][1]-P[k][1],dl=Math.hypot(dy,dx);if(dl<1e-6)return;const ext=Math.max(-0.8*dl,rAt(P[e])-rNew);P[e]=[P[e][0]+dy/dl*ext,P[e][1]+dx/dl*ext];};
+  const deg=new Map();for(const c of ch)for(const k of[c.a,c.b])if(k!=null)deg.set(k,(deg.get(k)||0)+1);
+  const strokes=[];for(const c of ch){const Q=ease(c.P);if(c.b==null||(free.has(c.b)&&deg.get(c.b)===1))reach(Q,false);if(free.has(c.a)&&deg.get(c.a)===1)reach(Q,true);strokes.push(Q);}
+  for(const P of loops)strokes.push(ease(P));
+  return{strokes,fillets:[],junctions:[],rot:0};}
 </script>
 
 <script>
@@ -1792,16 +1850,23 @@ function prepare(){if(!S.src)return;
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
 function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
-  lines:linesForWorker()};}
+  lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
+// A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
+// and circles); Even width only keeps every line exactly as drawn and just changes its width. Fix lines works
+// with either, and on a picture not yet redrawn it uses Even width only. Either can be switched to at any time;
+// from then on every change to the settings or fixes redraws it as before.
 function waitForGo(){S.view='original';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='original')));
-  $('levelBtn').hidden=false;$('fixBtn').disabled=true;['savePng','saveSvg','saveDxf'].forEach(id=>$(id).disabled=true);showView();
-  setStatus('Ready: press Level lines',false);}
-$('levelBtn').addEventListener('click',()=>{S.go=true;$('levelBtn').hidden=true;$('fixBtn').disabled=false;S.view='result';
-  document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));run();});
+  showMode();['savePng','saveSvg','saveDxf'].forEach(id=>$(id).disabled=true);showView();
+  setStatus('Ready: choose Level lines or Even width only',false);}
+function showMode(){$('levelBtn').setAttribute('aria-pressed',String(S.go&&S.mode==='level'));$('drawnBtn').setAttribute('aria-pressed',String(S.go&&S.mode==='drawn'));
+  const off=S.go&&S.mode==='drawn';['smooth','exactShapes','squareUp'].forEach(id=>{$(id).disabled=off;const r=$(id).closest('.slider-row,.check');if(r)r.classList.toggle('is-off',off);});}
+function setMode(mode){const was=S.go&&S.mode;S.go=true;S.mode=mode;showMode();if(was===mode)return;
+  if(S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));}
+  setStatus('Working…',true);schedule(run,0);}
+$('levelBtn').addEventListener('click',()=>setMode('level'));
+$('drawnBtn').addEventListener('click',()=>setMode('drawn'));
 function schedule(fn,ms){clearTimeout(timer);timer=setTimeout(fn,ms);}
-// (a new picture is only shown at first; nothing is redrawn until Level lines is pressed, and from then on every
-// change to the settings or fixes redraws it as before)
 function run(){if(!S.work)return;if(!S.go){waitForGo();return;}if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
   worker.postMessage({type:'run',id:S.runId,params:params()});}
 
@@ -2602,7 +2667,7 @@ function setAreaMode(on){if(!on&&S.areaPending)S.areaPending=null;S.areaMode=on;
   $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
 S.areaFlip='lr';$('fixAreaFlip').addEventListener('change',e=>{S.areaFlip=e.target.value;});
 $('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;S.symPending=null;if(S.drawMode)setDrawMode(false);setAreaMode(!S.areaMode);});
-$('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);setDrawMode(false);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
+$('fixBtn').addEventListener('click',()=>{if(!S.go&&!S.fixMode)setMode('drawn');S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);setDrawMode(false);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
   if(S.fixMode&&S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));showView();}
   closeFixPop();drawFixLayer();updateFixBar();});
 // (only drags changed: redraw straight away; anything else: the program runs again)
@@ -2614,7 +2679,7 @@ $('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
 window.addEventListener('resize',()=>{placeFixLayer();});
 
 // ---- controls ----
-const rerender=()=>{updateLabels();schedule(render,120);};
+const rerender=()=>{updateLabels();schedule(S.go&&S.mode==='drawn'?run:render,S.go&&S.mode==='drawn'?300:120);};
 $('widthNum').addEventListener('input',rerender);
 let lastUnit='in';
 $('unit').addEventListener('change',()=>{const f=UNIT[lastUnit]/UNIT[$('unit').value];lastUnit=$('unit').value;

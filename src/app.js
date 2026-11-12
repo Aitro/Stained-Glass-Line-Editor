@@ -75,16 +75,23 @@ function prepare(){if(!S.src)return;
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
 function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
-  lines:linesForWorker()};}
+  lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
+// A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
+// and circles); Even width only keeps every line exactly as drawn and just changes its width. Fix lines works
+// with either, and on a picture not yet redrawn it uses Even width only. Either can be switched to at any time;
+// from then on every change to the settings or fixes redraws it as before.
 function waitForGo(){S.view='original';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='original')));
-  $('levelBtn').hidden=false;$('fixBtn').disabled=true;['savePng','saveSvg','saveDxf'].forEach(id=>$(id).disabled=true);showView();
-  setStatus('Ready: press Level lines',false);}
-$('levelBtn').addEventListener('click',()=>{S.go=true;$('levelBtn').hidden=true;$('fixBtn').disabled=false;S.view='result';
-  document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));run();});
+  showMode();['savePng','saveSvg','saveDxf'].forEach(id=>$(id).disabled=true);showView();
+  setStatus('Ready: choose Level lines or Even width only',false);}
+function showMode(){$('levelBtn').setAttribute('aria-pressed',String(S.go&&S.mode==='level'));$('drawnBtn').setAttribute('aria-pressed',String(S.go&&S.mode==='drawn'));
+  const off=S.go&&S.mode==='drawn';['smooth','exactShapes','squareUp'].forEach(id=>{$(id).disabled=off;const r=$(id).closest('.slider-row,.check');if(r)r.classList.toggle('is-off',off);});}
+function setMode(mode){const was=S.go&&S.mode;S.go=true;S.mode=mode;showMode();if(was===mode)return;
+  if(S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));}
+  setStatus('Working…',true);schedule(run,0);}
+$('levelBtn').addEventListener('click',()=>setMode('level'));
+$('drawnBtn').addEventListener('click',()=>setMode('drawn'));
 function schedule(fn,ms){clearTimeout(timer);timer=setTimeout(fn,ms);}
-// (a new picture is only shown at first; nothing is redrawn until Level lines is pressed, and from then on every
-// change to the settings or fixes redraws it as before)
 function run(){if(!S.work)return;if(!S.go){waitForGo();return;}if(S.running){S.pending=true;return;}S.running=true;S.runId++;setStatus('Working…',true);
   worker.postMessage({type:'run',id:S.runId,params:params()});}
 
@@ -885,7 +892,7 @@ function setAreaMode(on){if(!on&&S.areaPending)S.areaPending=null;S.areaMode=on;
   $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
 S.areaFlip='lr';$('fixAreaFlip').addEventListener('change',e=>{S.areaFlip=e.target.value;});
 $('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;S.symPending=null;if(S.drawMode)setDrawMode(false);setAreaMode(!S.areaMode);});
-$('fixBtn').addEventListener('click',()=>{S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);setDrawMode(false);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
+$('fixBtn').addEventListener('click',()=>{if(!S.go&&!S.fixMode)setMode('drawn');S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);setDrawMode(false);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
   if(S.fixMode&&S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));showView();}
   closeFixPop();drawFixLayer();updateFixBar();});
 // (only drags changed: redraw straight away; anything else: the program runs again)
@@ -897,7 +904,7 @@ $('view').addEventListener('load',()=>{placeFixLayer();drawFixLayer();});
 window.addEventListener('resize',()=>{placeFixLayer();});
 
 // ---- controls ----
-const rerender=()=>{updateLabels();schedule(render,120);};
+const rerender=()=>{updateLabels();schedule(S.go&&S.mode==='drawn'?run:render,S.go&&S.mode==='drawn'?300:120);};
 $('widthNum').addEventListener('input',rerender);
 let lastUnit='in';
 $('unit').addEventListener('change',()=>{const f=UNIT[lastUnit]/UNIT[$('unit').value];lastUnit=$('unit').value;

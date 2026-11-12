@@ -108,7 +108,10 @@
         <button data-view="overlay" aria-pressed="false">Overlay</button>
         <button data-view="compare" aria-pressed="false" title="Drag across the picture to compare the original with the new lines">Compare</button>
       </div>
-      <button id="levelBtn" class="primary" title="Redraw the lines at one even width">Level lines</button>
+      <div class="mode-pair" role="group" aria-label="How to redraw the lines">
+        <button id="levelBtn" class="fix-btn" aria-pressed="false" title="Redraw every line at one even width, smoothing curves, tidying joints and making straight lines and circles exact">Level lines</button>
+        <button id="drawnBtn" class="fix-btn" aria-pressed="false" title="Keep every line exactly where and how it was drawn, and only change its width">Even width only</button>
+      </div>
       <button id="fixBtn" class="fix-btn" aria-pressed="false" title="Click a junction or a spot on a line to choose how it should look">Fix lines</button>
       <div class="status" id="status"><span class="dot"></span><span id="statusText">Ready</span></div>
       <div class="seg" role="group" aria-label="Zoom">

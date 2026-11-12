@@ -72,7 +72,8 @@ function process(p){
   // close gaps narrower than ~2/3 of a line width (hollow or skipping marker strokes),
   // using distance maps: grow the lines by r, then shrink them back by r
   // (not for colored patterns: they are clean drawings where every gap, however thin, is glass)
-  if(!colorIn){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
+  // (and not for Even width only: lines are kept as drawn, gaps and all)
+  if(!colorIn&&!p.asDrawn){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
     for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
     // pixels outside the image count as paper so the outer border is not pulled inward
@@ -104,7 +105,7 @@ function process(p){
 
   say('Tracing curves…');
   const dmap=new Float32Array(W*H);for(let i=0;i<W*H;i++)dmap[i]=Math.sqrt(dbg2[i]);dbg2=null;
-  const built=buildStrokes(sk,u,med,dmap,p.smooth,say,p);const strokes=built.strokes;
+  const built=p.asDrawn?traceAsDrawn(sk,u,dmap,p):buildStrokes(sk,u,med,dmap,p.smooth,say,p);const strokes=built.strokes;
   const fl=[],fo=[0],cl=[],co=[0];for(const f of built.fillets){for(const q of f.fill)fl.push(q[1]+0.5,q[0]+0.5);fo.push(fl.length/2);for(const q of f.curve)cl.push(q[1]+0.5,q[0]+0.5);co.push(cl.length/2);}
   const flat=[],offs=[0],hwf=[];
   // the original line's half-width at each point (largest distance-to-paper nearby), with a running
