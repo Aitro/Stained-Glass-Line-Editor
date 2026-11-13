@@ -74,7 +74,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
   lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
 // A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
@@ -289,7 +289,7 @@ function showStats(geo){const s=S.stats;if(!s||!S.offs||S.offs.length<2){['sThin
 // ---- fix lines: the user's own choices at junctions and along lines ----
 // A fix is kept in the source picture's own pixels, so it stays put when the size or line width changes,
 // and it is remembered in this browser for the same picture.
-const PAGE_FIX=new Set(['drag','mirror','smooth','straight','fillet','joint']);   // fixes applied to the finished lines (no re-run needed)
+const PAGE_FIX=new Set(['drag','mirror','smooth','straight','fillet','joint','remove']);   // fixes applied to the finished lines (no re-run needed)
 const FIXCOL=['#d2392c','#1f6fd1','#e08a00','#7b3fbf','#13917b','#c2185b','#5d6b70'];
 function srcToWork(sx,sy){const cr=S.crop;return[(sx-cr.x+PAD)*S.sx-0.5,(sy-cr.y+PAD)*S.sy-0.5];}   // -> worker's own x,y
 function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)/S.sy+cr.y-PAD];}
@@ -409,6 +409,7 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
   {const FSEL=z=>near.some(f=>f.mode==='fillet'&&f.size===z);h+=`<div class="row"><span class="row-label">Rounded corner:</span>${["small","medium","large"].map(z=>`<button data-fillet="${z}" aria-pressed="${FSEL(z)}">${z}</button>`).join("")}</div>`;}
   h+=`<button data-act="smooth" aria-pressed="${near.some(f=>f.mode==='smooth')}">Smooth this line (one even curve between its joints)</button>`;
   h+=`<button data-act="straight" aria-pressed="${near.some(f=>f.mode==='straight')}">Straighten this line (between its joints)</button>`;
+  h+=`<button data-act="remove">Remove this line (between its joints)</button>`;
   h+=`<button data-act="joint" aria-pressed="${near.some(f=>f.mode==='joint')}">Add a joint here (Smooth and Straighten then stop at it)</button>`;
   h+=`<button data-act="mirror" aria-pressed="${near.some(f=>f.mode==='mirror')}">Mirror the matching line from the other side…</button>`;
   const areasHere=S.fixes.filter(f=>{if(f.mode!=='area')return false;const b=areaPageBox(f);return px>b[0]&&px<b[2]&&py>b[1]&&py<b[3];});
@@ -428,7 +429,8 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
     // (each choice replaces only fixes of its own kind here: a joint sits alongside the others and pressing it
     // again takes it away; Smooth or Straighten replaces a Smooth or Straighten of the same stretch only, so
     // the stretches on either side of a joint keep theirs; Automatic takes everything here away)
-    if(act==='joint'){const had=near.filter(f=>f.mode==='joint');S.fixes=S.fixes.filter(f=>!had.includes(f));if(!had.length)S.fixes.push({sx,sy,mode:'joint'});}
+    if(act==='remove'){const mine=stretchAt(sx,sy);if(!S.fixes.some(f=>f.mode==='remove'&&stretchAt(f.sx,f.sy)===mine))S.fixes.push({sx,sy,mode:'remove'});}
+    else if(act==='joint'){const had=near.filter(f=>f.mode==='joint');S.fixes=S.fixes.filter(f=>!had.includes(f));if(!had.length)S.fixes.push({sx,sy,mode:'joint'});}
     else if(act==='auto')S.fixes=S.fixes.filter(f=>!near.includes(f));
     else{const kinds=act==='smooth'||act==='straight'?['smooth','straight']:['corner','round','fillet'];
       const mine=stretchAt(sx,sy),gone=S.fixes.filter(f=>kinds.includes(f.mode)&&(act==='smooth'||act==='straight'?stretchAt(f.sx,f.sy)===mine:near.includes(f)));
@@ -649,7 +651,25 @@ function inPoly(poly,x,y){let c=false;for(let i=0,j=poly.length-1;i<poly.length;
 function gripAt(poly){return[poly.reduce((t,q)=>t+q[0],0)/poly.length,poly.reduce((t,q)=>t+q[1],0)/poly.length];}
 function areaPageBox(f){const geo=pageGeom(),b=areaWorkBox(f),p=geo.map(b[0],b[1]),q=geo.map(b[2],b[3]);return[Math.min(p[0],q[0]),Math.min(p[1],q[1]),Math.max(p[0],q[0]),Math.max(p[1],q[1])];}
 function applyDrags(extra){if(!S.rawStrokes)return S.rawStrokes;const B={P:S.rawStrokes};S.offs=S.rawOffs;S.hw=S.rawHw;S.fill=S.rawFill;S.fcurve=S.rawFcurve;const ds=S.fixes.filter(f=>PAGE_FIX.has(f.mode));if(extra)ds.push(extra);if(!ds.length)return B.P;
-  const P=Float32Array.from(B.P);for(const d of ds){if(d.mode==='mirror')applyOneMirror(P,S.offs,d);else if(d.mode==='smooth'||d.mode==='straight')applyOneSmooth(P,S.offs,d);else if(d.mode==='fillet')applyOneFillet(P,S.offs,d);else if(d.mode==='drag')applyOneDrag(P,S.offs,d);}return P;}
+  const P=Float32Array.from(B.P);for(const d of ds){if(d.mode==='mirror')applyOneMirror(P,S.offs,d);else if(d.mode==='smooth'||d.mode==='straight')applyOneSmooth(P,S.offs,d);else if(d.mode==='fillet')applyOneFillet(P,S.offs,d);else if(d.mode==='drag')applyOneDrag(P,S.offs,d);}return removeLines(P,ds.filter(d=>d.mode==='remove'));}
+// (lines taken out: the stretch between two joints, or a whole ring, that each Remove fix points at. Done last,
+// on the lines as every other fix left them; the strokes either side of a removed stretch carry on as lines of
+// their own)
+function removeLines(P,rm){if(!rm.length)return P;const o=S.offs,n=o.length-1,lw=Math.max(2,widthIn()*S.workPPI),K=stretchTools(P,o,lw),cut=[];
+  for(const f of rm){const[tx,ty]=outPos(...srcToWork(f.sx,f.sy));let bs=-1,bi=-1,bd=3*lw;
+    for(let s=0;s<n;s++)for(let i=o[s];i<o[s+1];i++){const d=Math.hypot(P[2*i]-tx,P[2*i+1]-ty);if(d<bd){bd=d;bs=s;bi=i;}}
+    if(bs<0)continue;const[lo,hi]=K.piece(bs,bi);cut.push([bs,lo,hi]);}
+  if(!cut.length)return P;
+  const drop=new Uint8Array(P.length/2);for(const[,lo,hi]of cut)for(let i=lo+1;i<hi;i++)drop[i]=1;
+  // (a stretch's own two end points belong to the joints there, unless the whole line goes)
+  for(const[s,lo,hi]of cut)if(lo===o[s]&&hi===o[s+1]-1){drop[lo]=1;drop[hi]=1;}
+  const NP=[],NH=[],NO=[0],H=S.hw;
+  for(let s=0;s<n;s++){let run=[];const flush=()=>{if(run.length>=2){for(const i of run){NP.push(P[2*i],P[2*i+1]);NH.push(H?H[i]:0);}NO.push(NP.length/2);}run=[];};
+    for(let i=o[s];i<o[s+1];i++){if(drop[i]){flush();continue;}
+      // (a removed stretch's end point stays on both sides' strokes: it is the joint)
+      run.push(i);const nxtGone=i+1<o[s+1]&&drop[i+1]&&cut.some(([cs,lo])=>cs===s&&lo===i);if(nxtGone){flush();}}
+    flush();}
+  S.offs=Int32Array.from(NO);S.hw=Float32Array.from(NH);return Float32Array.from(NP);}
 function redrawDrags(){if(!S.rawStrokes)return;S.strokes=applyDrags();ptsCache=null;markBorder();render();drawFixLayer();}
 // pointer handling on the layer: a press that doesn't move is a click (menus); one that moves is a drag
 var press=null;
@@ -934,6 +954,7 @@ $('thresh').addEventListener('input',()=>{$('threshAuto').checked=false;updateLa
 $('threshAuto').addEventListener('change',()=>{if($('threshAuto').checked)$('thresh').value=S.otsu;updateLabels();schedule(run,0);});
 $('smooth').addEventListener('input',()=>{updateLabels();schedule(run,350);});
 $('invert').addEventListener('change',()=>{if(S.src){findCrop();prepare();}});
+$('dropText').addEventListener('change',()=>schedule(run,0));
 $('exactShapes').addEventListener('change',()=>{$('squareUp').disabled=!$('exactShapes').checked;schedule(run,0);});
 $('squareUp').addEventListener('change',()=>schedule(run,0));
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{S.view=b.dataset.view;

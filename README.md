@@ -33,6 +33,7 @@ Fixing a spot by hand:
 - **Drag** a line to reshape it: the line bends toward where you drag, easing off along the line on either side. **Drag reach** (under the preview) sets how far along the line the pull goes. A straight line stays straight (it pivots, or moves as a whole). Drag a junction dot to move the junction; every line meeting there follows. Lines that end on a line you move stay attached to it.
 - Clicking right on a joint (a dot) opens the joint menu; clicking a line anywhere else, even close to a joint, opens the line menu.
 - **Smooth this line** / **Straighten this line**: click a line and pick one. The stretch between its joints becomes one even curve, or a ruler-straight line, between the same ends; an end resting near the point of another line (the bottom of a V) moves onto that point. Set **Drag reach** to **whole line** to drag a whole stretch between its joints as one piece.
+- **Remove this line**: click a line and pick **Remove this line (between its joints)**. That stretch is taken out of the result (handy for little circles inside circles that can't be cut in glass). The picture itself is not changed; Undo or Automatic brings it back.
 - **Add a joint here**: click a line and add a joint; Smooth and Straighten then stop at it, so you can smooth a short section. Click the joint again to remove it.
 - **Make symmetric…**: copies one half of the whole pattern onto the other, flipped. Pick left onto right, right onto left, top onto bottom or bottom onto top; the half that will be replaced is shaded and the dashed centre line is where the program found the drawing's middle. If it's off, drag the line (or its **+**) sideways first, then **Apply**. Lines running along the centre line stay whole. Press **Make symmetric…** again to change or remove it, or use Undo.
 - **Tidy all lines…**: looks over every stretch of line between its joints. Nearly straight ones (never more than about half a lead width off the ruler line) are marked green to straighten; nearly even curves (smoothing would move them less than a lead width) are marked blue to smooth. Lines with real shape, and stretches you already straightened or smoothed, are left alone. Click a marked line to leave it out, then **Apply** (or Enter); Esc or Cancel changes nothing. They go in as ordinary Straighten and Smooth fixes, so one Undo takes them all out.
@@ -50,6 +51,7 @@ Fixing a spot by hand:
 Optional:
 - **Border line position**: where the new border line sits. *Centered* (the default) puts it on the middle of the original border, which is where you cut. *Outer edge* and *Inner edge* line it up with the outside or inside of the original border instead.
 - **Give the outer border its own width** for a zinc or wide lead border.
+- **Cleanup → Remove numbers and labels** (on by default): piece numbers and small writing drawn thinner than the lines are taken out before tracing. Turn it off if a pattern's real lines are very fine and some go missing.
 - **Cleanup → Curve smoothing** for patterns with rough or shaky lines.
 - **Cleanup → Dark cutoff** if faint lines are missed or smudges are picked up.
 - **Cleanup → Make straight lines and circles exact** (on by default): lines drawn straight come out perfectly straight and circles perfectly circular.
@@ -92,6 +94,7 @@ python3 build.py
 | `src/styles.css` | Colors, fonts and layout |
 | `src/app.js` | The page's behavior: opening a picture, sizing, the preview, saving PNG/SVG |
 | `src/worker/01-image.js` | Reading the picture: dark/light cutoff, speck removal, thinning lines to their centers |
+| `src/worker/10-text.js` | Taking out piece numbers and labels (Cleanup: **Remove numbers and labels**) |
 | `src/worker/02-filters.js` | Smoothing filters |
 | `src/worker/03-process.js` | One run from picture to lines |
 | `src/worker/04-geometry.js` | Small geometry helpers |

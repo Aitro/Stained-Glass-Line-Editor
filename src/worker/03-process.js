@@ -62,6 +62,8 @@ function process(p){
   // lines drawn by hand, as wide as the picture's own lines
   const lines=Array.isArray(p.lines)?p.lines.filter(L=>L&&[L.ax,L.ay,L.bx,L.by].every(isFinite)):[];
   if(lines.length){const lw=inkWidth(m);for(const L of lines)drawSeg(m,L.ax,L.ay,L.bx,L.by,lw/2);}
+  // numbers and labels written in the pieces: small separate bits of ink drawn much thinner than the lines
+  if(p.dropText!==false)dropText(m);
   // estimate typical line thickness from ridge of distance map
   const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;
   let dbg=edt(bg);const ridge=[];
