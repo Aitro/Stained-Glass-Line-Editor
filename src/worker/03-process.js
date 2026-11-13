@@ -110,6 +110,9 @@ function process(p){
   const dmap=new Float32Array(W*H);for(let i=0;i<W*H;i++)dmap[i]=Math.sqrt(dbg2[i]);dbg2=null;
   const built=p.asDrawn?traceAsDrawn(sk,u,dmap,p):buildStrokes(sk,u,med,dmap,p.smooth,say,p);
   if(p.keepGaps&&!p.asDrawn)uncross(built.strokes,traceAsDrawn(sk,u,dmap,{}).strokes,med);
+  if(p.keepGaps&&!p.asDrawn)built.strokes=reachLines(built.strokes,med);
+  if(p.dropIslands!==false)built.strokes=dropIslands(built.strokes,med);
+  if(!p.asDrawn)built.strokes=roundTouches(built.strokes,med);
   const strokes=built.strokes;
   const fl=[],fo=[0],cl=[],co=[0];for(const f of built.fillets){for(const q of f.fill)fl.push(q[1]+0.5,q[0]+0.5);fo.push(fl.length/2);for(const q of f.curve)cl.push(q[1]+0.5,q[0]+0.5);co.push(cl.length/2);}
   const flat=[],offs=[0],hwf=[];
@@ -198,17 +201,19 @@ function closeGapsKept(m,fill,r){
   const N=W*H,open=new Uint8Array(N);for(let i=0;i<N;i++)open[i]=m[i]||fill[i]?0:1;
   const dw=edt(open);
   // the paper, in separate pieces, each with the widest spot it has
-  const lab=new Int32Array(N),st=new Int32Array(N),wide=[0];let nl=0;
-  for(let s=0;s<N;s++){if(!open[s]||lab[s])continue;nl++;let sp=0,mx=0;st[sp++]=s;lab[s]=nl;
-    while(sp){const i=st[--sp];if(dw[i]>mx)mx=dw[i];const x=i%W,y=(i/W)|0;
+  const lab=new Int32Array(N),st=new Int32Array(N),wide=[0],area=[0];let nl=0;
+  for(let s=0;s<N;s++){if(!open[s]||lab[s])continue;nl++;let sp=0,mx=0,n=0;st[sp++]=s;lab[s]=nl;
+    while(sp){const i=st[--sp];n++;if(dw[i]>mx)mx=dw[i];const x=i%W,y=(i/W)|0;
       if(x>0&&open[i-1]&&!lab[i-1]){lab[i-1]=nl;st[sp++]=i-1;}if(x<W-1&&open[i+1]&&!lab[i+1]){lab[i+1]=nl;st[sp++]=i+1;}
       if(y>0&&open[i-W]&&!lab[i-W]){lab[i-W]=nl;st[sp++]=i-W;}if(y<H-1&&open[i+W]&&!lab[i+W]){lab[i+W]=nl;st[sp++]=i+W;}}
-    wide.push(mx);}
-  const need=(1.5*r)*(1.5*r),seen=new Uint8Array(N),cells=[];
+    wide.push(mx);area.push(n);}
+  const need=(1.5*r)*(1.5*r),small=Math.pow(8*r/0.33,2),seen=new Uint8Array(N),cells=[];
   for(let s=0;s<N;s++){if(!fill[s]||seen[s])continue;let sp=0;cells.length=0;st[sp++]=s;seen[s]=1;const near=new Set();
     while(sp){const i=st[--sp];cells.push(i);const x=i%W,y=(i/W)|0;
       for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const j=Y*W+X;
         if(fill[j]){if(!seen[j]){seen[j]=1;st[sp++]=j;}}else if(open[j])near.add(lab[j]);}}
-    let keep=near.size===0;
+    // (the tip of a small piece, such as the little windows of a church, is still filled: a small piece's tip is
+    // too tight for its lines to be told apart)
+    let keep=near.size===0||(near.size===1&&area[[...near][0]]<small);
     if(near.size>=2){keep=true;for(const l of near)if(wide[l]<need){keep=false;break;}}
     if(keep)for(const i of cells)m[i]=1;}}

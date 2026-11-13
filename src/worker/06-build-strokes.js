@@ -76,7 +76,10 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const mid=thk.slice(Math.floor(thk.length*.2),Math.ceil(thk.length*.8)).sort((p,q)=>p-q);
       const doubled=mid.length>0&&mid[0]>=1.2&&mid[mid.length>>1]>=1.3;
       const pairDev=Math.max(angDeg(neg(da[0]),db[bp]),angDeg(neg(da[1]),db[1-bp]));   // both lines must run straight through
-      if(best<60&&pairDev<=20&&spread>8&&along<60&&doubled){union(A,B);edges.splice(i,1);changed=true;break;}}}
+      // (Keep narrow gaps: a curve that touches a straight line, such as a border, and runs along it for a moment before
+      // turning away: the straight line runs on through, so the two joints are one, even though the curve bends there)
+      const kiss=opt.keepGaps&&doubled&&[0,1].some(q=>angDeg(neg(da[q]),db[q?1-bp:bp])<=10&&angDeg(neg(da[q]),link)<25);
+      if((best<60&&pairDev<=20&&spread>8&&along<60&&doubled)||kiss){union(A,B);edges.splice(i,1);changed=true;break;}}}
   // a V whose tip sits on another line through a very short stub (the two sides of a petal meeting
   // right at the line): the sides meet the line itself, at one point
   {const inc0=incident();
