@@ -52,6 +52,7 @@ Optional:
 - **Border line position**: where the new border line sits. *Centered* (the default) puts it on the middle of the original border, which is where you cut. *Outer edge* and *Inner edge* line it up with the outside or inside of the original border instead.
 - **Give the outer border its own width** for a zinc or wide lead border.
 - **Cleanup → Remove numbers and labels** (on by default): piece numbers and small writing drawn thinner than the lines are taken out before tracing. Turn it off if a pattern's real lines are very fine and some go missing.
+- **Cleanup → Keep narrow gaps between lines** (off by default): for clean, crowded drawings such as Starry Night. Lines drawn close together and the thin tips of pieces are traced as drawn instead of being run together, and a line that would cross another just before its end stops on it instead. Leave it off for scans with broken or hollow lines, which it would no longer close up.
 - **Cleanup → Curve smoothing** for patterns with rough or shaky lines.
 - **Cleanup → Dark cutoff** if faint lines are missed or smudges are picked up.
 - **Cleanup → Make straight lines and circles exact** (on by default): lines drawn straight come out perfectly straight and circles perfectly circular.
@@ -95,6 +96,7 @@ python3 build.py
 | `src/app.js` | The page's behavior: opening a picture, sizing, the preview, saving PNG/SVG |
 | `src/worker/01-image.js` | Reading the picture: dark/light cutoff, speck removal, thinning lines to their centers |
 | `src/worker/10-text.js` | Taking out piece numbers and labels (Cleanup: **Remove numbers and labels**) |
+| `src/worker/11-uncross.js` | Keep narrow gaps: lines that cross just before their end stop on the line they cross |
 | `src/worker/02-filters.js` | Smoothing filters |
 | `src/worker/03-process.js` | One run from picture to lines |
 | `src/worker/04-geometry.js` | Small geometry helpers |

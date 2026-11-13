@@ -278,6 +278,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
           <label class="check"><input id="threshAuto" type="checkbox" checked><span>Pick the cutoff automatically</span></label>
           <label class="check"><input id="invert" type="checkbox"><span>Lines are light on a dark background</span></label>
           <label class="check"><input id="dropText" type="checkbox" checked><span>Remove numbers and labels<br><span class="hint">Small bits of ink written much thinner than the lines, like piece numbers, are left out</span></span></label>
+          <label class="check"><input id="keepGaps" type="checkbox"><span>Keep narrow gaps between lines<br><span class="hint">For clean, crowded drawings: lines drawn close together, and the thin tips of pieces, are traced as drawn instead of being run together. Leave off for scans with broken or hollow lines</span></span></label>
           <label class="check"><input id="exactShapes" type="checkbox" checked><span>Make straight lines and circles exact</span></label>
           <label class="check"><input id="squareUp" type="checkbox" checked><span>Square up the panel<br><span class="hint">Lines that are nearly level or upright become exactly level or upright, so the border has true right angles and sits straight on the page</span></span></label>
           <label class="check"><input id="transparent" type="checkbox"><span>Save PNG with a transparent background</span></label>
@@ -481,8 +482,9 @@ function process(p){
     for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
     // pixels outside the image count as paper so the outer border is not pulled inward
-    const d2=edt(notd);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
-      const edge=Math.min(x+1,y+1,W-x,H-y);if(!m[i]&&d2[i]>r2&&edge*edge>r2)m[i]=1;}}
+    const d2=edt(notd);const fill=new Uint8Array(W*H);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
+      const edge=Math.min(x+1,y+1,W-x,H-y);if(!m[i]&&d2[i]>r2&&edge*edge>r2)fill[i]=1;}
+    if(p.keepGaps)closeGapsKept(m,fill,r);else for(let i=0;i<W*H;i++)if(fill[i])m[i]=1;}
   removeSmall(m,1,Math.round(40*u*u),true,false);
   removeSmall(m,0,Math.round(4*u*u),false,true);
   say('Finding line centers…');
@@ -509,7 +511,9 @@ function process(p){
 
   say('Tracing curves…');
   const dmap=new Float32Array(W*H);for(let i=0;i<W*H;i++)dmap[i]=Math.sqrt(dbg2[i]);dbg2=null;
-  const built=p.asDrawn?traceAsDrawn(sk,u,dmap,p):buildStrokes(sk,u,med,dmap,p.smooth,say,p);const strokes=built.strokes;
+  const built=p.asDrawn?traceAsDrawn(sk,u,dmap,p):buildStrokes(sk,u,med,dmap,p.smooth,say,p);
+  if(p.keepGaps&&!p.asDrawn)uncross(built.strokes,traceAsDrawn(sk,u,dmap,{}).strokes,med);
+  const strokes=built.strokes;
   const fl=[],fo=[0],cl=[],co=[0];for(const f of built.fillets){for(const q of f.fill)fl.push(q[1]+0.5,q[0]+0.5);fo.push(fl.length/2);for(const q of f.curve)cl.push(q[1]+0.5,q[0]+0.5);co.push(cl.length/2);}
   const flat=[],offs=[0],hwf=[];
   // the original line's half-width at each point (largest distance-to-paper nearby), with a running
@@ -587,6 +591,30 @@ function symAxis(mask,flip){const f=Math.max(1,Math.round(Math.max(W,H)/500)),w=
       if(sc>best+1e-9){best=sc;ang=a;if(flip==='tb')cy=c;else cx=c;}}}
   const u=flip==='tb'?[Math.cos(ang),Math.sin(ang)]:[-Math.sin(ang),Math.cos(ang)];
   return{cx:(cx+0.5)*f-0.5,cy:(cy+0.5)*f-0.5,u,match:best,base};}
+
+// Cleanup -> Keep narrow gaps: which of the gaps found above really are gaps. Each patch of white the closing would
+// fill is filled only when it is a hole inside a line (a hollow marker stroke: no paper next to it) or when it cuts
+// across a line between two open pieces of glass (a break in the ink). A patch with paper on one side only is the thin
+// tip of a piece, and one that cuts off a strip narrower than a lead line is the narrow white between two lines drawn
+// close together: both are the drawing's own shape, so they stay as drawn.
+function closeGapsKept(m,fill,r){
+  const N=W*H,open=new Uint8Array(N);for(let i=0;i<N;i++)open[i]=m[i]||fill[i]?0:1;
+  const dw=edt(open);
+  // the paper, in separate pieces, each with the widest spot it has
+  const lab=new Int32Array(N),st=new Int32Array(N),wide=[0];let nl=0;
+  for(let s=0;s<N;s++){if(!open[s]||lab[s])continue;nl++;let sp=0,mx=0;st[sp++]=s;lab[s]=nl;
+    while(sp){const i=st[--sp];if(dw[i]>mx)mx=dw[i];const x=i%W,y=(i/W)|0;
+      if(x>0&&open[i-1]&&!lab[i-1]){lab[i-1]=nl;st[sp++]=i-1;}if(x<W-1&&open[i+1]&&!lab[i+1]){lab[i+1]=nl;st[sp++]=i+1;}
+      if(y>0&&open[i-W]&&!lab[i-W]){lab[i-W]=nl;st[sp++]=i-W;}if(y<H-1&&open[i+W]&&!lab[i+W]){lab[i+W]=nl;st[sp++]=i+W;}}
+    wide.push(mx);}
+  const need=(1.5*r)*(1.5*r),seen=new Uint8Array(N),cells=[];
+  for(let s=0;s<N;s++){if(!fill[s]||seen[s])continue;let sp=0;cells.length=0;st[sp++]=s;seen[s]=1;const near=new Set();
+    while(sp){const i=st[--sp];cells.push(i);const x=i%W,y=(i/W)|0;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const j=Y*W+X;
+        if(fill[j]){if(!seen[j]){seen[j]=1;st[sp++]=j;}}else if(open[j])near.add(lab[j]);}}
+    let keep=near.size===0;
+    if(near.size>=2){keep=true;for(const l of near)if(wide[l]<need){keep=false;break;}}
+    if(keep)for(const i of cells)m[i]=1;}}
 function arclen(P){const L=new Float64Array(P.length);for(let i=1;i<P.length;i++)L[i]=L[i-1]+Math.hypot(P[i][0]-P[i-1][0],P[i][1]-P[i-1][1]);return L;}
 function at(P,d,L){L=L||arclen(P);const n=P.length;if(n===1)return[P[0][0],P[0][1]];d=Math.max(0,Math.min(d,L[n-1]));
   let lo=0,hi=n-1;while(hi-lo>1){const mid=(lo+hi)>>1;if(L[mid]<=d)lo=mid;else hi=mid;}
@@ -716,7 +744,15 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   const parent=new Map();cent.forEach((c,k)=>{if(k)parent.set(k,k);});
   const find=k=>{while(parent.get(k)!==k){parent.set(k,parent.get(parent.get(k)));k=parent.get(k);}return k;};
   const union=(a,b)=>{a=find(a);b=find(b);if(a!==b)parent.set(b,a);};
-  edges=edges.filter(E=>{if(!E.closed&&E.a!=null&&E.e!=null&&E.a!==E.e&&E.L[E.L.length-1]<2.5*u&&!isFreeLab(E.a)&&!isFreeLab(E.e)){union(E.a,E.e);return false;}return true;});
+  // (except the rung of an H: two lines running past each other that touch, the short link running straight across
+  // both of them; they stay two lines that touch, rather than becoming one crossing)
+  const isRung=(()=>{const at0=new Map();edges.forEach((E,i)=>{if(E.closed)return;[[0,E.a],[1,E.e]].forEach(([s,k])=>{if(k!=null){if(!at0.has(k))at0.set(k,[]);at0.get(k).push([i,s]);}});});
+    return E=>{const i=edges.indexOf(E),la=(at0.get(E.a)||[]).filter(([j])=>j!==i),lb=(at0.get(E.e)||[]).filter(([j])=>j!==i);if(la.length!==2||lb.length!==2)return false;
+      const P=E.P,lk=[P[P.length-1][0]-P[0][0],P[P.length-1][1]-P[0][1]],ln=Math.hypot(lk[0],lk[1]);if(ln<0.5*med)return false;const k=[lk[0]/ln,lk[1]/ln];
+      const ok=L=>{const d=L.map(([j,s])=>endDir(edges[j].P,s,u,edges[j].L)[1]);if(angDeg(d[0],d[1])<140)return false;
+        return d.every(v=>Math.abs(v[0]*k[0]+v[1]*k[1])<Math.cos(55*Math.PI/180));};
+      return ok(la)&&ok(lb);};})();
+  edges=edges.filter(E=>{if(!E.closed&&E.a!=null&&E.e!=null&&E.a!==E.e&&E.L[E.L.length-1]<2.5*u&&!isFreeLab(E.a)&&!isFreeLab(E.e)&&!isRung(E)){union(E.a,E.e);return false;}return true;});
   const incident=()=>{const inc=new Map();edges.forEach((E,i)=>{if(E.closed)return;[[0,E.a],[1,E.e]].forEach(([s,k])=>{if(k!=null){const r=find(k);if(!inc.has(r))inc.set(r,[]);inc.get(r).push([i,s]);}});});return inc;};
   // shallow crossings
   let changed=true;
@@ -1352,7 +1388,11 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   // a line closing in on another almost parallel (under 25 degrees) whose own aim would carry it more
   // than two and a half line widths along that line from their junction lands at the junction itself,
   // instead of running alongside it (the tip of a petal where a background line meets it)
-  const meet=(e,F,fallback)=>{const h=meet0(e,F,fallback);if(!fallback||!h||Math.hypot(h[0]-fallback[0],h[1]-fallback[1])<=2.5*med)return h;
+  // (and a landing reached only by crossing open paper is no landing: the line's end turns away before it, as where the
+  // leg of a narrow arch runs down beside a line into a long wedge of ink; it lands where the ink joins instead)
+  const overPaper=(a,h)=>{const L=Math.hypot(h[0]-a[0],h[1]-a[1]);let off=0;for(let t=0;t<=L;t+=1){const yy=Math.round(a[0]+(h[0]-a[0])*t/(L||1)),xx=Math.round(a[1]+(h[1]-a[1])*t/(L||1));
+      if(yy>=0&&xx>=0&&yy<H&&xx<W&&dmap[yy*W+xx]<0.5)off++;}return off>Math.max(3,0.5*med)&&off>0.5*L;};
+  const meet=(e,F,fallback)=>{let h=meet0(e,F,fallback);if(fallback&&h&&e.anchor&&Math.hypot(h[0]-fallback[0],h[1]-fallback[1])>2.5*med&&overPaper(e.anchor,h)&&!overPaper(e.anchor,fallback))h=fallback;if(!fallback||!h||Math.hypot(h[0]-fallback[0],h[1]-fallback[1])<=2.5*med)return h;
     let bi=0,bd=Infinity;F.forEach((f,q)=>{const d=Math.hypot(f[0]-h[0],f[1]-h[1]);if(d<bd){bd=d;bi=q;}});
     const a=F[Math.max(0,bi-4)],b=F[Math.min(F.length-1,bi+4)],t=[b[0]-a[0],b[1]-a[1]],tn=Math.hypot(t[0],t[1])||1;
     const ang=Math.asin(Math.min(1,Math.abs(e.dir[0]*t[1]-e.dir[1]*t[0])/tn))*180/Math.PI;if(ang>=25)return h;
@@ -1867,6 +1907,41 @@ function dropText(m){
     // (writing: small, never cut off by the picture's edge (a border line the scan clipped is thin but is lead), and more than a few line widths of it, so a line's rounded end or a corner's tip is not taken)
     const size=Math.max(x1-x0,y1-y0),edge=x0<=2||y0<=2||x1>=W-3||y1>=H-3;if(!edge&&!two&&size<=15*wLine&&size>=1.2*wLine&&cells.length>=wLine*wLine*0.6){for(const i of cells)m[i]=0;dropped++;}}
   return dropped;}
+// Where two traced lines cross close to the end of one of them (not at a joint), the drawing almost always has one
+// line ending on the other there, as where two lines run into a border through a wedge of ink. The line whose last
+// stretch past the crossing wanders off the lines as drawn (checked against the Change width only trace) is the one
+// that overshoots: it is cut at the crossing, so it ends on the other line.
+function uncross(strokes,drawn,med){
+  const mask=new Uint8Array(W*H);
+  for(const Q of drawn)for(let k=1;k<Q.length;k++){const a=Q[k-1],b=Q[k],n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])));
+    for(let t=0;t<=n;t++){const y=Math.round(a[0]+(b[0]-a[0])*t/n),x=Math.round(a[1]+(b[1]-a[1])*t/n);if(y>=0&&x>=0&&y<H&&x<W)mask[y*W+x]=1;}}
+  const dd=edt(mask);const dev=(y,x)=>{y=Math.round(y);x=Math.round(x);return(y>=0&&x>=0&&y<H&&x<W)?Math.sqrt(dd[y*W+x]):0;};
+  const len=(Q,i0,i1)=>{let L=0;for(let k=i0+1;k<=i1;k++)L+=Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]);return L;};
+  // (how far a stretch strays from the lines as drawn, on average)
+  const stray=(Q,i0,i1)=>{let s=0,n=0;for(let k=i0;k<=i1;k++){s+=dev(Q[k][0],Q[k][1]);n++;}return n?s/n:0;};
+  const near=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1])<3;
+  // (crossings found through a grid of the lines' segments, so long lines don't make it slow)
+  const crossings=()=>{const cell=16,G=new Map(),out=[],seen=new Set();
+    strokes.forEach((Q,si)=>{for(let k=1;k<Q.length;k++){const a=Q[k-1],b=Q[k];
+      for(let cy=Math.floor(Math.min(a[0],b[0])/cell);cy<=Math.floor(Math.max(a[0],b[0])/cell);cy++)for(let cx=Math.floor(Math.min(a[1],b[1])/cell);cx<=Math.floor(Math.max(a[1],b[1])/cell);cx++){
+        const key=cy*100000+cx;let L=G.get(key);if(!L)G.set(key,L=[]);L.push(si,k);}}});
+    G.forEach(L=>{for(let x=0;x<L.length;x+=2)for(let y=x+2;y<L.length;y+=2){let i=L[x],k=L[x+1],j=L[y],l=L[y+1];if(i===j)continue;if(i>j){[i,j]=[j,i];[k,l]=[l,k];}
+      const id=i+','+k+','+j+','+l;if(seen.has(id))continue;seen.add(id);const A=strokes[i],C=strokes[j],p=A[k-1],r=[A[k][0]-p[0],A[k][1]-p[1]],q=C[l-1],s2=[C[l][0]-q[0],C[l][1]-q[1]],den=r[0]*s2[1]-r[1]*s2[0];
+      if(Math.abs(den)<1e-9)continue;const t=((q[0]-p[0])*s2[1]-(q[1]-p[1])*s2[0])/den,v=((q[0]-p[0])*r[1]-(q[1]-p[1])*r[0])/den;if(t<=0||t>=1||v<=0||v>=1)continue;
+      out.push({i,k,j,l,X:[p[0]+t*r[0],p[1]+t*r[1]]});}});
+    return out;};
+  for(let pass=0;pass<8;pass++){let cut=false;
+    for(const{i,k,j,l,X}of crossings()){const A=strokes[i],C=strokes[j];
+      if([A[0],A[A.length-1],C[0],C[C.length-1]].some(e=>near(e,X)))continue;
+      // (each line's tail past the crossing, toward its nearer end)
+      const tail=(Q,m)=>{const toStart=len(Q,0,m-1)+Math.hypot(X[0]-Q[m-1][0],X[1]-Q[m-1][1]),toEnd=len(Q,m,Q.length-1)+Math.hypot(X[0]-Q[m][0],X[1]-Q[m][1]);
+        return toStart<toEnd?{start:true,L:toStart,dev:stray(Q,0,m-1)}:{start:false,L:toEnd,dev:stray(Q,m,Q.length-1)};};
+      const cand=[[i,k,tail(A,k)],[j,l,tail(C,l)]].filter(([,,T])=>T.L<=6*med&&T.dev>0.15*med);if(!cand.length)continue;
+      cand.sort((x,y)=>y[2].dev-x[2].dev);const[si,m,T]=cand[0];const Q=strokes[si];
+      if(T.start)strokes[si]=[X].concat(Q.slice(m));else strokes[si]=Q.slice(0,m).concat([X]);
+      cut=true;break;}
+    if(!cut)break;}
+  return strokes;}
 </script>
 
 <script>
@@ -1945,7 +2020,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,keepGaps:$('keepGaps').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
   lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
 // A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
@@ -1956,7 +2031,7 @@ function waitForGo(){S.view='original';document.querySelectorAll('[data-view]').
   showMode();['savePng','saveSvg','saveDxf'].forEach(id=>$(id).disabled=true);showView();
   setStatus('Ready: choose Level lines or Change width only',false);}
 function showMode(){$('levelBtn').setAttribute('aria-pressed',String(S.go&&S.mode==='level'));$('drawnBtn').setAttribute('aria-pressed',String(S.go&&S.mode==='drawn'));
-  const off=S.go&&S.mode==='drawn';['smooth','exactShapes','squareUp'].forEach(id=>{$(id).disabled=off;const r=$(id).closest('.slider-row,.check');if(r)r.classList.toggle('is-off',off);});}
+  const off=S.go&&S.mode==='drawn';['smooth','exactShapes','squareUp','keepGaps'].forEach(id=>{$(id).disabled=off;const r=$(id).closest('.slider-row,.check');if(r)r.classList.toggle('is-off',off);});}
 function setMode(mode){const was=S.go&&S.mode;S.go=true;S.mode=mode;showMode();if(was===mode)return;
   if(S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));}
   setStatus('Working…',true);schedule(run,0);}
@@ -2826,6 +2901,7 @@ $('threshAuto').addEventListener('change',()=>{if($('threshAuto').checked)$('thr
 $('smooth').addEventListener('input',()=>{updateLabels();schedule(run,350);});
 $('invert').addEventListener('change',()=>{if(S.src){findCrop();prepare();}});
 $('dropText').addEventListener('change',()=>schedule(run,0));
+$('keepGaps').addEventListener('change',()=>schedule(run,0));
 $('exactShapes').addEventListener('change',()=>{$('squareUp').disabled=!$('exactShapes').checked;schedule(run,0);});
 $('squareUp').addEventListener('change',()=>schedule(run,0));
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{S.view=b.dataset.view;

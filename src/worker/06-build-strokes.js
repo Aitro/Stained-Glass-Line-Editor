@@ -44,7 +44,15 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   const parent=new Map();cent.forEach((c,k)=>{if(k)parent.set(k,k);});
   const find=k=>{while(parent.get(k)!==k){parent.set(k,parent.get(parent.get(k)));k=parent.get(k);}return k;};
   const union=(a,b)=>{a=find(a);b=find(b);if(a!==b)parent.set(b,a);};
-  edges=edges.filter(E=>{if(!E.closed&&E.a!=null&&E.e!=null&&E.a!==E.e&&E.L[E.L.length-1]<2.5*u&&!isFreeLab(E.a)&&!isFreeLab(E.e)){union(E.a,E.e);return false;}return true;});
+  // (except the rung of an H: two lines running past each other that touch, the short link running straight across
+  // both of them; they stay two lines that touch, rather than becoming one crossing)
+  const isRung=(()=>{const at0=new Map();edges.forEach((E,i)=>{if(E.closed)return;[[0,E.a],[1,E.e]].forEach(([s,k])=>{if(k!=null){if(!at0.has(k))at0.set(k,[]);at0.get(k).push([i,s]);}});});
+    return E=>{const i=edges.indexOf(E),la=(at0.get(E.a)||[]).filter(([j])=>j!==i),lb=(at0.get(E.e)||[]).filter(([j])=>j!==i);if(la.length!==2||lb.length!==2)return false;
+      const P=E.P,lk=[P[P.length-1][0]-P[0][0],P[P.length-1][1]-P[0][1]],ln=Math.hypot(lk[0],lk[1]);if(ln<0.5*med)return false;const k=[lk[0]/ln,lk[1]/ln];
+      const ok=L=>{const d=L.map(([j,s])=>endDir(edges[j].P,s,u,edges[j].L)[1]);if(angDeg(d[0],d[1])<140)return false;
+        return d.every(v=>Math.abs(v[0]*k[0]+v[1]*k[1])<Math.cos(55*Math.PI/180));};
+      return ok(la)&&ok(lb);};})();
+  edges=edges.filter(E=>{if(!E.closed&&E.a!=null&&E.e!=null&&E.a!==E.e&&E.L[E.L.length-1]<2.5*u&&!isFreeLab(E.a)&&!isFreeLab(E.e)&&!isRung(E)){union(E.a,E.e);return false;}return true;});
   const incident=()=>{const inc=new Map();edges.forEach((E,i)=>{if(E.closed)return;[[0,E.a],[1,E.e]].forEach(([s,k])=>{if(k!=null){const r=find(k);if(!inc.has(r))inc.set(r,[]);inc.get(r).push([i,s]);}});});return inc;};
   // shallow crossings
   let changed=true;
@@ -680,7 +688,11 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   // a line closing in on another almost parallel (under 25 degrees) whose own aim would carry it more
   // than two and a half line widths along that line from their junction lands at the junction itself,
   // instead of running alongside it (the tip of a petal where a background line meets it)
-  const meet=(e,F,fallback)=>{const h=meet0(e,F,fallback);if(!fallback||!h||Math.hypot(h[0]-fallback[0],h[1]-fallback[1])<=2.5*med)return h;
+  // (and a landing reached only by crossing open paper is no landing: the line's end turns away before it, as where the
+  // leg of a narrow arch runs down beside a line into a long wedge of ink; it lands where the ink joins instead)
+  const overPaper=(a,h)=>{const L=Math.hypot(h[0]-a[0],h[1]-a[1]);let off=0;for(let t=0;t<=L;t+=1){const yy=Math.round(a[0]+(h[0]-a[0])*t/(L||1)),xx=Math.round(a[1]+(h[1]-a[1])*t/(L||1));
+      if(yy>=0&&xx>=0&&yy<H&&xx<W&&dmap[yy*W+xx]<0.5)off++;}return off>Math.max(3,0.5*med)&&off>0.5*L;};
+  const meet=(e,F,fallback)=>{let h=meet0(e,F,fallback);if(fallback&&h&&e.anchor&&Math.hypot(h[0]-fallback[0],h[1]-fallback[1])>2.5*med&&overPaper(e.anchor,h)&&!overPaper(e.anchor,fallback))h=fallback;if(!fallback||!h||Math.hypot(h[0]-fallback[0],h[1]-fallback[1])<=2.5*med)return h;
     let bi=0,bd=Infinity;F.forEach((f,q)=>{const d=Math.hypot(f[0]-h[0],f[1]-h[1]);if(d<bd){bd=d;bi=q;}});
     const a=F[Math.max(0,bi-4)],b=F[Math.min(F.length-1,bi+4)],t=[b[0]-a[0],b[1]-a[1]],tn=Math.hypot(t[0],t[1])||1;
     const ang=Math.asin(Math.min(1,Math.abs(e.dir[0]*t[1]-e.dir[1]*t[0])/tn))*180/Math.PI;if(ang>=25)return h;

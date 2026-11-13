@@ -79,8 +79,9 @@ function process(p){
     for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
     // pixels outside the image count as paper so the outer border is not pulled inward
-    const d2=edt(notd);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
-      const edge=Math.min(x+1,y+1,W-x,H-y);if(!m[i]&&d2[i]>r2&&edge*edge>r2)m[i]=1;}}
+    const d2=edt(notd);const fill=new Uint8Array(W*H);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
+      const edge=Math.min(x+1,y+1,W-x,H-y);if(!m[i]&&d2[i]>r2&&edge*edge>r2)fill[i]=1;}
+    if(p.keepGaps)closeGapsKept(m,fill,r);else for(let i=0;i<W*H;i++)if(fill[i])m[i]=1;}
   removeSmall(m,1,Math.round(40*u*u),true,false);
   removeSmall(m,0,Math.round(4*u*u),false,true);
   say('Finding line centers…');
@@ -107,7 +108,9 @@ function process(p){
 
   say('Tracing curves…');
   const dmap=new Float32Array(W*H);for(let i=0;i<W*H;i++)dmap[i]=Math.sqrt(dbg2[i]);dbg2=null;
-  const built=p.asDrawn?traceAsDrawn(sk,u,dmap,p):buildStrokes(sk,u,med,dmap,p.smooth,say,p);const strokes=built.strokes;
+  const built=p.asDrawn?traceAsDrawn(sk,u,dmap,p):buildStrokes(sk,u,med,dmap,p.smooth,say,p);
+  if(p.keepGaps&&!p.asDrawn)uncross(built.strokes,traceAsDrawn(sk,u,dmap,{}).strokes,med);
+  const strokes=built.strokes;
   const fl=[],fo=[0],cl=[],co=[0];for(const f of built.fillets){for(const q of f.fill)fl.push(q[1]+0.5,q[0]+0.5);fo.push(fl.length/2);for(const q of f.curve)cl.push(q[1]+0.5,q[0]+0.5);co.push(cl.length/2);}
   const flat=[],offs=[0],hwf=[];
   // the original line's half-width at each point (largest distance-to-paper nearby), with a running
@@ -185,3 +188,27 @@ function symAxis(mask,flip){const f=Math.max(1,Math.round(Math.max(W,H)/500)),w=
       if(sc>best+1e-9){best=sc;ang=a;if(flip==='tb')cy=c;else cx=c;}}}
   const u=flip==='tb'?[Math.cos(ang),Math.sin(ang)]:[-Math.sin(ang),Math.cos(ang)];
   return{cx:(cx+0.5)*f-0.5,cy:(cy+0.5)*f-0.5,u,match:best,base};}
+
+// Cleanup -> Keep narrow gaps: which of the gaps found above really are gaps. Each patch of white the closing would
+// fill is filled only when it is a hole inside a line (a hollow marker stroke: no paper next to it) or when it cuts
+// across a line between two open pieces of glass (a break in the ink). A patch with paper on one side only is the thin
+// tip of a piece, and one that cuts off a strip narrower than a lead line is the narrow white between two lines drawn
+// close together: both are the drawing's own shape, so they stay as drawn.
+function closeGapsKept(m,fill,r){
+  const N=W*H,open=new Uint8Array(N);for(let i=0;i<N;i++)open[i]=m[i]||fill[i]?0:1;
+  const dw=edt(open);
+  // the paper, in separate pieces, each with the widest spot it has
+  const lab=new Int32Array(N),st=new Int32Array(N),wide=[0];let nl=0;
+  for(let s=0;s<N;s++){if(!open[s]||lab[s])continue;nl++;let sp=0,mx=0;st[sp++]=s;lab[s]=nl;
+    while(sp){const i=st[--sp];if(dw[i]>mx)mx=dw[i];const x=i%W,y=(i/W)|0;
+      if(x>0&&open[i-1]&&!lab[i-1]){lab[i-1]=nl;st[sp++]=i-1;}if(x<W-1&&open[i+1]&&!lab[i+1]){lab[i+1]=nl;st[sp++]=i+1;}
+      if(y>0&&open[i-W]&&!lab[i-W]){lab[i-W]=nl;st[sp++]=i-W;}if(y<H-1&&open[i+W]&&!lab[i+W]){lab[i+W]=nl;st[sp++]=i+W;}}
+    wide.push(mx);}
+  const need=(1.5*r)*(1.5*r),seen=new Uint8Array(N),cells=[];
+  for(let s=0;s<N;s++){if(!fill[s]||seen[s])continue;let sp=0;cells.length=0;st[sp++]=s;seen[s]=1;const near=new Set();
+    while(sp){const i=st[--sp];cells.push(i);const x=i%W,y=(i/W)|0;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const j=Y*W+X;
+        if(fill[j]){if(!seen[j]){seen[j]=1;st[sp++]=j;}}else if(open[j])near.add(lab[j]);}}
+    let keep=near.size===0;
+    if(near.size>=2){keep=true;for(const l of near)if(wide[l]<need){keep=false;break;}}
+    if(keep)for(const i of cells)m[i]=1;}}

@@ -74,7 +74,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,keepGaps:$('keepGaps').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
   lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
 // A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
@@ -85,7 +85,7 @@ function waitForGo(){S.view='original';document.querySelectorAll('[data-view]').
   showMode();['savePng','saveSvg','saveDxf'].forEach(id=>$(id).disabled=true);showView();
   setStatus('Ready: choose Level lines or Change width only',false);}
 function showMode(){$('levelBtn').setAttribute('aria-pressed',String(S.go&&S.mode==='level'));$('drawnBtn').setAttribute('aria-pressed',String(S.go&&S.mode==='drawn'));
-  const off=S.go&&S.mode==='drawn';['smooth','exactShapes','squareUp'].forEach(id=>{$(id).disabled=off;const r=$(id).closest('.slider-row,.check');if(r)r.classList.toggle('is-off',off);});}
+  const off=S.go&&S.mode==='drawn';['smooth','exactShapes','squareUp','keepGaps'].forEach(id=>{$(id).disabled=off;const r=$(id).closest('.slider-row,.check');if(r)r.classList.toggle('is-off',off);});}
 function setMode(mode){const was=S.go&&S.mode;S.go=true;S.mode=mode;showMode();if(was===mode)return;
   if(S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));}
   setStatus('Working…',true);schedule(run,0);}
@@ -955,6 +955,7 @@ $('threshAuto').addEventListener('change',()=>{if($('threshAuto').checked)$('thr
 $('smooth').addEventListener('input',()=>{updateLabels();schedule(run,350);});
 $('invert').addEventListener('change',()=>{if(S.src){findCrop();prepare();}});
 $('dropText').addEventListener('change',()=>schedule(run,0));
+$('keepGaps').addEventListener('change',()=>schedule(run,0));
 $('exactShapes').addEventListener('change',()=>{$('squareUp').disabled=!$('exactShapes').checked;schedule(run,0);});
 $('squareUp').addEventListener('change',()=>schedule(run,0));
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{S.view=b.dataset.view;
