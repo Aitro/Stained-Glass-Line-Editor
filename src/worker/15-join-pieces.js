@@ -36,6 +36,14 @@ function joinPieces(m,dropBits){
       for(let h=0;h<comp.length;h++){const j=comp[h],y=(j/W)|0,x=j-y*W;if(d3[j]>mx)mx=d3[j];
         for(const k of[x>0?j-1:-1,x<W-1?j+1:-1,y>0?j-W:-1,y<H-1?j+W:-1])if(k>=0&&!m[k]&&out[k]&&!reach[k]&&!seen[k]){seen[k]=1;comp.push(k);}}
       if(mx<=lim&&comp.length<=maxArea){for(const j of comp)m[j]=1;filled+=comp.length;}}}
+  // (the outline round the outside of the design is widened outward by a channel's width, so a line that runs along
+  // a gap between two pieces and then on along the outside edge keeps the same place: the middle of the gap is a
+  // channel's half-width outside each piece, and so is the middle of the widened outline)
+  {const reach=new Uint8Array(N);sp=0;const sd=i=>{if(!m[i]&&!reach[i]){reach[i]=1;st[sp++]=i;}};
+    for(let x=0;x<W;x++){sd(x);sd((H-1)*W+x);}for(let y=0;y<H;y++){sd(y*W);sd(y*W+W-1);}
+    while(sp){const i=st[--sp],y=(i/W)|0,x=i-y*W;if(x>0)sd(i-1);if(x<W-1)sd(i+1);if(y>0)sd(i-W);if(y<H-1)sd(i+W);}
+    const dd=new Uint8Array(N);for(let i=0;i<N;i++)dd[i]=m[i]?1:0;const d4=edt(dd),gw=(2*mode)*(2*mode);
+    for(let i=0;i<N;i++)if(reach[i]&&d4[i]<=gw)m[i]=1;}
   // (shapes left on their own: joined to the nearest other line by a bar as wide as a channel)
   const lab=new Int32Array(N).fill(-1),size=[];let nl=0;
   for(let i=0;i<N;i++){if(!m[i]||lab[i]>=0)continue;let n=0;sp=0;st[sp++]=i;lab[i]=nl;
