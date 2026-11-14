@@ -122,7 +122,8 @@ function process(p){
   const built=p.asDrawn?traceAsDrawn(sk,u,dmap,p):buildStrokes(sk,u,med,dmap,p.smooth,say,p);
   if(p.keepGaps&&!p.asDrawn){const dr=traceAsDrawn(sk,u,dmap,{}).strokes;uncross(built.strokes,dr,med);built.strokes=followDrawn(built.strokes,dr,dmap,med);built.strokes=drawnEnds(built.strokes,skDrawn===sk?dr:traceAsDrawn(skDrawn,u,dmap,{}).strokes,dmap,med);}
   if(p.keepGaps&&!p.asDrawn)built.strokes=joinMerged(built.strokes,dmap,med);
-  if(p.keepGaps&&!p.asDrawn)built.strokes=reachLines(built.strokes,med);
+  if((p.keepGaps||p.joinPieces)&&!p.asDrawn)built.strokes=reachLines(built.strokes,med);
+  if(p.joinPieces&&!p.asDrawn&&!colorIn)built.strokes=dropDoubles(built.strokes,dmap,med);
   if(p.dropIslands!==false)built.strokes=dropIslands(built.strokes,med);
   if(!p.asDrawn)built.strokes=roundTouches(built.strokes,med,dmap,+p.newHalf);
   const strokes=built.strokes;
