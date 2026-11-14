@@ -75,6 +75,7 @@ function process(p){
   // using distance maps: grow the lines by r, then shrink them back by r
   // (not for colored patterns: they are clean drawings where every gap, however thin, is glass)
   // (and not for Change width only: lines are kept as drawn, gaps and all)
+  const m0=p.keepGaps&&!p.asDrawn&&!colorIn?m.slice():null;
   if(!colorIn&&!p.asDrawn){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
     for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
@@ -82,11 +83,12 @@ function process(p){
     const d2=edt(notd);const fill=new Uint8Array(W*H);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
       const edge=Math.min(x+1,y+1,W-x,H-y);if(!m[i]&&d2[i]>r2&&edge*edge>r2)fill[i]=1;}
     if(p.keepGaps)closeGapsKept(m,fill,r);else for(let i=0;i<W*H;i++)if(fill[i])m[i]=1;}
-  removeSmall(m,1,Math.round(40*u*u),true,false);
-  removeSmall(m,0,Math.round(4*u*u),false,true);
-  say('Finding line centers…');
+  // (thin a mask down to its one-pixel centre lines)
+  const skel=M=>{
+  removeSmall(M,1,Math.round(40*u*u),true,false);
+  removeSmall(M,0,Math.round(4*u*u),false,true);
   const PW=W+2,PH=H+2;const img=new Uint8Array(PW*PH);
-  for(let y=0;y<H;y++)for(let x=0;x<W;x++)img[(y+1)*PW+x+1]=m[y*W+x];
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++)img[(y+1)*PW+x+1]=M[y*W+x];
   thin(img,PW,PH);
   // remove staircase pixels: drop a pixel whose neighbours stay connected without it,
   // so ordinary line pixels have exactly two neighbours and only real junctions have three
@@ -99,6 +101,11 @@ function process(p){
       let comps=0;for(let i=0;i<on.length;i++)if(f(i)===i)comps++;
       if(comps===1&&on.length<=3)img[k]=0;}}
   const sk=new Uint8Array(W*H);for(let y=0;y<H;y++)for(let x=0;x<W;x++)sk[y*W+x]=img[(y+1)*PW+x+1];
+  return sk;};
+  say('Finding line centers…');
+  const sk=skel(m);
+  // (Keep narrow gaps also traces the lines exactly as drawn, gaps not closed, to check the levelled lines against)
+  const skDrawn=m0?skel(m0):sk;
   // stats: thickness sampled on the centerline
   for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;dbg=edt(bg);let dbg2=dbg;const th=[];
   for(let i=0;i<W*H;i++)if(sk[i])th.push(2*Math.sqrt(dbg[i])-1);th.sort((a,b)=>a-b);
@@ -109,10 +116,11 @@ function process(p){
   say('Tracing curves…');
   const dmap=new Float32Array(W*H);for(let i=0;i<W*H;i++)dmap[i]=Math.sqrt(dbg2[i]);dbg2=null;
   const built=p.asDrawn?traceAsDrawn(sk,u,dmap,p):buildStrokes(sk,u,med,dmap,p.smooth,say,p);
-  if(p.keepGaps&&!p.asDrawn){const dr=traceAsDrawn(sk,u,dmap,{}).strokes;uncross(built.strokes,dr,med);built.strokes=followDrawn(built.strokes,dr,dmap,med);}
+  if(p.keepGaps&&!p.asDrawn){const dr=traceAsDrawn(sk,u,dmap,{}).strokes;uncross(built.strokes,dr,med);built.strokes=followDrawn(built.strokes,dr,dmap,med);built.strokes=drawnEnds(built.strokes,skDrawn===sk?dr:traceAsDrawn(skDrawn,u,dmap,{}).strokes,dmap,med);}
+  if(p.keepGaps&&!p.asDrawn)built.strokes=joinMerged(built.strokes,dmap,med);
   if(p.keepGaps&&!p.asDrawn)built.strokes=reachLines(built.strokes,med);
   if(p.dropIslands!==false)built.strokes=dropIslands(built.strokes,med);
-  if(!p.asDrawn)built.strokes=roundTouches(built.strokes,med);
+  if(!p.asDrawn)built.strokes=roundTouches(built.strokes,med,dmap,+p.newHalf);
   const strokes=built.strokes;
   const fl=[],fo=[0],cl=[],co=[0];for(const f of built.fillets){for(const q of f.fill)fl.push(q[1]+0.5,q[0]+0.5);fo.push(fl.length/2);for(const q of f.curve)cl.push(q[1]+0.5,q[0]+0.5);co.push(cl.length/2);}
   const flat=[],offs=[0],hwf=[];

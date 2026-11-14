@@ -96,3 +96,132 @@ function followDrawn(strokes,drawn,dmap,med){
     const DQ=dense(Q);for(let i=0;i<out.length;i+=2){const q=out[i];let bd=1e18;for(let j=0;j<DQ.length;j+=2){const d=(DQ[j][0]-q[0])**2+(DQ[j][1]-q[1])**2;if(d<bd)bd=d;}if(bd>(1.0*med)**2)return Q;}
     return paperRun(out)<pr?out:Q;});}
 
+
+// Keep narrow gaps: a line that ends on another line ends where the drawing has it end.
+// ------------------------------------------------------------------------------------------------
+// Where two strips of lead run close together into a third line, or a strip bends round into a line it nearly
+// touches, the levelled line can take a short cut and end on the neighbour at the wrong spot (a little V where two
+// lines share one end, or a hook across the paper). The Change width only trace has the end in the right place: from
+// a point a few widths back, where both traces agree, the end is followed along the drawn lines to the first other
+// line they reach, and the line ends there instead.
+function drawnEnds(strokes,drawn,dmap,med){
+  const on=new Uint8Array(W*H);
+  for(const Q of drawn)for(let k=1;k<Q.length;k++){const a=Q[k-1],b=Q[k],n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])));
+    for(let t=0;t<=n;t++){const y=Math.round(a[0]+(b[0]-a[0])*t/n),x=Math.round(a[1]+(b[1]-a[1])*t/n);if(y>=0&&x>=0&&y<H&&x<W)on[y*W+x]=1;}}
+  const dense=Q=>{const out=[Q[0]];for(let k=1;k<Q.length;k++){const a=Q[k-1],b=Q[k],n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])));for(let t=1;t<=n;t++)out.push([a[0]+(b[0]-a[0])*t/n,a[1]+(b[1]-a[1])*t/n]);}return out;};
+  const paper=P=>{let n=0;for(const q of P){const y=Math.round(q[0]),x=Math.round(q[1]);if(y>=0&&x>=0&&y<H&&x<W&&dmap[y*W+x]<0.5)n++;}return n;};
+  const nearOn=(p,R)=>{let best=-1,bd=1e9;const py=Math.round(p[0]),px=Math.round(p[1]);for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){const y=py+dy,x=px+dx;if(y<0||x<0||y>=H||x>=W||!on[y*W+x])continue;const d=dx*dx+dy*dy;if(d<bd){bd=d;best=y*W+x;}}return bd<=R*R?best:-1;};
+  // (nearest point on any line but this one)
+  const nearOther=(p,q,lim,skip)=>{let bd=lim*lim,bp=null,bs=-1,bt=null;for(let s=0;s<strokes.length;s++){if(s===q||(skip&&skip.has(s)))continue;const S=strokes[s];
+      for(let k=1;k<S.length;k++){const a=S[k-1],b=S[k],vy=b[0]-a[0],vx=b[1]-a[1],L2=vy*vy+vx*vx;let t=L2>0?((p[0]-a[0])*vy+(p[1]-a[1])*vx)/L2:0;t=Math.max(0,Math.min(1,t));
+        const y=a[0]+vy*t,x=a[1]+vx*t,d=(y-p[0])**2+(x-p[1])**2;if(d<bd){bd=d;bp=[y,x];bs=s;bt=[vy,vx];}}}return bp?{p:bp,s:bs,d:Math.sqrt(bd),t:bt}:null;};
+  const R1=Math.max(2,Math.ceil(0.25*med)),Rt=Math.max(2,0.3*med);
+  // (which line is near each pixel, so the walk can stop at the first other line it reaches)
+  const own=new Int32Array(W*H).fill(-1),two=new Uint8Array(W*H),Ri=Math.ceil(Rt);
+  for(let s=0;s<strokes.length;s++){if(!strokes[s]||strokes[s].length<2)continue;for(const p of dense(strokes[s])){const py=Math.round(p[0]),px=Math.round(p[1]);
+    for(let dy=-Ri;dy<=Ri;dy++)for(let dx=-Ri;dx<=Ri;dx++){if(dx*dx+dy*dy>Rt*Rt)continue;const y=py+dy,x=px+dx;if(y<0||x<0||y>=H||x>=W)continue;const j=y*W+x;
+      if(own[j]<0)own[j]=s;else if(own[j]!==s)two[j]=1;}}}
+  for(let q=0;q<strokes.length;q++)for(let side=0;side<2;side++){
+    let Q=strokes[q];if(!Q||Q.length<4)continue;if(side)Q=Q.slice().reverse();
+    const e=Q[0],F=nearOther(e,q,1.0*med);if(!F)continue; // (only a line that ends on another line)
+    // (cumulative length, and the anchor: the first point a few widths back where the line sits on the drawn trace for a width)
+    const cum=[0];for(let k=1;k<Q.length;k++)cum.push(cum[k-1]+Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]));
+    if(cum[cum.length-1]<8*med)continue;
+    // (the tip of a round shape resting on the other line, its two sides arriving from either hand, is left to the
+    // rounding of touches)
+    const arrive=S=>{const R=Math.hypot(S[0][0]-e[0],S[0][1]-e[1])<Math.hypot(S[S.length-1][0]-e[0],S[S.length-1][1]-e[1])?S:S.slice().reverse();
+      let L=0,k=0;while(k<R.length-1&&L<2*med){L+=Math.hypot(R[k+1][0]-R[k][0],R[k+1][1]-R[k][1]);k++;}return[R[0][0]-R[k][0],R[0][1]-R[k][1]];};
+    {const v=arrive(Q),cr=w=>w[0]*F.t[1]-w[1]*F.t[0];let tip=false;
+      // (the two sides one circle, its centre on their side of the line)
+      const round=(A,B,v)=>{const pts=[];for(const S of[A,B]){const R=Math.hypot(S[0][0]-e[0],S[0][1]-e[1])<Math.hypot(S[S.length-1][0]-e[0],S[S.length-1][1]-e[1])?S:S.slice().reverse();
+          let L=0;for(let k=1;k<R.length&&L<5*med;k++){L+=Math.hypot(R[k][0]-R[k-1][0],R[k][1]-R[k-1][1]);if(L>0.5*med)pts.push(R[k]);}}
+        let sx=0,sy=0,sxx=0,syy=0,sxy=0,sxz=0,syz=0,sz=0;const n=pts.length;if(n<8)return false;
+        for(const[y,x]of pts){const z=x*x+y*y;sx+=x;sy+=y;sxx+=x*x;syy+=y*y;sxy+=x*y;sxz+=x*z;syz+=y*z;sz+=z;}
+        const M=[[sxx,sxy,sx],[sxy,syy,sy],[sx,sy,n]],vv=[-sxz,-syz,-sz];const det=m=>m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1])-m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0])+m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);
+        const D=det(M);if(Math.abs(D)<1e-9)return false;const col=i=>M.map((r,j)=>r.map((c,k)=>k===i?vv[j]:c));
+        const cx=-det(col(0))/D/2,cy=-det(col(1))/D/2,r=Math.sqrt(Math.max(0,cx*cx+cy*cy-det(col(2))/D));if(r<1.5*med||r>40*med)return false;
+        let er=0;for(const[y,x]of pts)er=Math.max(er,Math.abs(Math.hypot(x-cx,y-cy)-r));if(er>0.35*med)return false;
+        return cr([cy-e[0],cx-e[1]])*cr(v)<0;};
+      for(let s2=0;s2<strokes.length;s2++){const S=strokes[s2];if(s2===q||!S||S.length<4)continue;
+        if(Math.min(Math.hypot(S[0][0]-e[0],S[0][1]-e[1]),Math.hypot(S[S.length-1][0]-e[0],S[S.length-1][1]-e[1]))>1.0*med)continue;
+        const w=arrive(S);if(v[0]*w[0]+v[1]*w[1]<0&&cr(v)*cr(w)>0&&round(Q,S,v))tip=true;}
+      if(tip)continue;}
+    let ai=-1;for(let k=1;k<Q.length;k++){if(cum[k]<3*med)continue;if(cum[k]>12*med||cum[cum.length-1]-cum[k]<3*med)break;
+      let ok=true;for(let j=k;j<Q.length&&cum[j]-cum[k]<1.5*med;j++)if(nearOn(Q[j],R1)<0){ok=false;break;}if(ok){ai=k;break;}}
+    if(ai<0)continue;
+    // (lines that end at this same point are not where it should end instead)
+    const sib=new Set();for(let s=0;s<strokes.length;s++){const S=strokes[s];if(s===q||!S||S.length<2)continue;for(const t of [S[0],S[S.length-1]])if(Math.hypot(t[0]-e[0],t[1]-e[1])<1.0*med)sib.add(s);}
+    const a0=nearOn(Q[ai],R1);
+    // (the rest of this line, widened, is out of bounds: the walk has to go toward the end)
+    const ban=new Set(),Rb=Math.ceil(0.5*med);let bi=ai;while(bi<Q.length-1&&cum[bi]-cum[ai]<1.5*med)bi++;for(const p of dense(Q.slice(bi))){const py=Math.round(p[0]),px=Math.round(p[1]);
+      for(let dy=-Rb;dy<=Rb;dy++)for(let dx=-Rb;dx<=Rb;dx++)if(dx*dx+dy*dy<=Rb*Rb)ban.add((py+dy)*W+px+dx);}
+    ban.delete(a0);
+    const lim=1.6*cum[ai]+2*med;const dist=new Map([[a0,0]]),prev=new Map(),heap=[[0,a0]];let hit=-1,hitF=null;
+    const push=(d,i)=>{heap.push([d,i]);let c=heap.length-1;while(c>0){const p=(c-1)>>1;if(heap[p][0]<=heap[c][0])break;[heap[p],heap[c]]=[heap[c],heap[p]];c=p;}};
+    const pop=()=>{const top=heap[0],last=heap.pop();if(heap.length){heap[0]=last;let c=0;for(;;){const l=2*c+1,r=l+1;let m2=c;if(l<heap.length&&heap[l][0]<heap[m2][0])m2=l;if(r<heap.length&&heap[r][0]<heap[m2][0])m2=r;if(m2===c)break;[heap[m2],heap[c]]=[heap[c],heap[m2]];c=m2;}}return top;};
+    while(heap.length){const[d,i]=pop();if(d>dist.get(i))continue;if(d>lim)break;const y=(i/W)|0,x=i%W;
+      if(d>1.5*med&&own[i]>=0&&(own[i]!==q||two[i])&&!(sib.has(own[i])&&!two[i])){const f=nearOther([y,x],q,Rt+1,sib);if(f){hit=i;hitF=f;break;}}
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const Y=y+dy,X=x+dx;if(Y<0||X<0||Y>=H||X>=W)continue;const j=Y*W+X;if(!on[j]||ban.has(j))continue;
+        const nd=d+(dx&&dy?1.4142:1);if(nd<(dist.has(j)?dist.get(j):1e18)){dist.set(j,nd);prev.set(j,i);push(nd,j);}}}
+    if(hit<0)continue;
+    // (an end already where the drawing has it is left alone)
+    if(Math.hypot(hitF.p[0]-e[0],hitF.p[1]-e[1])<0.8*med)continue;
+    // (nor a walk that just stops at a joint it passes on its way: the new end is about as far out as the old one)
+    {const ay=(a0/W)|0,ax=a0%W;if(Math.hypot(hitF.p[0]-ay,hitF.p[1]-ax)<0.5*Math.hypot(e[0]-ay,e[1]-ax))continue;}
+    const path=[];for(let i=hit;i!==undefined;i=prev.get(i)){path.push([(i/W)|0,i%W]);if(i===a0)break;}
+    // (new end: the meeting point on the other line, then the drawn way back to the anchor, evened out; the rest as it was)
+    let nw=[hitF.p.slice()].concat(path);for(let it=0;it<3;it++)nw=nw.map((p,i)=>{if(i===0||i===nw.length-1)return p;const R2=Math.min(6,i,nw.length-1-i);let a=0,b=0,c=0;for(let j=i-R2;j<=i+R2;j++){a+=nw[j][0];b+=nw[j][1];c++;}return[a/c,b/c];});
+    const thin=[nw[0]];for(let i=2;i<nw.length-1;i+=2)thin.push(nw[i]);
+    const cand=thin.concat(Q.slice(ai));
+    // (the seam where the drawn way joins the old line is eased over a couple of widths each way, the end held)
+    {const J=thin.length,c0=cand.map(p=>p.slice());let lo=J,hi=J,L=0;while(lo>1&&L<2*med){L+=Math.hypot(c0[lo][0]-c0[lo-1][0],c0[lo][1]-c0[lo-1][1]);lo--;}
+      L=0;while(hi<c0.length-2&&L<2*med){L+=Math.hypot(c0[hi+1][0]-c0[hi][0],c0[hi+1][1]-c0[hi][1]);hi++;}
+      for(let it=0;it<4;it++){const c=cand.map(p=>p.slice());for(let i=lo;i<=hi;i++){let a=0,b=0,n=0;for(let j=Math.max(0,i-3);j<=Math.min(c.length-1,i+3);j++){a+=c[j][0];b+=c[j][1];n++;}
+        const w0=Math.max(0,1-Math.abs(i-J)/Math.max(1,i<J?J-lo:hi-J)),w=w0*w0*(3-2*w0);cand[i]=[c[i][0]+(a/n-c[i][0])*w,c[i][1]+(b/n-c[i][1])*w];}}}
+    // (the old end has to have been off the drawing: over paper, or away from the drawn lines; the new one no worse)
+    const oldP=dense(Q.slice(0,ai+1)),newP=dense(cand.slice(0,thin.length+1));
+    let off=0;for(const p of oldP){const y=Math.round(p[0]),x=Math.round(p[1]);if(nearOn(p,Math.ceil(0.35*med))<0)off++;}
+    if(paper(oldP)<0.5*med&&off<1.0*med)continue;if(paper(newP)>paper(oldP))continue;
+    const Ln=cum[ai]>0?newP.length:0;if(Ln>1.8*cum[ai]+2*med)continue;
+    // (and no sharp bend where the old line was smooth: a drawn way that kinks into the other line is not used)
+    const turn=(R,n)=>{let m=0;const st=Math.max(2,Math.round(0.4*med/2));for(let i=st;i<Math.min(R.length,n)-st;i++){const a=R[i-st],b=R[i],c=R[i+st];const v1=[b[0]-a[0],b[1]-a[1]],v2=[c[0]-b[0],c[1]-b[1]];const n1=Math.hypot(...v1),n2=Math.hypot(...v2);if(n1<1e-6||n2<1e-6)continue;m=Math.max(m,Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(n1*n2)))));}return m;};
+    if(turn(cand,thin.length+Math.ceil(med))>Math.max(0.6,turn(Q,ai+Math.ceil(med))+0.25))continue;
+    strokes[q]=side?cand.reverse():cand;}
+  return strokes;}
+
+// Keep narrow gaps: two lines that run into a third through one patch of ink join each other where the ink parts.
+// ------------------------------------------------------------------------------------------------
+// Where two strips of lead merge into solid ink just before they reach another line, the two levelled lines would run
+// on side by side to it with a sliver of glass between them that the drawing does not have. The line is ended on its
+// neighbour instead, at the point where the paper between them stops (a Y), and the neighbour alone goes on.
+function joinMerged(strokes,dmap,med){
+  const near=(p,skip)=>{let bd=1e18,bp=null,bs=-1;for(let s=0;s<strokes.length;s++){if(skip.has(s))continue;const S=strokes[s];if(!S||S.length<2)continue;
+      for(let k=1;k<S.length;k++){const a=S[k-1],b=S[k],vy=b[0]-a[0],vx=b[1]-a[1],L2=vy*vy+vx*vx;let t=L2>0?((p[0]-a[0])*vy+(p[1]-a[1])*vx)/L2:0;t=Math.max(0,Math.min(1,t));
+        const y=a[0]+vy*t,x=a[1]+vx*t,d=(y-p[0])**2+(x-p[1])**2;if(d<bd){bd=d;bp=[y,x];bs=s;}}}return bp?{p:bp,s:bs,d:Math.sqrt(bd)}:null;};
+  const inkBetween=(a,b)=>{const n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])));for(let t=0;t<=n;t++){const y=Math.round(a[0]+(b[0]-a[0])*t/n),x=Math.round(a[1]+(b[1]-a[1])*t/n);
+      if(y<0||x<0||y>=H||x>=W||dmap[y*W+x]<0.5)return false;}return true;};
+  for(let q=0;q<strokes.length;q++)for(let side=0;side<2;side++){
+    let Q=strokes[q];if(!Q||Q.length<6)continue;if(side)Q=Q.slice().reverse();
+    const e=Q[0],F=near(e,new Set([q]));if(!F||F.d>0.6*med)continue; // (a line that ends on another line)
+    const skip=new Set([q,F.s]);
+    // (from the end inward: how far the ink between this line and its nearest neighbour stays unbroken)
+    let L=0,cut=-1,G=null;for(let k=0;k<Q.length-1&&L<5*med;k++){if(k)L+=Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]);
+      const g=near(Q[k],skip);if(!g||g.d>1.6*med||g.d<0.3*med||!inkBetween(Q[k],g.p))break;if(G&&g.s!==G.s)break;G=g;cut=k;}
+    if(cut<0||L<0.8*med||!G)continue;let Lc=0;for(let k=1;k<=cut;k++)Lc+=Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]);if(Lc<0.8*med)continue;
+    // (only a neighbour that runs into the same line right beside this one, alongside it: two strips merging)
+    const S=strokes[G.s],gEnd=Math.hypot(S[0][0]-e[0],S[0][1]-e[1])<Math.hypot(S[S.length-1][0]-e[0],S[S.length-1][1]-e[1])?S:S.slice().reverse();
+    if(Math.hypot(gEnd[0][0]-e[0],gEnd[0][1]-e[1])>2.5*med)continue;
+    const back=(R,d)=>{let l=0,k=0;while(k<R.length-1&&l<d){l+=Math.hypot(R[k+1][0]-R[k][0],R[k+1][1]-R[k][1]);k++;}return k;};
+    {const kq=back(Q,2*med),kg=back(gEnd,2*med),v1=[Q[0][0]-Q[kq][0],Q[0][1]-Q[kq][1]],v2=[gEnd[0][0]-gEnd[kg][0],gEnd[0][1]-gEnd[kg][1]];
+      if((v1[0]*v2[0]+v1[1]*v2[1])/((Math.hypot(...v1)*Math.hypot(...v2))||1)<Math.cos(Math.PI*40/180))continue;}
+    // (the join: from where the ink parts, a short smooth bend over to where the neighbour meets the line, so no scrap of
+    // glass is closed off between them; all of it on the ink)
+    const k0=Math.min(Q.length-2,cut);
+    let gi=0,gd=1e18;for(let i=0;i<gEnd.length;i++){const d=(gEnd[i][0]-G.p[0])**2+(gEnd[i][1]-G.p[1])**2;if(d<gd){gd=d;gi=i;}}
+    let l=0,j=gi;while(j>0&&l<0.6*med){l+=Math.hypot(gEnd[j][0]-gEnd[j-1][0],gEnd[j][1]-gEnd[j-1][1]);j--;}
+    const A=Q[k0],B=gEnd[0],tq=Math.min(Q.length-1,k0+3),dir=[Q[k0][0]-Q[tq][0],Q[k0][1]-Q[tq][1]],dn=Math.hypot(dir[0],dir[1])||1;
+    const h=0.55*Math.hypot(B[0]-A[0],B[1]-A[1]),C1=[A[0]+dir[0]/dn*h,A[1]+dir[1]/dn*h];
+    const curve=[];for(let i=16;i>=1;i--){const t=i/16,u=1-t;curve.push([u*u*A[0]+2*u*t*C1[0]+t*t*B[0],u*u*A[1]+2*u*t*C1[1]+t*t*B[1]]);}
+    {let off=0;for(const c of curve){const y=Math.round(c[0]),x=Math.round(c[1]);if(y<0||x<0||y>=H||x>=W||dmap[y*W+x]<0.5)off++;}if(off)continue;}
+    const cand=curve.concat(Q.slice(k0));strokes[q]=side?cand.reverse():cand;}
+  return strokes;}
