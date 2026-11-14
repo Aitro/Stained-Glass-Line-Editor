@@ -65,6 +65,11 @@ function whittaker(Y,w,lam){const n=Y.length;if(n<5)return Y.map(q=>q.slice());
     for(let i=0;i<n;i++)out[i][c]=z[i];}
   return out;}
 const refl=(i,n)=>{while(i<0||i>=n){if(i<0)i=-i-1;if(i>=n)i=2*n-i-1;}return i;};
-function maxFilter(a,size){const n=a.length,h=size>>1,o=new Float64Array(n);for(let i=0;i<n;i++){let m=-Infinity;for(let j=-h;j<=h;j++)m=Math.max(m,a[refl(i+j,n)]);o[i]=m;}return o;}
+function maxFilter(a,size){const n=a.length,h=size>>1,o=new Float64Array(n);if(!n)return o;
+  // (the largest value in a window round each point, edges mirrored; a running window, so the cost does not grow with its size)
+  const ext=new Float64Array(n+2*h);for(let j=0;j<n+2*h;j++)ext[j]=a[refl(j-h,n)];
+  const dq=new Int32Array(n+2*h);let hd=0,tl=0;
+  for(let j=0;j<n+2*h;j++){while(tl>hd&&ext[dq[tl-1]]<=ext[j])tl--;dq[tl++]=j;const i=j-2*h;if(i>=0){while(dq[hd]<i)hd++;o[i]=ext[dq[hd]];}}
+  return o;}
 function gaussFilter(a,sig){const n=a.length,r=Math.ceil(4*sig),k=[];let s=0;for(let i=-r;i<=r;i++){const v=Math.exp(-i*i/(2*sig*sig));k.push(v);s+=v;}
   const o=new Float64Array(n);for(let i=0;i<n;i++){let t=0;for(let j=-r;j<=r;j++)t+=a[refl(i+j,n)]*k[j+r];o[i]=t/s;}return o;}

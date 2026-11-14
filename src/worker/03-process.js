@@ -182,7 +182,12 @@ function inkAxis(mask,flip,G){if(!G)return null;const f=Math.max(1,Math.round(Ma
   let c=flip==='tb'?G.cy:G.cx,an=angOf(G),b=score(mk(c,an));const span=0.03*(flip==='tb'?H:W);
   for(const[dc,da,nc,na]of[[f,0.25,Math.ceil(span/f),6],[f/4,0.05,6,5]]){const cc=c,aa=an;for(let ia=-na;ia<=na;ia++)for(let ic=-nc;ic<=nc;ic++){const A=mk(cc+ic*dc,aa+ia*da*Math.PI/180),sc=score(A);if(sc>b+1e-9){b=sc;c=cc+ic*dc;an=aa+ia*da*Math.PI/180;}}}
   const out=mk(c,an);out.match=b;return out;}
-function symAxis(mask,flip){const f=Math.max(1,Math.round(Math.max(W,H)/500)),w=Math.ceil(W/f),h=Math.ceil(H/f),s=new Uint8Array(w*h);
+// (kept for the same picture: the centre lines are looked for afresh only when the lines picture changes)
+const symAxisCache=new Map();
+function symAxis(mask,flip){let hsh=2166136261;for(let i=0;i<mask.length;i++){hsh^=mask[i];hsh=Math.imul(hsh,16777619);}
+  const ck=flip+':'+W+'x'+H+':'+(hsh>>>0);if(symAxisCache.has(ck))return symAxisCache.get(ck);if(symAxisCache.size>8)symAxisCache.clear();
+  const r=symAxis0(mask,flip);symAxisCache.set(ck,r);return r;}
+function symAxis0(mask,flip){const f=Math.max(1,Math.round(Math.max(W,H)/500)),w=Math.ceil(W/f),h=Math.ceil(H/f),s=new Uint8Array(w*h);
   for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(mask[y*W+x])s[((y/f)|0)*w+((x/f)|0)]=1;
   // (the panel: everything not reachable from the picture's edge without crossing a line)
   const out=new Uint8Array(w*h),st=[];for(let x=0;x<w;x++){st.push(x,(h-1)*w+x);}for(let y=0;y<h;y++){st.push(y*w,y*w+w-1);}

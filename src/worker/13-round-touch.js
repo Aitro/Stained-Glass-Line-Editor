@@ -12,9 +12,9 @@ function roundTouches(strokes,med,dmap,leadHalf){
   const len=Q=>{const L=[0];for(let k=1;k<Q.length;k++)L.push(L[k-1]+Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]));return L;};
   const unit=v=>{const n=Math.hypot(v[0],v[1])||1;return[v[0]/n,v[1]/n];};
   // (the nearest point of any line other than these, with that line's direction there)
-  const nearest=(skip,p)=>{let best=null;strokes.forEach((F,t)=>{if(skip.includes(t)||F.length<2)return;for(let k=1;k<F.length;k++){const a=F[k-1],b=F[k],ab=[b[0]-a[0],b[1]-a[1]],l2=ab[0]*ab[0]+ab[1]*ab[1]||1;
-      let u=((p[0]-a[0])*ab[0]+(p[1]-a[1])*ab[1])/l2;u=Math.max(0,Math.min(1,u));const q=[a[0]+u*ab[0],a[1]+u*ab[1]],d=Math.hypot(q[0]-p[0],q[1]-p[1]);
-      if(!best||d<best.d){const a2=F[Math.max(0,k-6)],b2=F[Math.min(F.length-1,k+5)];best={d,q,s:t,t:unit([b2[0]-a2[0],b2[1]-a2[1]])};}}});return best;};
+  const NI=nearIndex(strokes,2*med);
+  const nearest=(skip,p)=>{const b=NI.near(p,skip);if(!b)return null;const F=strokes[b.s],k=b.k,a2=F[Math.max(0,k-6)],b2=F[Math.min(F.length-1,k+5)];
+    return{d:b.d,q:b.p,s:b.s,t:unit([b2[0]-a2[0],b2[1]-a2[1]])};};
   // (circle through points, least squares)
   const fitCircle=pts=>{let sx=0,sy=0,sxx=0,syy=0,sxy=0,sxz=0,syz=0,sz=0;const n=pts.length;
     for(const[y,x]of pts){const z=x*x+y*y;sx+=x;sy+=y;sxx+=x*x;syy+=y*y;sxy+=x*y;sxz+=x*z;syz+=y*z;sz+=z;}
@@ -107,7 +107,7 @@ function roundTouches(strokes,med,dmap,leadHalf){
     {let bad=0,tot=0;for(const c of[cap(dA,S1.R[k1]),cap(dB,S2.R[k2])])for(let i=1;i<c.length;i++){const a=c[i-1],b=c[i],m=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])));
         for(let t=0;t<m;t++){const y=Math.round(a[0]+(b[0]-a[0])*t/m),x=Math.round(a[1]+(b[1]-a[1])*t/m);tot++;if(y<0||x<0||y>=H||x>=W||dmap[y*W+x]<0.5)bad++;}}
       if(relaxed&&bad>Math.max(0.5*med,0.05*tot))continue;}
-    ease(S1,k1);ease(S2,k2);
+    ease(S1,k1);ease(S2,k2);NI.update(E1.s);NI.update(E2.s);
     const aA=cap(dA,S1.R[k1]),aB=cap(dB,S2.R[k2]);aA[aA.length-1]=T.slice();aB[aB.length-1]=T.slice();
     const i1b=k1,i2b=k2;
     const new1=S1.R.slice(0,i1b+1).concat(aA),new2=S2.R.slice(0,i2b+1).concat(aB);
@@ -116,6 +116,7 @@ function roundTouches(strokes,med,dmap,leadHalf){
       const Q=strokes[E1.s],j1=Q.length-1-i1b;if(j1>=i2b)continue;for(let i=0;i<=i1b;i++)Q[Q.length-1-i]=S1.R[i];
       strokes[E1.s]=[T.slice()].concat(aA.slice(0,-1).reverse(),Q.slice(j1,i2b+1).map(q=>q.slice()),aB);}
     else{strokes[E1.s]=E1.end===1?new1:new1.slice().reverse();strokes[E2.s]=E2.end===1?new2:new2.slice().reverse();}
+    NI.update(E1.s);NI.update(E2.s);
     joins.push([E1.s,S1.R[k1].slice()],[E2.s,S2.R[k2].slice()]);used.add(x);used.add(y);}
   // (where a shape was rounded at both ends, its two new halves meet at its sides; each meeting is evened out over a
   // few line widths either way, over the stretch each side was eased, so no small step shows there)

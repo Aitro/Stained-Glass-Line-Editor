@@ -469,9 +469,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       toC=t=>[m[0]+t[0]*pd[0],m[1]+t[0]*pd[1]];par=[(base.c[0]-m[0])*pd[0]+(base.c[1]-m[1])*pd[1]];}
     else{toC=t=>[t[0],t[1]];par=base.c.slice();}
     const cost=t=>{const c=toC(t),r=Math.hypot(A[0][0]-c[0],A[0][1]-c[1]);let s=0;for(const p of P){const e=Math.hypot(p[0]-c[0],p[1]-c[1])-r;s+=e*e;}return s;};
-    let step=Math.max(1,base.r*0.05);
+    let step=Math.max(1,base.r*0.05),cp=cost(par);   // (the cost where we stand, kept rather than worked out again)
     for(let it=0;it<200&&step>1e-3;it++){let improved=false;
-      for(let k=0;k<par.length;k++)for(const sg of[1,-1]){const t=par.slice();t[k]+=sg*step;if(cost(t)<cost(par)){par=t;improved=true;}}
+      for(let k=0;k<par.length;k++)for(const sg of[1,-1]){const t=par.slice();t[k]+=sg*step;const ct=cost(t);if(ct<cp){par=t;cp=ct;improved=true;}}
       if(!improved)step/=2;}
     const c=toC(par),r=Math.hypot(A[0][0]-c[0],A[0][1]-c[1]);
     let dev=0;for(const p of P)dev=Math.max(dev,Math.abs(Math.hypot(p[0]-c[0],p[1]-c[1])-r));
@@ -682,7 +682,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const t=(rx*(-e[1])-(-e[0])*ry)/det,s_=(d[0]*ry-d[1]*rx)/det;
       if(s_>=0&&s_<=1&&t>=-2*u&&t<=30*u&&(best===null||Math.abs(t)<Math.abs(best[0])))best=[t,[p[0]+t*d[0],p[1]+t*d[1]]];}
     return best?best[1]:null;};
-  const segHit=(p,q,F)=>{for(let i=0;i<F.length-1;i++){const a=F[i],b=F[i+1];
+  const segHit=(p,q,F)=>{const py0=Math.min(p[0],q[0]),py1=Math.max(p[0],q[0]),px0=Math.min(p[1],q[1]),px1=Math.max(p[1],q[1]);
+    for(let i=0;i<F.length-1;i++){const a=F[i],b=F[i+1];if((a[0]<py0&&b[0]<py0)||(a[0]>py1&&b[0]>py1)||(a[1]<px0&&b[1]<px0)||(a[1]>px1&&b[1]>px1))continue;   // (pieces off to one side cannot cross)
       const d1=[q[0]-p[0],q[1]-p[1]],e=[b[0]-a[0],b[1]-a[1]];const det=d1[0]*(-e[1])+e[0]*d1[1];if(Math.abs(det)<1e-9)continue;
       const rx=a[0]-p[0],ry=a[1]-p[1];const t=(rx*(-e[1])+e[0]*ry)/det,s_=(d1[0]*ry-d1[1]*rx)/det;
       if(t>=0&&t<=1&&s_>=0&&s_<=1){const ne=norm2(e)||1,nd=norm2(d1)||1;
@@ -862,7 +863,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     const items=[];
     stemNodes.forEach((lst,k)=>{const own=new Set(lst.map(([c])=>c));const cs=[...(through.get(k)||[])].filter(c=>!own.has(c));if(!cs.length)return;
       for(const[ci,k2]of lst){const kk=key(k2[0],k2[1]);if(!land.has(kk)||landTrim.has(kk))continue;items.push({ci,k2,cF:cs[0],p:land.get(kk),e:ends.get(kk)});}});
-    const nearestIdx=(F,p)=>{let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});return bi;};
+    const nIdx=new Map();   // (the answer for each point, kept: the same points are asked about again and again)
+    const nearestIdx=(F,p)=>{const c=nIdx.get(p);if(c&&c.F===F)return c.i;let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});nIdx.set(p,{F,i:bi});return bi;};
     const sideOf=(F,i,q)=>{const a=F[Math.max(0,i-3)],b=F[Math.min(F.length-1,i+3)];return Math.sign((b[0]-a[0])*(q[1]-F[i][1])-(b[1]-a[1])*(q[0]-F[i][0]));};
     const cands=[];
     for(let x=0;x<items.length;x++)for(let y=x+1;y<items.length;y++){let a=items[x],b=items[y];
@@ -984,7 +986,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   // petal) ends exactly on that tip
   chains.forEach((C,i)=>{if(C.dead||C.closed)return;const F0=fitted[i];if(!F0||F0.length<4)return;
     for(const atStart of[true,false]){const E=atStart?fitted[i][0]:fitted[i][fitted[i].length-1];let best=null,bd=0.8*med;
-      fitted.forEach((T,ti)=>{if(ti===i||!T||T.length<7)return;const K=Math.max(3,Math.round(1.5*u));
+      fitted.forEach((T,ti)=>{if(ti===i||!T||T.length<7)return;{let y0=Infinity,y1=-Infinity,x0=Infinity,x1=-Infinity;for(const q of T){if(q[0]<y0)y0=q[0];if(q[0]>y1)y1=q[0];if(q[1]<x0)x0=q[1];if(q[1]>x1)x1=q[1];}
+          if(E[0]<y0-bd||E[0]>y1+bd||E[1]<x0-bd||E[1]>x1+bd)return;}   // (a line nowhere near is not looked along)const K=Math.max(3,Math.round(1.5*u));
         for(let t=K;t<T.length-K;t++){const d=Math.hypot(T[t][0]-E[0],T[t][1]-E[1]);if(d>=bd||d<0.05)continue;
           const v1=[T[t][0]-T[t-K][0],T[t][1]-T[t-K][1]],v2=[T[t+K][0]-T[t][0],T[t+K][1]-T[t][1]];
           const ang=Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(norm2(v1)*norm2(v2)+1e-9))))*180/Math.PI;

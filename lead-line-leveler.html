@@ -586,7 +586,12 @@ function inkAxis(mask,flip,G){if(!G)return null;const f=Math.max(1,Math.round(Ma
   let c=flip==='tb'?G.cy:G.cx,an=angOf(G),b=score(mk(c,an));const span=0.03*(flip==='tb'?H:W);
   for(const[dc,da,nc,na]of[[f,0.25,Math.ceil(span/f),6],[f/4,0.05,6,5]]){const cc=c,aa=an;for(let ia=-na;ia<=na;ia++)for(let ic=-nc;ic<=nc;ic++){const A=mk(cc+ic*dc,aa+ia*da*Math.PI/180),sc=score(A);if(sc>b+1e-9){b=sc;c=cc+ic*dc;an=aa+ia*da*Math.PI/180;}}}
   const out=mk(c,an);out.match=b;return out;}
-function symAxis(mask,flip){const f=Math.max(1,Math.round(Math.max(W,H)/500)),w=Math.ceil(W/f),h=Math.ceil(H/f),s=new Uint8Array(w*h);
+// (kept for the same picture: the centre lines are looked for afresh only when the lines picture changes)
+const symAxisCache=new Map();
+function symAxis(mask,flip){let hsh=2166136261;for(let i=0;i<mask.length;i++){hsh^=mask[i];hsh=Math.imul(hsh,16777619);}
+  const ck=flip+':'+W+'x'+H+':'+(hsh>>>0);if(symAxisCache.has(ck))return symAxisCache.get(ck);if(symAxisCache.size>8)symAxisCache.clear();
+  const r=symAxis0(mask,flip);symAxisCache.set(ck,r);return r;}
+function symAxis0(mask,flip){const f=Math.max(1,Math.round(Math.max(W,H)/500)),w=Math.ceil(W/f),h=Math.ceil(H/f),s=new Uint8Array(w*h);
   for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(mask[y*W+x])s[((y/f)|0)*w+((x/f)|0)]=1;
   // (the panel: everything not reachable from the picture's edge without crossing a line)
   const out=new Uint8Array(w*h),st=[];for(let x=0;x<w;x++){st.push(x,(h-1)*w+x);}for(let y=0;y<h;y++){st.push(y*w,y*w+w-1);}
@@ -694,7 +699,12 @@ function whittaker(Y,w,lam){const n=Y.length;if(n<5)return Y.map(q=>q.slice());
     for(let i=0;i<n;i++)out[i][c]=z[i];}
   return out;}
 const refl=(i,n)=>{while(i<0||i>=n){if(i<0)i=-i-1;if(i>=n)i=2*n-i-1;}return i;};
-function maxFilter(a,size){const n=a.length,h=size>>1,o=new Float64Array(n);for(let i=0;i<n;i++){let m=-Infinity;for(let j=-h;j<=h;j++)m=Math.max(m,a[refl(i+j,n)]);o[i]=m;}return o;}
+function maxFilter(a,size){const n=a.length,h=size>>1,o=new Float64Array(n);if(!n)return o;
+  // (the largest value in a window round each point, edges mirrored; a running window, so the cost does not grow with its size)
+  const ext=new Float64Array(n+2*h);for(let j=0;j<n+2*h;j++)ext[j]=a[refl(j-h,n)];
+  const dq=new Int32Array(n+2*h);let hd=0,tl=0;
+  for(let j=0;j<n+2*h;j++){while(tl>hd&&ext[dq[tl-1]]<=ext[j])tl--;dq[tl++]=j;const i=j-2*h;if(i>=0){while(dq[hd]<i)hd++;o[i]=ext[dq[hd]];}}
+  return o;}
 function gaussFilter(a,sig){const n=a.length,r=Math.ceil(4*sig),k=[];let s=0;for(let i=-r;i<=r;i++){const v=Math.exp(-i*i/(2*sig*sig));k.push(v);s+=v;}
   const o=new Float64Array(n);for(let i=0;i<n;i++){let t=0;for(let j=-r;j<=r;j++)t+=a[refl(i+j,n)]*k[j+r];o[i]=t/s;}return o;}
 function smoothPiece(Q,w,u,strength,closed,own){
@@ -1183,9 +1193,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       toC=t=>[m[0]+t[0]*pd[0],m[1]+t[0]*pd[1]];par=[(base.c[0]-m[0])*pd[0]+(base.c[1]-m[1])*pd[1]];}
     else{toC=t=>[t[0],t[1]];par=base.c.slice();}
     const cost=t=>{const c=toC(t),r=Math.hypot(A[0][0]-c[0],A[0][1]-c[1]);let s=0;for(const p of P){const e=Math.hypot(p[0]-c[0],p[1]-c[1])-r;s+=e*e;}return s;};
-    let step=Math.max(1,base.r*0.05);
+    let step=Math.max(1,base.r*0.05),cp=cost(par);   // (the cost where we stand, kept rather than worked out again)
     for(let it=0;it<200&&step>1e-3;it++){let improved=false;
-      for(let k=0;k<par.length;k++)for(const sg of[1,-1]){const t=par.slice();t[k]+=sg*step;if(cost(t)<cost(par)){par=t;improved=true;}}
+      for(let k=0;k<par.length;k++)for(const sg of[1,-1]){const t=par.slice();t[k]+=sg*step;const ct=cost(t);if(ct<cp){par=t;cp=ct;improved=true;}}
       if(!improved)step/=2;}
     const c=toC(par),r=Math.hypot(A[0][0]-c[0],A[0][1]-c[1]);
     let dev=0;for(const p of P)dev=Math.max(dev,Math.abs(Math.hypot(p[0]-c[0],p[1]-c[1])-r));
@@ -1396,7 +1406,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const t=(rx*(-e[1])-(-e[0])*ry)/det,s_=(d[0]*ry-d[1]*rx)/det;
       if(s_>=0&&s_<=1&&t>=-2*u&&t<=30*u&&(best===null||Math.abs(t)<Math.abs(best[0])))best=[t,[p[0]+t*d[0],p[1]+t*d[1]]];}
     return best?best[1]:null;};
-  const segHit=(p,q,F)=>{for(let i=0;i<F.length-1;i++){const a=F[i],b=F[i+1];
+  const segHit=(p,q,F)=>{const py0=Math.min(p[0],q[0]),py1=Math.max(p[0],q[0]),px0=Math.min(p[1],q[1]),px1=Math.max(p[1],q[1]);
+    for(let i=0;i<F.length-1;i++){const a=F[i],b=F[i+1];if((a[0]<py0&&b[0]<py0)||(a[0]>py1&&b[0]>py1)||(a[1]<px0&&b[1]<px0)||(a[1]>px1&&b[1]>px1))continue;   // (pieces off to one side cannot cross)
       const d1=[q[0]-p[0],q[1]-p[1]],e=[b[0]-a[0],b[1]-a[1]];const det=d1[0]*(-e[1])+e[0]*d1[1];if(Math.abs(det)<1e-9)continue;
       const rx=a[0]-p[0],ry=a[1]-p[1];const t=(rx*(-e[1])+e[0]*ry)/det,s_=(d1[0]*ry-d1[1]*rx)/det;
       if(t>=0&&t<=1&&s_>=0&&s_<=1){const ne=norm2(e)||1,nd=norm2(d1)||1;
@@ -1576,7 +1587,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     const items=[];
     stemNodes.forEach((lst,k)=>{const own=new Set(lst.map(([c])=>c));const cs=[...(through.get(k)||[])].filter(c=>!own.has(c));if(!cs.length)return;
       for(const[ci,k2]of lst){const kk=key(k2[0],k2[1]);if(!land.has(kk)||landTrim.has(kk))continue;items.push({ci,k2,cF:cs[0],p:land.get(kk),e:ends.get(kk)});}});
-    const nearestIdx=(F,p)=>{let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});return bi;};
+    const nIdx=new Map();   // (the answer for each point, kept: the same points are asked about again and again)
+    const nearestIdx=(F,p)=>{const c=nIdx.get(p);if(c&&c.F===F)return c.i;let bi=0,bd=Infinity;F.forEach((f,i)=>{const d=Math.hypot(f[0]-p[0],f[1]-p[1]);if(d<bd){bd=d;bi=i;}});nIdx.set(p,{F,i:bi});return bi;};
     const sideOf=(F,i,q)=>{const a=F[Math.max(0,i-3)],b=F[Math.min(F.length-1,i+3)];return Math.sign((b[0]-a[0])*(q[1]-F[i][1])-(b[1]-a[1])*(q[0]-F[i][0]));};
     const cands=[];
     for(let x=0;x<items.length;x++)for(let y=x+1;y<items.length;y++){let a=items[x],b=items[y];
@@ -1698,7 +1710,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   // petal) ends exactly on that tip
   chains.forEach((C,i)=>{if(C.dead||C.closed)return;const F0=fitted[i];if(!F0||F0.length<4)return;
     for(const atStart of[true,false]){const E=atStart?fitted[i][0]:fitted[i][fitted[i].length-1];let best=null,bd=0.8*med;
-      fitted.forEach((T,ti)=>{if(ti===i||!T||T.length<7)return;const K=Math.max(3,Math.round(1.5*u));
+      fitted.forEach((T,ti)=>{if(ti===i||!T||T.length<7)return;{let y0=Infinity,y1=-Infinity,x0=Infinity,x1=-Infinity;for(const q of T){if(q[0]<y0)y0=q[0];if(q[0]>y1)y1=q[0];if(q[1]<x0)x0=q[1];if(q[1]>x1)x1=q[1];}
+          if(E[0]<y0-bd||E[0]>y1+bd||E[1]<x0-bd||E[1]>x1+bd)return;}   // (a line nowhere near is not looked along)const K=Math.max(3,Math.round(1.5*u));
         for(let t=K;t<T.length-K;t++){const d=Math.hypot(T[t][0]-E[0],T[t][1]-E[1]);if(d>=bd||d<0.05)continue;
           const v1=[T[t][0]-T[t-K][0],T[t][1]-T[t-K][1]],v2=[T[t+K][0]-T[t][0],T[t+K][1]-T[t][1]];
           const ang=Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(norm2(v1)*norm2(v2)+1e-9))))*180/Math.PI;
@@ -2047,9 +2060,8 @@ function drawnEnds(strokes,drawn,dmap,med){
   const paper=P=>{let n=0;for(const q of P){const y=Math.round(q[0]),x=Math.round(q[1]);if(y>=0&&x>=0&&y<H&&x<W&&dmap[y*W+x]<0.5)n++;}return n;};
   const nearOn=(p,R)=>{let best=-1,bd=1e9;const py=Math.round(p[0]),px=Math.round(p[1]);for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){const y=py+dy,x=px+dx;if(y<0||x<0||y>=H||x>=W||!on[y*W+x])continue;const d=dx*dx+dy*dy;if(d<bd){bd=d;best=y*W+x;}}return bd<=R*R?best:-1;};
   // (nearest point on any line but this one)
-  const nearOther=(p,q,lim,skip)=>{let bd=lim*lim,bp=null,bs=-1,bt=null;for(let s=0;s<strokes.length;s++){if(s===q||(skip&&skip.has(s)))continue;const S=strokes[s];
-      for(let k=1;k<S.length;k++){const a=S[k-1],b=S[k],vy=b[0]-a[0],vx=b[1]-a[1],L2=vy*vy+vx*vx;let t=L2>0?((p[0]-a[0])*vy+(p[1]-a[1])*vx)/L2:0;t=Math.max(0,Math.min(1,t));
-        const y=a[0]+vy*t,x=a[1]+vx*t,d=(y-p[0])**2+(x-p[1])**2;if(d<bd){bd=d;bp=[y,x];bs=s;bt=[vy,vx];}}}return bp?{p:bp,s:bs,d:Math.sqrt(bd),t:bt}:null;};
+  const NI=nearIndex(strokes,2*med);
+  const nearOther=(p,q,lim,skip)=>{const b=NI.near(p,t=>t===q||(skip&&skip.has(t)),lim);return b?{p:b.p,s:b.s,d:b.d,t:b.t}:null;};
   const R1=Math.max(2,Math.ceil(0.25*med)),Rt=Math.max(2,0.3*med);
   // (which line is near each pixel, so the walk can stop at the first other line it reaches)
   const own=new Int32Array(W*H).fill(-1),two=new Uint8Array(W*H),Ri=Math.ceil(Rt);
@@ -2123,7 +2135,7 @@ function drawnEnds(strokes,drawn,dmap,med){
     // (and no sharp bend where the old line was smooth: a drawn way that kinks into the other line is not used)
     const turn=(R,n)=>{let m=0;const st=Math.max(2,Math.round(0.4*med/2));for(let i=st;i<Math.min(R.length,n)-st;i++){const a=R[i-st],b=R[i],c=R[i+st];const v1=[b[0]-a[0],b[1]-a[1]],v2=[c[0]-b[0],c[1]-b[1]];const n1=Math.hypot(...v1),n2=Math.hypot(...v2);if(n1<1e-6||n2<1e-6)continue;m=Math.max(m,Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(n1*n2)))));}return m;};
     if(turn(cand,thin.length+Math.ceil(med))>Math.max(0.6,turn(Q,ai+Math.ceil(med))+0.25))continue;
-    strokes[q]=side?cand.reverse():cand;}
+    strokes[q]=side?cand.reverse():cand;NI.update(q);}
   return strokes;}
 
 // Keep narrow gaps: two lines that run into a third through one patch of ink join each other where the ink parts.
@@ -2132,9 +2144,8 @@ function drawnEnds(strokes,drawn,dmap,med){
 // on side by side to it with a sliver of glass between them that the drawing does not have. The line is ended on its
 // neighbour instead, at the point where the paper between them stops (a Y), and the neighbour alone goes on.
 function joinMerged(strokes,dmap,med){
-  const near=(p,skip)=>{let bd=1e18,bp=null,bs=-1;for(let s=0;s<strokes.length;s++){if(skip.has(s))continue;const S=strokes[s];if(!S||S.length<2)continue;
-      for(let k=1;k<S.length;k++){const a=S[k-1],b=S[k],vy=b[0]-a[0],vx=b[1]-a[1],L2=vy*vy+vx*vx;let t=L2>0?((p[0]-a[0])*vy+(p[1]-a[1])*vx)/L2:0;t=Math.max(0,Math.min(1,t));
-        const y=a[0]+vy*t,x=a[1]+vx*t,d=(y-p[0])**2+(x-p[1])**2;if(d<bd){bd=d;bp=[y,x];bs=s;}}}return bp?{p:bp,s:bs,d:Math.sqrt(bd)}:null;};
+  const NI=nearIndex(strokes,2*med);
+  const near=(p,skip)=>{const b=NI.near(p,skip);return b?{p:b.p,s:b.s,d:b.d}:null;};
   const inkBetween=(a,b)=>{const n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])));for(let t=0;t<=n;t++){const y=Math.round(a[0]+(b[0]-a[0])*t/n),x=Math.round(a[1]+(b[1]-a[1])*t/n);
       if(y<0||x<0||y>=H||x>=W||dmap[y*W+x]<0.5)return false;}return true;};
   for(let q=0;q<strokes.length;q++)for(let side=0;side<2;side++){
@@ -2166,7 +2177,7 @@ function joinMerged(strokes,dmap,med){
     const P1=[A[0]+dA[0]/nA*kk,A[1]+dA[1]/nA*kk],P2=[B[0]+dB[0]/nB*kk,B[1]+dB[1]/nB*kk];
     const curve=[];for(let i=16;i>=1;i--){const t=i/16,u=1-t;curve.push([u*u*u*A[0]+3*u*u*t*P1[0]+3*u*t*t*P2[0]+t*t*t*B[0],u*u*u*A[1]+3*u*u*t*P1[1]+3*u*t*t*P2[1]+t*t*t*B[1]]);}
     {let off=0;for(const c of curve){const y=Math.round(c[0]),x=Math.round(c[1]);if(y<0||x<0||y>=H||x>=W||dmap[y*W+x]<0.5)off++;}if(off)continue;}
-    const cand=curve.concat(Q.slice(k0));strokes[q]=side?cand.reverse():cand;}
+    const cand=curve.concat(Q.slice(k0));strokes[q]=side?cand.reverse():cand;NI.update(q);}
   return strokes;}
 // Circles inside circles: a small ring standing alone inside a piece, touching no other line (the middle of a
 // star, a dot in an eye). It would make the piece around it a ring of glass with a hole, which can't be cut, so it is
@@ -2197,9 +2208,9 @@ function roundTouches(strokes,med,dmap,leadHalf){
   const len=Q=>{const L=[0];for(let k=1;k<Q.length;k++)L.push(L[k-1]+Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]));return L;};
   const unit=v=>{const n=Math.hypot(v[0],v[1])||1;return[v[0]/n,v[1]/n];};
   // (the nearest point of any line other than these, with that line's direction there)
-  const nearest=(skip,p)=>{let best=null;strokes.forEach((F,t)=>{if(skip.includes(t)||F.length<2)return;for(let k=1;k<F.length;k++){const a=F[k-1],b=F[k],ab=[b[0]-a[0],b[1]-a[1]],l2=ab[0]*ab[0]+ab[1]*ab[1]||1;
-      let u=((p[0]-a[0])*ab[0]+(p[1]-a[1])*ab[1])/l2;u=Math.max(0,Math.min(1,u));const q=[a[0]+u*ab[0],a[1]+u*ab[1]],d=Math.hypot(q[0]-p[0],q[1]-p[1]);
-      if(!best||d<best.d){const a2=F[Math.max(0,k-6)],b2=F[Math.min(F.length-1,k+5)];best={d,q,s:t,t:unit([b2[0]-a2[0],b2[1]-a2[1]])};}}});return best;};
+  const NI=nearIndex(strokes,2*med);
+  const nearest=(skip,p)=>{const b=NI.near(p,skip);if(!b)return null;const F=strokes[b.s],k=b.k,a2=F[Math.max(0,k-6)],b2=F[Math.min(F.length-1,k+5)];
+    return{d:b.d,q:b.p,s:b.s,t:unit([b2[0]-a2[0],b2[1]-a2[1]])};};
   // (circle through points, least squares)
   const fitCircle=pts=>{let sx=0,sy=0,sxx=0,syy=0,sxy=0,sxz=0,syz=0,sz=0;const n=pts.length;
     for(const[y,x]of pts){const z=x*x+y*y;sx+=x;sy+=y;sxx+=x*x;syy+=y*y;sxy+=x*y;sxz+=x*z;syz+=y*z;sz+=z;}
@@ -2292,7 +2303,7 @@ function roundTouches(strokes,med,dmap,leadHalf){
     {let bad=0,tot=0;for(const c of[cap(dA,S1.R[k1]),cap(dB,S2.R[k2])])for(let i=1;i<c.length;i++){const a=c[i-1],b=c[i],m=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])));
         for(let t=0;t<m;t++){const y=Math.round(a[0]+(b[0]-a[0])*t/m),x=Math.round(a[1]+(b[1]-a[1])*t/m);tot++;if(y<0||x<0||y>=H||x>=W||dmap[y*W+x]<0.5)bad++;}}
       if(relaxed&&bad>Math.max(0.5*med,0.05*tot))continue;}
-    ease(S1,k1);ease(S2,k2);
+    ease(S1,k1);ease(S2,k2);NI.update(E1.s);NI.update(E2.s);
     const aA=cap(dA,S1.R[k1]),aB=cap(dB,S2.R[k2]);aA[aA.length-1]=T.slice();aB[aB.length-1]=T.slice();
     const i1b=k1,i2b=k2;
     const new1=S1.R.slice(0,i1b+1).concat(aA),new2=S2.R.slice(0,i2b+1).concat(aB);
@@ -2301,6 +2312,7 @@ function roundTouches(strokes,med,dmap,leadHalf){
       const Q=strokes[E1.s],j1=Q.length-1-i1b;if(j1>=i2b)continue;for(let i=0;i<=i1b;i++)Q[Q.length-1-i]=S1.R[i];
       strokes[E1.s]=[T.slice()].concat(aA.slice(0,-1).reverse(),Q.slice(j1,i2b+1).map(q=>q.slice()),aB);}
     else{strokes[E1.s]=E1.end===1?new1:new1.slice().reverse();strokes[E2.s]=E2.end===1?new2:new2.slice().reverse();}
+    NI.update(E1.s);NI.update(E2.s);
     joins.push([E1.s,S1.R[k1].slice()],[E2.s,S2.R[k2].slice()]);used.add(x);used.add(y);}
   // (where a shape was rounded at both ends, its two new halves meet at its sides; each meeting is evened out over a
   // few line widths either way, over the stretch each side was eased, so no small step shows there)
@@ -2308,6 +2320,31 @@ function roundTouches(strokes,med,dmap,leadHalf){
     if(bd>(0.6*med)**2)continue;const R=3.5*med;let lo=bi,hi=bi,L=0;while(lo>1&&L<R){L+=Math.hypot(Q[lo][0]-Q[lo-1][0],Q[lo][1]-Q[lo-1][1]);lo--;}L=0;while(hi<Q.length-2&&L<R){L+=Math.hypot(Q[hi+1][0]-Q[hi][0],Q[hi+1][1]-Q[hi][1]);hi++;}
     for(let it=0;it<4;it++){const c=Q.map(q=>q.slice());for(let i=lo;i<=hi;i++){let a=0,b=0,n2=0;for(let j=Math.max(0,i-4);j<=Math.min(Q.length-1,i+4);j++){a+=c[j][0];b+=c[j][1];n2++;}const w0=Math.max(0,1-Math.abs(i-bi)/Math.max(1,i<bi?bi-lo:hi-bi)),w=w0*w0*(3-2*w0);Q[i]=[c[i][0]+(a/n2-c[i][0])*w,c[i][1]+(b/n2-c[i][1])*w];}}}
   return strokes;}
+// The finishing steps keep asking "which other line is nearest this point, and where on it". Scanning every line for
+// each question was most of their time on a big pattern; the line pieces are filed by where they lie, so only the
+// nearby ones are looked at. The answer is the same: the nearest point, ties going to the earlier line and piece.
+// A line that is changed is filed again with update(s).
+function nearIndex(strokes,cell){
+  cell=Math.max(4,Math.round(cell||16));const GW=Math.ceil(W/cell)+1,GH=Math.ceil(H/cell)+1,grid=new Map(),where=[];
+  const put=s=>{const S=strokes[s],keys=[];if(S&&S.length>=2)for(let k=1;k<S.length;k++){const a=S[k-1],b=S[k];
+      const cx0=Math.max(0,Math.floor(Math.min(a[1],b[1])/cell)),cx1=Math.min(GW-1,Math.floor(Math.max(a[1],b[1])/cell)),cy0=Math.max(0,Math.floor(Math.min(a[0],b[0])/cell)),cy1=Math.min(GH-1,Math.floor(Math.max(a[0],b[0])/cell));
+      for(let cy=cy0;cy<=cy1;cy++)for(let cx=cx0;cx<=cx1;cx++){const key=cy*GW+cx;let L=grid.get(key);if(!L){L=[];grid.set(key,L);}L.push(s,k);keys.push(key);}}
+    where[s]=keys;};
+  const drop=s=>{const keys=where[s];if(!keys)return;for(const key of new Set(keys)){const L=grid.get(key);if(!L)continue;const M=[];for(let i=0;i<L.length;i+=2)if(L[i]!==s)M.push(L[i],L[i+1]);if(M.length)grid.set(key,M);else grid.delete(key);}where[s]=null;};
+  for(let s=0;s<strokes.length;s++)put(s);
+  // (skip: a test or a set of line numbers to leave out; lim: farthest distance asked about)
+  const near=(p,skip,lim)=>{const bad=typeof skip==='function'?skip:skip?(s=>skip.has?skip.has(s):skip.includes(s)):()=>false;
+    lim=lim==null?Infinity:lim;let bd=lim*lim,best=null;const pcx=Math.floor(p[1]/cell),pcy=Math.floor(p[0]/cell),maxR=Math.max(GW,GH);
+    for(let r=0;r<=maxR;r++){
+      // (cells in ring r are at least (r-1)*cell away; once that passes the best, stop)
+      const ring=(r-1)*cell;if(ring>0&&ring*ring>bd)break;if(lim!==Infinity&&ring>lim)break;
+      for(let cy=pcy-r;cy<=pcy+r;cy++){if(cy<0||cy>=GH)continue;const edge=(cy===pcy-r||cy===pcy+r);
+        for(let cx=pcx-r;cx<=pcx+r;cx+=(edge?1:2*r||1)){if(cx<0||cx>=GW)continue;const L=grid.get(cy*GW+cx);if(!L)continue;
+          for(let i=0;i<L.length;i+=2){const s=L[i],k=L[i+1];if(bad(s))continue;const S=strokes[s],a=S[k-1],b=S[k],vy=b[0]-a[0],vx=b[1]-a[1],L2=vy*vy+vx*vx;
+            let t=L2>0?((p[0]-a[0])*vy+(p[1]-a[1])*vx)/L2:0;t=Math.max(0,Math.min(1,t));const y=a[0]+vy*t,x=a[1]+vx*t,d=(y-p[0])**2+(x-p[1])**2;
+            if(d<bd||(best&&d===bd&&(s<best.s||(s===best.s&&k<best.k)))){bd=d;best={p:[y,x],s,k,t:[vy,vx]};}}}}}
+    if(best)best.d=Math.sqrt(bd);return best;};
+  return{near,update:s=>{drop(s);put(s);}};}
 </script>
 
 <script>
@@ -3289,13 +3326,28 @@ mat.addEventListener('drop',e=>{const f=e.dataTransfer&&e.dataTransfer.files[0];
 window.addEventListener('paste',e=>{const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/'));if(it)loadFile(it.getAsFile());});
 
 function fname(ext){const w=widthIn(),z=sizeIn();return S.name+'-'+fit2(z.w)+'x'+fit2(z.h)+'in-'+w.toFixed(3).replace(/^0/,'')+'in-lines.'+ext;}
+// (one file in a .zip, stored as it is: a zip opens on every computer without anything extra)
+function zipOne(name,data){const enc=new TextEncoder(),fn=enc.encode(name),body=typeof data==='string'?enc.encode(data):new Uint8Array(data);
+  let crc=-1;for(let i=0;i<body.length;i++){crc^=body[i];for(let k=0;k<8;k++)crc=(crc>>>1)^(0xEDB88320&-(crc&1));}crc=(crc^-1)>>>0;
+  const d=new Date(),dt=((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1))&0xffff,dd=(((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())&0xffff;
+  const lh=new Uint8Array(30+fn.length),cd=new Uint8Array(46+fn.length),end=new Uint8Array(22);
+  const w16=(a,o,v)=>{a[o]=v&255;a[o+1]=(v>>>8)&255;},w32=(a,o,v)=>{w16(a,o,v&0xffff);w16(a,o+2,(v>>>16)&0xffff);};
+  w32(lh,0,0x04034b50);w16(lh,4,20);w16(lh,6,0x0800);w16(lh,8,0);w16(lh,10,dt);w16(lh,12,dd);w32(lh,14,crc);w32(lh,18,body.length);w32(lh,22,body.length);w16(lh,26,fn.length);w16(lh,28,0);lh.set(fn,30);
+  w32(cd,0,0x02014b50);w16(cd,4,20);w16(cd,6,20);w16(cd,8,0x0800);w16(cd,10,0);w16(cd,12,dt);w16(cd,14,dd);w32(cd,16,crc);w32(cd,20,body.length);w32(cd,24,body.length);w16(cd,28,fn.length);w32(cd,42,0);cd.set(fn,46);
+  w32(end,0,0x06054b50);w16(end,8,1);w16(end,10,1);w32(end,12,cd.length);w32(end,16,lh.length+body.length);
+  return new Blob([lh,body,cd,end],{type:'application/zip'});}
 async function save(data,ext){const note=$('note');
   if(!S.dl&&!window.claude){const blob=data instanceof Blob?data:new Blob([data],{type:ext==='svg'?'image/svg+xml':'application/octet-stream'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname(ext);document.body.appendChild(a);a.click();
     setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);note.textContent='Saved '+fname(ext)+'.';return;}
   if(!S.dl){note.textContent='Saving is not available in this view. Switch to Result, then right-click (or long-press) the image and choose Save image.';return;}
   try{const name=fname(ext);await S.dl.save({filename:name,data});note.textContent='Saved '+name+'.';}
-  catch(err){const c=err&&err.code;note.textContent=c==='declined'?'Save cancelled.':c==='rate_limited'?'A save prompt is already open. Finish it, then try again.':
+  catch(err){const c=err&&err.code;
+    // (Claude's viewer saves only some kinds of file, and a .dxf is not one of them: the cut file goes inside a .zip,
+    // which it does save; open the .zip and the .dxf is in it)
+    if(c==='rejected_extension'&&ext!=='zip'){try{const name=fname(ext),z=zipOne(name,data),zn=name.replace(/\.[a-z0-9]+$/i,'')+'.zip';
+        await S.dl.save({filename:zn,data:z});note.textContent='Saved '+zn+'. This view cannot save a .'+ext+' file directly, so it is inside the .zip: open the .zip and use the .'+ext+' in it.';return;}
+      catch(e2){const c2=e2&&e2.code;note.textContent=c2==='declined'?'Save cancelled.':c2==='rate_limited'?'A save prompt is already open. Finish it, then try again.':'Saving is not available here.';return;}}note.textContent=c==='declined'?'Save cancelled.':c==='rate_limited'?'A save prompt is already open. Finish it, then try again.':
     'Saving is not available here. Switch to Result, then right-click (or long-press) the image and choose Save image.';}}
 try{const v=localStorage.getItem('pngPPI');if(v==='600'||v==='300')$('pngPPI').value=v;}catch(e){}
 $('pngPPI').addEventListener('change',e=>{try{localStorage.setItem('pngPPI',e.target.value);}catch(_){}});

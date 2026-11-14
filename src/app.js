@@ -977,13 +977,28 @@ mat.addEventListener('drop',e=>{const f=e.dataTransfer&&e.dataTransfer.files[0];
 window.addEventListener('paste',e=>{const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith('image/'));if(it)loadFile(it.getAsFile());});
 
 function fname(ext){const w=widthIn(),z=sizeIn();return S.name+'-'+fit2(z.w)+'x'+fit2(z.h)+'in-'+w.toFixed(3).replace(/^0/,'')+'in-lines.'+ext;}
+// (one file in a .zip, stored as it is: a zip opens on every computer without anything extra)
+function zipOne(name,data){const enc=new TextEncoder(),fn=enc.encode(name),body=typeof data==='string'?enc.encode(data):new Uint8Array(data);
+  let crc=-1;for(let i=0;i<body.length;i++){crc^=body[i];for(let k=0;k<8;k++)crc=(crc>>>1)^(0xEDB88320&-(crc&1));}crc=(crc^-1)>>>0;
+  const d=new Date(),dt=((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1))&0xffff,dd=(((d.getFullYear()-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())&0xffff;
+  const lh=new Uint8Array(30+fn.length),cd=new Uint8Array(46+fn.length),end=new Uint8Array(22);
+  const w16=(a,o,v)=>{a[o]=v&255;a[o+1]=(v>>>8)&255;},w32=(a,o,v)=>{w16(a,o,v&0xffff);w16(a,o+2,(v>>>16)&0xffff);};
+  w32(lh,0,0x04034b50);w16(lh,4,20);w16(lh,6,0x0800);w16(lh,8,0);w16(lh,10,dt);w16(lh,12,dd);w32(lh,14,crc);w32(lh,18,body.length);w32(lh,22,body.length);w16(lh,26,fn.length);w16(lh,28,0);lh.set(fn,30);
+  w32(cd,0,0x02014b50);w16(cd,4,20);w16(cd,6,20);w16(cd,8,0x0800);w16(cd,10,0);w16(cd,12,dt);w16(cd,14,dd);w32(cd,16,crc);w32(cd,20,body.length);w32(cd,24,body.length);w16(cd,28,fn.length);w32(cd,42,0);cd.set(fn,46);
+  w32(end,0,0x06054b50);w16(end,8,1);w16(end,10,1);w32(end,12,cd.length);w32(end,16,lh.length+body.length);
+  return new Blob([lh,body,cd,end],{type:'application/zip'});}
 async function save(data,ext){const note=$('note');
   if(!S.dl&&!window.claude){const blob=data instanceof Blob?data:new Blob([data],{type:ext==='svg'?'image/svg+xml':'application/octet-stream'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname(ext);document.body.appendChild(a);a.click();
     setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);note.textContent='Saved '+fname(ext)+'.';return;}
   if(!S.dl){note.textContent='Saving is not available in this view. Switch to Result, then right-click (or long-press) the image and choose Save image.';return;}
   try{const name=fname(ext);await S.dl.save({filename:name,data});note.textContent='Saved '+name+'.';}
-  catch(err){const c=err&&err.code;note.textContent=c==='declined'?'Save cancelled.':c==='rate_limited'?'A save prompt is already open. Finish it, then try again.':
+  catch(err){const c=err&&err.code;
+    // (Claude's viewer saves only some kinds of file, and a .dxf is not one of them: the cut file goes inside a .zip,
+    // which it does save; open the .zip and the .dxf is in it)
+    if(c==='rejected_extension'&&ext!=='zip'){try{const name=fname(ext),z=zipOne(name,data),zn=name.replace(/\.[a-z0-9]+$/i,'')+'.zip';
+        await S.dl.save({filename:zn,data:z});note.textContent='Saved '+zn+'. This view cannot save a .'+ext+' file directly, so it is inside the .zip: open the .zip and use the .'+ext+' in it.';return;}
+      catch(e2){const c2=e2&&e2.code;note.textContent=c2==='declined'?'Save cancelled.':c2==='rate_limited'?'A save prompt is already open. Finish it, then try again.':'Saving is not available here.';return;}}note.textContent=c==='declined'?'Save cancelled.':c==='rate_limited'?'A save prompt is already open. Finish it, then try again.':
     'Saving is not available here. Switch to Result, then right-click (or long-press) the image and choose Save image.';}}
 try{const v=localStorage.getItem('pngPPI');if(v==='600'||v==='300')$('pngPPI').value=v;}catch(e){}
 $('pngPPI').addEventListener('change',e=>{try{localStorage.setItem('pngPPI',e.target.value);}catch(_){}});

@@ -112,9 +112,8 @@ function drawnEnds(strokes,drawn,dmap,med){
   const paper=P=>{let n=0;for(const q of P){const y=Math.round(q[0]),x=Math.round(q[1]);if(y>=0&&x>=0&&y<H&&x<W&&dmap[y*W+x]<0.5)n++;}return n;};
   const nearOn=(p,R)=>{let best=-1,bd=1e9;const py=Math.round(p[0]),px=Math.round(p[1]);for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){const y=py+dy,x=px+dx;if(y<0||x<0||y>=H||x>=W||!on[y*W+x])continue;const d=dx*dx+dy*dy;if(d<bd){bd=d;best=y*W+x;}}return bd<=R*R?best:-1;};
   // (nearest point on any line but this one)
-  const nearOther=(p,q,lim,skip)=>{let bd=lim*lim,bp=null,bs=-1,bt=null;for(let s=0;s<strokes.length;s++){if(s===q||(skip&&skip.has(s)))continue;const S=strokes[s];
-      for(let k=1;k<S.length;k++){const a=S[k-1],b=S[k],vy=b[0]-a[0],vx=b[1]-a[1],L2=vy*vy+vx*vx;let t=L2>0?((p[0]-a[0])*vy+(p[1]-a[1])*vx)/L2:0;t=Math.max(0,Math.min(1,t));
-        const y=a[0]+vy*t,x=a[1]+vx*t,d=(y-p[0])**2+(x-p[1])**2;if(d<bd){bd=d;bp=[y,x];bs=s;bt=[vy,vx];}}}return bp?{p:bp,s:bs,d:Math.sqrt(bd),t:bt}:null;};
+  const NI=nearIndex(strokes,2*med);
+  const nearOther=(p,q,lim,skip)=>{const b=NI.near(p,t=>t===q||(skip&&skip.has(t)),lim);return b?{p:b.p,s:b.s,d:b.d,t:b.t}:null;};
   const R1=Math.max(2,Math.ceil(0.25*med)),Rt=Math.max(2,0.3*med);
   // (which line is near each pixel, so the walk can stop at the first other line it reaches)
   const own=new Int32Array(W*H).fill(-1),two=new Uint8Array(W*H),Ri=Math.ceil(Rt);
@@ -188,7 +187,7 @@ function drawnEnds(strokes,drawn,dmap,med){
     // (and no sharp bend where the old line was smooth: a drawn way that kinks into the other line is not used)
     const turn=(R,n)=>{let m=0;const st=Math.max(2,Math.round(0.4*med/2));for(let i=st;i<Math.min(R.length,n)-st;i++){const a=R[i-st],b=R[i],c=R[i+st];const v1=[b[0]-a[0],b[1]-a[1]],v2=[c[0]-b[0],c[1]-b[1]];const n1=Math.hypot(...v1),n2=Math.hypot(...v2);if(n1<1e-6||n2<1e-6)continue;m=Math.max(m,Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(n1*n2)))));}return m;};
     if(turn(cand,thin.length+Math.ceil(med))>Math.max(0.6,turn(Q,ai+Math.ceil(med))+0.25))continue;
-    strokes[q]=side?cand.reverse():cand;}
+    strokes[q]=side?cand.reverse():cand;NI.update(q);}
   return strokes;}
 
 // Keep narrow gaps: two lines that run into a third through one patch of ink join each other where the ink parts.
@@ -197,9 +196,8 @@ function drawnEnds(strokes,drawn,dmap,med){
 // on side by side to it with a sliver of glass between them that the drawing does not have. The line is ended on its
 // neighbour instead, at the point where the paper between them stops (a Y), and the neighbour alone goes on.
 function joinMerged(strokes,dmap,med){
-  const near=(p,skip)=>{let bd=1e18,bp=null,bs=-1;for(let s=0;s<strokes.length;s++){if(skip.has(s))continue;const S=strokes[s];if(!S||S.length<2)continue;
-      for(let k=1;k<S.length;k++){const a=S[k-1],b=S[k],vy=b[0]-a[0],vx=b[1]-a[1],L2=vy*vy+vx*vx;let t=L2>0?((p[0]-a[0])*vy+(p[1]-a[1])*vx)/L2:0;t=Math.max(0,Math.min(1,t));
-        const y=a[0]+vy*t,x=a[1]+vx*t,d=(y-p[0])**2+(x-p[1])**2;if(d<bd){bd=d;bp=[y,x];bs=s;}}}return bp?{p:bp,s:bs,d:Math.sqrt(bd)}:null;};
+  const NI=nearIndex(strokes,2*med);
+  const near=(p,skip)=>{const b=NI.near(p,skip);return b?{p:b.p,s:b.s,d:b.d}:null;};
   const inkBetween=(a,b)=>{const n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])));for(let t=0;t<=n;t++){const y=Math.round(a[0]+(b[0]-a[0])*t/n),x=Math.round(a[1]+(b[1]-a[1])*t/n);
       if(y<0||x<0||y>=H||x>=W||dmap[y*W+x]<0.5)return false;}return true;};
   for(let q=0;q<strokes.length;q++)for(let side=0;side<2;side++){
@@ -231,5 +229,5 @@ function joinMerged(strokes,dmap,med){
     const P1=[A[0]+dA[0]/nA*kk,A[1]+dA[1]/nA*kk],P2=[B[0]+dB[0]/nB*kk,B[1]+dB[1]/nB*kk];
     const curve=[];for(let i=16;i>=1;i--){const t=i/16,u=1-t;curve.push([u*u*u*A[0]+3*u*u*t*P1[0]+3*u*t*t*P2[0]+t*t*t*B[0],u*u*u*A[1]+3*u*u*t*P1[1]+3*u*t*t*P2[1]+t*t*t*B[1]]);}
     {let off=0;for(const c of curve){const y=Math.round(c[0]),x=Math.round(c[1]);if(y<0||x<0||y>=H||x>=W||dmap[y*W+x]<0.5)off++;}if(off)continue;}
-    const cand=curve.concat(Q.slice(k0));strokes[q]=side?cand.reverse():cand;}
+    const cand=curve.concat(Q.slice(k0));strokes[q]=side?cand.reverse():cand;NI.update(q);}
   return strokes;}
