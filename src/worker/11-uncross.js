@@ -166,6 +166,8 @@ function drawnEnds(strokes,drawn,dmap,med){
     if(hit<0)continue;
     // (an end already where the drawing has it is left alone)
     if(Math.hypot(hitF.p[0]-e[0],hitF.p[1]-e[1])<0.8*med)continue;
+    // (nor onto the outer border: lines that end by the border keep the end they were traced with)
+    {const m=1.5*med;if(hitF.p[0]<m||hitF.p[1]<m||hitF.p[0]>H-1-m||hitF.p[1]>W-1-m)continue;}
     // (nor a walk that just stops at a joint it passes on its way: the new end is about as far out as the old one)
     {const ay=(a0/W)|0,ax=a0%W;if(Math.hypot(hitF.p[0]-ay,hitF.p[1]-ax)<0.5*Math.hypot(e[0]-ay,e[1]-ax))continue;}
     const path=[];for(let i=hit;i!==undefined;i=prev.get(i)){path.push([(i/W)|0,i%W]);if(i===a0)break;}
@@ -202,12 +204,13 @@ function joinMerged(strokes,dmap,med){
       if(y<0||x<0||y>=H||x>=W||dmap[y*W+x]<0.5)return false;}return true;};
   for(let q=0;q<strokes.length;q++)for(let side=0;side<2;side++){
     let Q=strokes[q];if(!Q||Q.length<6)continue;if(side)Q=Q.slice().reverse();
-    const e=Q[0],F=near(e,new Set([q]));if(!F||F.d>0.6*med)continue; // (a line that ends on another line)
+    const e=Q[0],F=near(e,new Set([q]));if(!F||F.d>0.6*med)continue;
+    {const m=1.5*med;if(F.p[0]<m||F.p[1]<m||F.p[0]>H-1-m||F.p[1]>W-1-m)continue;} // (not at the outer border) // (a line that ends on another line)
     const skip=new Set([q,F.s]);
     // (from the end inward: how far the ink between this line and its nearest neighbour stays unbroken)
     let L=0,cut=-1,G=null;for(let k=0;k<Q.length-1&&L<5*med;k++){if(k)L+=Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]);
       const g=near(Q[k],skip);if(!g||g.d>1.6*med||g.d<0.3*med||!inkBetween(Q[k],g.p))break;if(G&&g.s!==G.s)break;G=g;cut=k;}
-    if(cut<0||L<0.8*med||!G)continue;let Lc=0;for(let k=1;k<=cut;k++)Lc+=Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]);if(Lc<0.8*med)continue;
+    if(cut<0||L<0.8*med||!G)continue;let Lc=0;for(let k=1;k<=cut;k++)Lc+=Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]);if(Lc<0.8*med||Lc>2*med)continue; // (a short merge, as where two strips run together just below a line; a long wedge is left alone)
     // (only a neighbour that runs into the same line right beside this one, alongside it: two strips merging)
     const S=strokes[G.s],gEnd=Math.hypot(S[0][0]-e[0],S[0][1]-e[1])<Math.hypot(S[S.length-1][0]-e[0],S[S.length-1][1]-e[1])?S:S.slice().reverse();
     if(Math.hypot(gEnd[0][0]-e[0],gEnd[0][1]-e[1])>2.5*med)continue;
@@ -219,9 +222,14 @@ function joinMerged(strokes,dmap,med){
     const k0=Math.min(Q.length-2,cut);
     let gi=0,gd=1e18;for(let i=0;i<gEnd.length;i++){const d=(gEnd[i][0]-G.p[0])**2+(gEnd[i][1]-G.p[1])**2;if(d<gd){gd=d;gi=i;}}
     let l=0,j=gi;while(j>0&&l<0.6*med){l+=Math.hypot(gEnd[j][0]-gEnd[j-1][0],gEnd[j][1]-gEnd[j-1][1]);j--;}
-    const A=Q[k0],B=gEnd[0],tq=Math.min(Q.length-1,k0+3),dir=[Q[k0][0]-Q[tq][0],Q[k0][1]-Q[tq][1]],dn=Math.hypot(dir[0],dir[1])||1;
-    const h=0.55*Math.hypot(B[0]-A[0],B[1]-A[1]),C1=[A[0]+dir[0]/dn*h,A[1]+dir[1]/dn*h];
-    const curve=[];for(let i=16;i>=1;i--){const t=i/16,u=1-t;curve.push([u*u*A[0]+2*u*t*C1[0]+t*t*B[0],u*u*A[1]+2*u*t*C1[1]+t*t*B[1]]);}
+    // (an arch over the top of the glass between them: up from where the ink parts, over, and down onto the neighbour a
+    // little below the line, its top just under that line)
+    let lj=0,jb=0;while(jb<gEnd.length-1&&lj<0.5*med){lj+=Math.hypot(gEnd[jb+1][0]-gEnd[jb][0],gEnd[jb+1][1]-gEnd[jb][1]);jb++;}
+    const A=Q[k0],B=gEnd[jb],tq=Math.min(Q.length-1,k0+3),dA=[Q[k0][0]-Q[tq][0],Q[k0][1]-Q[tq][1]],nA=Math.hypot(dA[0],dA[1])||1;
+    const tb=Math.min(gEnd.length-1,jb+3),dB=[gEnd[jb][0]-gEnd[tb][0],gEnd[jb][1]-gEnd[tb][1]],nB=Math.hypot(dB[0],dB[1])||1;
+    const kk=Math.max(0.4*med,1.2*lj+0.5*Math.max(0,Math.hypot(A[0]-e[0],A[1]-e[1])-lj));
+    const P1=[A[0]+dA[0]/nA*kk,A[1]+dA[1]/nA*kk],P2=[B[0]+dB[0]/nB*kk,B[1]+dB[1]/nB*kk];
+    const curve=[];for(let i=16;i>=1;i--){const t=i/16,u=1-t;curve.push([u*u*u*A[0]+3*u*u*t*P1[0]+3*u*t*t*P2[0]+t*t*t*B[0],u*u*u*A[1]+3*u*u*t*P1[1]+3*u*t*t*P2[1]+t*t*t*B[1]]);}
     {let off=0;for(const c of curve){const y=Math.round(c[0]),x=Math.round(c[1]);if(y<0||x<0||y>=H||x>=W||dmap[y*W+x]<0.5)off++;}if(off)continue;}
     const cand=curve.concat(Q.slice(k0));strokes[q]=side?cand.reverse():cand;}
   return strokes;}
