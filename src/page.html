@@ -86,6 +86,7 @@
           <label class="check"><input id="invert" type="checkbox"><span>Lines are light on a dark background</span></label>
           <label class="check"><input id="dropText" type="checkbox" checked><span>Remove numbers and labels<br><span class="hint">Small bits of ink written much thinner than the lines, like piece numbers, are left out</span></span></label>
           <label class="check"><input id="dropIslands" type="checkbox" checked><span>Remove circles inside pieces<br><span class="hint">A small ring that touches no other line (a circle within a circle) can't be cut in glass, so it is left out</span></span></label>
+          <label class="check"><input id="joinPieces" type="checkbox"><span>Join pieces drawn apart<br><span class="hint">For designs where every piece has its own outline with a thin white gap between pieces: each gap becomes one shared lead line, and a shape standing on its own is joined to the nearest line</span></span></label>
           <label class="check"><input id="keepGaps" type="checkbox"><span>Keep narrow gaps between lines<br><span class="hint">For clean, crowded drawings: lines drawn close together, and the thin tips of pieces, are traced as drawn instead of being run together. Leave off for scans with broken or hollow lines</span></span></label>
           <label class="check"><input id="exactShapes" type="checkbox" checked><span>Make straight lines and circles exact</span></label>
           <label class="check"><input id="squareUp" type="checkbox" checked><span>Square up the panel<br><span class="hint">Lines that are nearly level or upright become exactly level or upright, so the border has true right angles and sits straight on the page</span></span></label>
@@ -131,7 +132,7 @@
       <div id="fixPop" class="fix-pop" role="dialog" aria-label="Fix this spot" hidden></div>
     </div>
     <div class="fix-bar" id="fixBar" hidden>
-      <span id="fixHelp">Click a dot or a line to choose how it should look, or drag it to reshape it.</span>
+      <span id="fixHelp">Click a dot or a line to choose how it should look, or drag it to reshape it. To bend a line at a spot of your own, click the line and choose Add a dot here, then drag the dot.</span>
       <label class="fix-reach">Drag reach <select id="fixReach"><option value="short">short</option><option value="medium" selected>medium</option><option value="wide">wide</option><option value="line">whole line</option></select></label>
       <button id="fixArea" aria-pressed="false" title="Drag a box around a spot to replace it with a mirror of the same spot on the other side">Mirror an area</button>
       <select id="fixAreaFlip" hidden aria-label="Copy from"><option value="lr">from the other side (left ↔ right)</option><option value="tb">from the other end (top ↔ bottom)</option></select>

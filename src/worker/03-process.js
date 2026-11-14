@@ -64,6 +64,9 @@ function process(p){
   if(lines.length){const lw=inkWidth(m);for(const L of lines)drawSeg(m,L.ax,L.ay,L.bx,L.by,lw/2);}
   // numbers and labels written in the pieces: small separate bits of ink drawn much thinner than the lines
   if(p.dropText!==false)dropText(m);
+  // pieces drawn as separate outlines with narrow gaps between them: the gaps become shared lines (and numbers left
+  // standing on their own in the pieces are taken out there)
+  if(p.joinPieces&&!colorIn)joinPieces(m,p.dropText!==false);
   // estimate typical line thickness from ridge of distance map
   const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;
   let dbg=edt(bg);const ridge=[];
@@ -76,7 +79,8 @@ function process(p){
   // (not for colored patterns: they are clean drawings where every gap, however thin, is glass)
   // (and not for Change width only: lines are kept as drawn, gaps and all)
   const m0=p.keepGaps&&!p.asDrawn&&!colorIn?m.slice():null;
-  if(!colorIn&&!p.asDrawn){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
+  // (nor for joined pieces: a clean drawing, and its narrow pieces are glass)
+  if(!colorIn&&!p.asDrawn&&!p.joinPieces){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
     for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
     // pixels outside the image count as paper so the outer border is not pulled inward

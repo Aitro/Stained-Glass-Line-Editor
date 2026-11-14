@@ -279,6 +279,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
           <label class="check"><input id="invert" type="checkbox"><span>Lines are light on a dark background</span></label>
           <label class="check"><input id="dropText" type="checkbox" checked><span>Remove numbers and labels<br><span class="hint">Small bits of ink written much thinner than the lines, like piece numbers, are left out</span></span></label>
           <label class="check"><input id="dropIslands" type="checkbox" checked><span>Remove circles inside pieces<br><span class="hint">A small ring that touches no other line (a circle within a circle) can't be cut in glass, so it is left out</span></span></label>
+          <label class="check"><input id="joinPieces" type="checkbox"><span>Join pieces drawn apart<br><span class="hint">For designs where every piece has its own outline with a thin white gap between pieces: each gap becomes one shared lead line, and a shape standing on its own is joined to the nearest line</span></span></label>
           <label class="check"><input id="keepGaps" type="checkbox"><span>Keep narrow gaps between lines<br><span class="hint">For clean, crowded drawings: lines drawn close together, and the thin tips of pieces, are traced as drawn instead of being run together. Leave off for scans with broken or hollow lines</span></span></label>
           <label class="check"><input id="exactShapes" type="checkbox" checked><span>Make straight lines and circles exact</span></label>
           <label class="check"><input id="squareUp" type="checkbox" checked><span>Square up the panel<br><span class="hint">Lines that are nearly level or upright become exactly level or upright, so the border has true right angles and sits straight on the page</span></span></label>
@@ -324,7 +325,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
       <div id="fixPop" class="fix-pop" role="dialog" aria-label="Fix this spot" hidden></div>
     </div>
     <div class="fix-bar" id="fixBar" hidden>
-      <span id="fixHelp">Click a dot or a line to choose how it should look, or drag it to reshape it.</span>
+      <span id="fixHelp">Click a dot or a line to choose how it should look, or drag it to reshape it. To bend a line at a spot of your own, click the line and choose Add a dot here, then drag the dot.</span>
       <label class="fix-reach">Drag reach <select id="fixReach"><option value="short">short</option><option value="medium" selected>medium</option><option value="wide">wide</option><option value="line">whole line</option></select></label>
       <button id="fixArea" aria-pressed="false" title="Drag a box around a spot to replace it with a mirror of the same spot on the other side">Mirror an area</button>
       <select id="fixAreaFlip" hidden aria-label="Copy from"><option value="lr">from the other side (left ↔ right)</option><option value="tb">from the other end (top ↔ bottom)</option></select>
@@ -468,6 +469,9 @@ function process(p){
   if(lines.length){const lw=inkWidth(m);for(const L of lines)drawSeg(m,L.ax,L.ay,L.bx,L.by,lw/2);}
   // numbers and labels written in the pieces: small separate bits of ink drawn much thinner than the lines
   if(p.dropText!==false)dropText(m);
+  // pieces drawn as separate outlines with narrow gaps between them: the gaps become shared lines (and numbers left
+  // standing on their own in the pieces are taken out there)
+  if(p.joinPieces&&!colorIn)joinPieces(m,p.dropText!==false);
   // estimate typical line thickness from ridge of distance map
   const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;
   let dbg=edt(bg);const ridge=[];
@@ -480,7 +484,8 @@ function process(p){
   // (not for colored patterns: they are clean drawings where every gap, however thin, is glass)
   // (and not for Change width only: lines are kept as drawn, gaps and all)
   const m0=p.keepGaps&&!p.asDrawn&&!colorIn?m.slice():null;
-  if(!colorIn&&!p.asDrawn){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
+  // (nor for joined pieces: a clean drawing, and its narrow pieces are glass)
+  if(!colorIn&&!p.asDrawn&&!p.joinPieces){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
     for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
     // pixels outside the image count as paper so the outer border is not pulled inward
@@ -2181,7 +2186,8 @@ function joinMerged(strokes,dmap,med){
   return strokes;}
 // Circles inside circles: a small ring standing alone inside a piece, touching no other line (the middle of a
 // star, a dot in an eye). It would make the piece around it a ring of glass with a hole, which can't be cut, so it is
-// left out. A closed line that anything else touches or lands on is part of the pattern and stays.
+// left out. A closed line that anything else touches or lands on is part of the pattern and stays, and so does one
+// out in the open, not inside any piece.
 function dropIslands(strokes,med){
   const cell=Math.max(8,Math.round(med)),G=new Map(),key=(y,x)=>((y/cell)|0)*100000+((x/cell)|0);
   const put=(y,x,s)=>{const kk=key(y,x);let L=G.get(kk);if(!L)G.set(kk,L=[]);L.push(s);};
@@ -2194,6 +2200,12 @@ function dropIslands(strokes,med){
     if(y1-y0>H/4||x1-x0>W/4)return;
     // (nothing else within about a line width of it)
     for(const q of Q){const cy=(q[0]/cell)|0,cx=(q[1]/cell)|0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const L=G.get((cy+dy)*100000+cx+dx);if(L&&L.some(t=>t!==s))return;}}
+    // (and only inside a piece: lines all round it. A shape out in the open, such as a circle standing above the rest of
+    // a design, is part of the picture and stays; rays from its middle out to the picture's edge meet no other line)
+    const cy=(y0+y1)/2,cx=(x0+x1)/2;
+    for(let a=0;a<8;a++){const dy=Math.sin(a*Math.PI/4),dx=Math.cos(a*Math.PI/4);let hit=false;
+      for(let t=0;;t+=cell/2){const y=cy+dy*t,x=cx+dx*t;if(y<0||x<0||y>=H||x>=W)break;const L=G.get(key(y,x));if(L&&L.some(o=>o!==s)){hit=true;break;}}
+      if(!hit)return;}
     drop.add(s);});
   return drop.size?strokes.filter((_,s)=>!drop.has(s)):strokes;}
 // A round shape (a star's circle) that just touches another line, such as the border, is traced as two arcs (or one
@@ -2345,6 +2357,83 @@ function nearIndex(strokes,cell){
             if(d<bd||(best&&d===bd&&(s<best.s||(s===best.s&&k<best.k)))){bd=d;best={p:[y,x],s,k,t:[vy,vx]};}}}}}
     if(best)best.d=Math.sqrt(bd);return best;};
   return{near,update:s=>{drop(s);put(s);}};}
+// Some patterns draw every piece as its own outline, with a narrow white channel between neighbouring pieces (a
+// sticker or vinyl design). In glass the neighbours share one lead line. Each narrow channel of the white outside
+// the pieces is filled with ink, so the two outlines and the channel between them become one line, traced down its
+// middle; the white inside the pieces is never touched, so no piece is lost or changed. How narrow counts as a
+// channel is read from the picture: the most common width of the outside white between lines. A shape left on its
+// own afterwards (a circle above the rest, say) is joined to the nearest line by a short bar, so the whole design
+// holds together as one panel.
+function joinPieces(m,dropBits){
+  const N=W*H,out=new Uint8Array(N),st=new Int32Array(N);let sp=0;
+  // (the white outside every piece: reached from the picture's edge without crossing a line)
+  const seed=i=>{if(!m[i]&&!out[i]){out[i]=1;st[sp++]=i;}};
+  for(let x=0;x<W;x++){seed(x);seed((H-1)*W+x);}for(let y=0;y<H;y++){seed(y*W);seed(y*W+W-1);}
+  while(sp){const i=st[--sp],y=(i/W)|0,x=i-y*W;if(x>0)seed(i-1);if(x<W-1)seed(i+1);if(y>0)seed(i-W);if(y<H-1)seed(i+W);}
+  // (the channel width: the commonest half-width of that outside white, measured along its middle)
+  const din=new Uint8Array(N);for(let i=0;i<N;i++)din[i]=m[i]?1:0;const d=edt(din),hist=new Float64Array(64);
+  for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){const i=y*W+x;if(!out[i])continue;const v=d[i];if(v<1)continue;
+    if(v>=d[i-1]&&v>=d[i+1]&&v>=d[i-W]&&v>=d[i+W]){const r=Math.round(Math.sqrt(v));if(r<64)hist[r]++;}}
+  let mode=1;for(let r=1;r<40;r++)if(hist[r]>hist[mode])mode=r;
+  const R=Math.max(2,Math.min(25,Math.round(1.6*mode))),R2=R*R;
+  // (fill the narrow outside white: grow the lines by R, shrink them back by R, and keep what was outside)
+  const d1=edt(din);
+  const nd=new Uint8Array(N);for(let i=0;i<N;i++)nd[i]=d1[i]<=R2?0:1;   // (1 where the grown lines don't reach)
+  const d2=edt(nd);let filled=0;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;if(m[i]||!out[i])continue;const edge=Math.min(x+1,y+1,W-x,H-y);
+    if(d1[i]<=R2&&d2[i]>R2&&edge*edge>R2){m[i]=1;filled++;}}
+  // (where several channels meet, the white between them is wider than a channel and is left as a small pocket, cut off
+  // from the outside now; such a pocket was never a piece, so it is filled too: only a small, roundish one, since a
+  // longer pocket is a piece of glass drawn open to the outside)
+  {const reach=new Uint8Array(N);sp=0;const sd=i=>{if(!m[i]&&!reach[i]){reach[i]=1;st[sp++]=i;}};
+    for(let x=0;x<W;x++){sd(x);sd((H-1)*W+x);}for(let y=0;y<H;y++){sd(y*W);sd(y*W+W-1);}
+    while(sp){const i=st[--sp],y=(i/W)|0,x=i-y*W;if(x>0)sd(i-1);if(x<W-1)sd(i+1);if(y>0)sd(i-W);if(y<H-1)sd(i+W);}
+    const din2=new Uint8Array(N);for(let i=0;i<N;i++)din2[i]=m[i]?1:0;const d3=edt(din2),seen=new Uint8Array(N),lim=(1.6*R)*(1.6*R),maxArea=Math.PI*(2.5*R)*(2.5*R);
+    for(let i=0;i<N;i++){if(m[i]||!out[i]||reach[i]||seen[i])continue;const comp=[i];seen[i]=1;let mx=0;
+      for(let h=0;h<comp.length;h++){const j=comp[h],y=(j/W)|0,x=j-y*W;if(d3[j]>mx)mx=d3[j];
+        for(const k of[x>0?j-1:-1,x<W-1?j+1:-1,y>0?j-W:-1,y<H-1?j+W:-1])if(k>=0&&!m[k]&&out[k]&&!reach[k]&&!seen[k]){seen[k]=1;comp.push(k);}}
+      if(mx<=lim&&comp.length<=maxArea){for(const j of comp)m[j]=1;filled+=comp.length;}}}
+  // (shapes left on their own: joined to the nearest other line by a bar as wide as a channel)
+  const lab=new Int32Array(N).fill(-1),size=[];let nl=0;
+  for(let i=0;i<N;i++){if(!m[i]||lab[i]>=0)continue;let n=0;sp=0;st[sp++]=i;lab[i]=nl;
+    while(sp){const j=st[--sp],y=(j/W)|0,x=j-y*W;n++;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const Y=y+dy,X=x+dx;if(Y<0||X<0||Y>=H||X>=W)continue;const k=Y*W+X;if(m[k]&&lab[k]<0){lab[k]=nl;st[sp++]=k;}}}
+    size.push(n);nl++;}
+  let main=0;for(let c=1;c<nl;c++)if(size[c]>size[main])main=c;
+  // (only real shapes: a closed outline round a piece of its own, such as a circle; never a number or a speck)
+  const minSize=Math.max(60,40*R);let bars=0;const shape=new Map();
+  const isShape=c=>{if(shape.has(c))return shape.get(c);let y0=H,y1=-1,x0=W,x1=-1;
+    for(let i=0;i<N;i++)if(lab[i]===c){const y=(i/W)|0,x=i-y*W;if(y<y0)y0=y;if(y>y1)y1=y;if(x<x0)x0=x;if(x>x1)x1=x;}
+    let ok=false;if(size[c]>=minSize&&y1-y0>=6*R&&x1-x0>=6*R){
+      // (flood the white from the middle of its box, with only this shape as walls: a hole of its own if it never gets out)
+      const bw=x1-x0+1,bh=y1-y0+1,seen=new Uint8Array(bw*bh),cy=((y0+y1)/2)|0,cx=((x0+x1)/2)|0;
+      if(lab[cy*W+cx]!==c){const q=[(cy-y0)*bw+(cx-x0)];seen[q[0]]=1;let out2=false,n=0;
+        for(let h=0;h<q.length&&!out2;h++){const j=q[h],y=(j/bw)|0,x=j-y*bw;n++;
+          for(const[dy,dx]of[[1,0],[-1,0],[0,1],[0,-1]]){const Y=y+dy,X=x+dx;if(Y<0||X<0||Y>=bh||X>=bw){out2=true;break;}const k=Y*bw+X;if(seen[k]||lab[(Y+y0)*W+X+x0]===c)continue;seen[k]=1;q.push(k);}}
+        ok=!out2&&n>=9*R*R;}}
+    shape.set(c,ok);return ok;};
+  for(let pass=0;pass<nl&&nl>1;pass++){
+    // (distance outward from the main shape, with the spot it came from)
+    const dist=new Float32Array(N).fill(Infinity),from=new Int32Array(N).fill(-1);const q=[];
+    for(let i=0;i<N;i++)if(lab[i]===main){dist[i]=0;from[i]=i;q.push(i);}
+    let best=-1,bd=Infinity;const lim=12*R;
+    for(let h=0;h<q.length;h++){const i=q[h],y=(i/W)|0,x=i-y*W;if(dist[i]>lim)break;
+      for(const[dy,dx]of[[1,0],[-1,0],[0,1],[0,-1]]){const Y=y+dy,X=x+dx;if(Y<0||X<0||Y>=H||X>=W)continue;const k=Y*W+X;if(dist[k]!==Infinity)continue;
+        dist[k]=dist[i]+1;from[k]=from[i];
+        if(m[k]&&lab[k]!==main&&size[lab[k]]>=minSize&&isShape(lab[k])){const f=from[k],fy=(f/W)|0,fx=f-fy*W,e=Math.hypot(X-fx,Y-fy);if(e<bd){bd=e;best=k;}}
+        if(!m[k])q.push(k);}}
+    if(best<0)break;
+    const c=lab[best],f=from[best],fy=(f/W)|0,fx=f-fy*W,by=(best/W)|0,bx=best-by*W;
+    drawSeg(m,fx,fy,bx,by,R);bars++;
+    // (that shape is now part of the main one)
+    for(let i=0;i<N;i++)if(lab[i]===c)lab[i]=main;size[main]+=size[c];
+    {const x0=Math.max(0,Math.min(fx,bx)-R-1),x1=Math.min(W-1,Math.max(fx,bx)+R+1),y0=Math.max(0,Math.min(fy,by)-R-1),y1=Math.min(H-1,Math.max(fy,by)+R+1);
+      for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const i=y*W+x;if(m[i])lab[i]=main;}}}
+  // (numbers and other small marks left on their own inside the pieces: drawn as thin as the old outlines, so the
+  // usual text clean-up keeps them; here they stand apart from every line, and are taken out)
+  let bits=0;if(dropBits){const box=new Map();for(let i=0;i<N;i++){const c=lab[i];if(c<0||c===main)continue;const y=(i/W)|0,x=i-y*W;let b=box.get(c);if(!b)box.set(c,b=[y,y,x,x]);
+      if(y<b[0])b[0]=y;if(y>b[1])b[1]=y;if(x<b[2])b[2]=x;if(x>b[3])b[3]=x;}
+    for(const[c,b]of box){if(Math.max(b[1]-b[0],b[3]-b[2])>10*R||isShape(c))continue;for(let y=b[0];y<=b[1];y++)for(let x=b[2];x<=b[3];x++){const i=y*W+x;if(lab[i]===c){m[i]=0;}}bits++;}}
+  return{R,filled,bars,bits,main:size[main]};}
 </script>
 
 <script>
@@ -2423,7 +2512,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,keepGaps:$('keepGaps').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,keepGaps:$('keepGaps').checked,joinPieces:$('joinPieces').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
   lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
 // A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
@@ -2759,7 +2848,7 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
   h+=`<button data-act="smooth" aria-pressed="${near.some(f=>f.mode==='smooth')}">Smooth this line (one even curve between its joints)</button>`;
   h+=`<button data-act="straight" aria-pressed="${near.some(f=>f.mode==='straight')}">Straighten this line (between its joints)</button>`;
   h+=`<button data-act="remove">Remove this line (between its joints)</button>`;
-  h+=`<button data-act="joint" aria-pressed="${near.some(f=>f.mode==='joint')}">Add a joint here (Smooth and Straighten then stop at it)</button>`;
+  h+=`<button data-act="joint" aria-pressed="${near.some(f=>f.mode==='joint')}">${near.some(f=>f.mode==='joint')?'Take away the dot here':'Add a dot here (drag it to bend the line between its joints; Smooth and Straighten stop at it)'}</button>`;
   h+=`<button data-act="mirror" aria-pressed="${near.some(f=>f.mode==='mirror')}">Mirror the matching line from the other side…</button>`;
   const areasHere=S.fixes.filter(f=>{if(f.mode!=='area')return false;const b=areaPageBox(f);return px>b[0]&&px<b[2]&&py>b[1]&&py<b[3];});
   if(areasHere.length)h+=`<button data-act="unarea">Remove the mirrored area here</button>`;
@@ -2779,7 +2868,7 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
     // again takes it away; Smooth or Straighten replaces a Smooth or Straighten of the same stretch only, so
     // the stretches on either side of a joint keep theirs; Automatic takes everything here away)
     if(act==='remove'){const mine=stretchAt(sx,sy);if(!S.fixes.some(f=>f.mode==='remove'&&stretchAt(f.sx,f.sy)===mine))S.fixes.push({sx,sy,mode:'remove'});}
-    else if(act==='joint'){const had=near.filter(f=>f.mode==='joint');S.fixes=S.fixes.filter(f=>!had.includes(f));if(!had.length)S.fixes.push({sx,sy,mode:'joint'});}
+    else if(act==='joint'){const had=near.filter(f=>f.mode==='joint');S.fixes=S.fixes.filter(f=>!had.includes(f));if(!had.length)S.fixes.push({sx,sy,mode:'joint',id:'d'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)});}
     else if(act==='auto')S.fixes=S.fixes.filter(f=>!near.includes(f));
     else{const kinds=act==='smooth'||act==='straight'?['smooth','straight']:['corner','round','fillet'];
       const mine=stretchAt(sx,sy),gone=S.fixes.filter(f=>kinds.includes(f.mode)&&(act==='smooth'||act==='straight'?stretchAt(f.sx,f.sy)===mine:near.includes(f)));
@@ -2842,7 +2931,11 @@ function applyOneDrag(P,offs,d){const n=offs.length-1;const[ax,ay]=outPos(...src
     if(bs>=0)pull(bs,bi,vx,vy,R);}
   else{let bs=-1,bi=-1,bd=2*lw;for(let s=0;s<n;s++)for(let j=offs[s];j<offs[s+1];j++){const dd=Math.hypot(P[2*j]-ax,P[2*j+1]-ay);if(dd<bd){bd=dd;bs=s;bi=j;}}
     if(bs<0)return moved;
-    if(d.whole){// the whole stretch between its joints moves as one; past a joint the line eases back, and lines
+    if(d.dot){// a dot the person added: the line bends there, easing off to nothing at the joints on either side
+      const T=stretchTools(orig,offs,lw),[i0,i1]=T.piece(bs,bi,d.dot),a=offs[bs],L=arc(bs);
+      for(let j=i0;j<=i1;j++){const w=j===bi?1:j<bi?1-smooth01((L[bi-a]-L[j-a])/((L[bi-a]-L[i0-a])||1)):1-smooth01((L[j-a]-L[bi-a])/((L[i1-a]-L[bi-a])||1));
+        if(w>0){P[2*j]+=vx*w;P[2*j+1]+=vy*w;}}moved.add(bs);}
+    else if(d.whole){// the whole stretch between its joints moves as one; past a joint the line eases back, and lines
       // that meet it at a joint move their ends with it
       const T=stretchTools(orig,offs,lw),[i0,i1]=T.piece(bs,bi),a=offs[bs],b=offs[bs+1],L=arc(bs),ease=Math.min(R,14*lw);
       for(let j=a;j<b;j++){const g=j<i0?L[i0-a]-L[j-a]:j>i1?L[j-a]-L[i1-a]:0,w=1-smooth01(g/ease);if(w>0){P[2*j]+=vx*w;P[2*j+1]+=vy*w;}}moved.add(bs);
@@ -2874,13 +2967,13 @@ function patternMidX(){const P=S.rawStrokes;let lo=Infinity,hi=-Infinity;for(let
 // (shared by the fixes that reshape one stretch of a line between its joints: mirror, smooth, straighten)
 function stretchTools(P,offs,lw){const n=offs.length-1,orig=Float32Array.from(P);
   // each picked line is taken between its joints: its own ends, and the spots where other lines end on it
-  const piece=(s0,i)=>{const a=offs[s0],b=offs[s0+1]-1;let lo=a,hi=b;
+  const piece=(s0,i,skip)=>{const a=offs[s0],b=offs[s0+1]-1;let lo=a,hi=b;
     for(let s=0;s<n;s++){if(s===s0)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;
       for(const e of[sa,sb-1]){let bj=-1,bd=1.2*lw;for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(d<bd){bd=d;bj=j;}}
         if(bj<0)continue;const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
         if(fromA<1.5*lw||fromB<1.5*lw)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}}
     // (joints the person added on this line count too)
-    for(const f of S.fixes){if(f.mode!=='joint')continue;const[jx,jy]=outPos(...srcToWork(f.sx,f.sy));let bj=-1,bd=1.5*lw;
+    for(const f of S.fixes){if(f.mode!=='joint'||(skip&&f.id===skip))continue;const[jx,jy]=outPos(...srcToWork(f.sx,f.sy));let bj=-1,bd=1.5*lw;
       for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-jx,orig[2*j+1]-jy);if(d<bd){bd=d;bj=j;}}if(bj<0||bj===i)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}
     return[lo,hi];};
   // how each end of the stretch is held: partway along the line, or where other lines end too (the point of a
@@ -3036,6 +3129,9 @@ $('fixLayer').addEventListener('pointerdown',e=>{if(e.button!==0)return;const[px
   if(S.areaMode){if(S.areaPending)cancelPending();closeFixPop();press={area:true,px,py,x0:e.clientX,y0:e.clientY,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}
   {const af=S.fixes.filter(f=>f.mode==='area');for(let i=0;i<af.length;i++){const g=gripAt(areaSrcPoly(af[i],i));if(Math.hypot(g[0]-px,g[1]-py)<14/sc){closeFixPop();
       press={grip:af[i],px,py,x0:e.clientX,y0:e.clientY,d:[0,0],dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}}
+  // (a dot the person added takes the drag when it starts right on it: the line bends there, between its joints)
+  {const f=dotAt(px,py,8/sc);if(f){if(!f.id)f.id='d'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+      press={px,py,x0:e.clientX,y0:e.clientY,j:-1,q:dotPage(f),dot:f,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}
   // (a drag takes a joint, and all the lines meeting there, only when it starts right on its dot; otherwise the line)
   let j=-1,bd=7/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;j=i;}});
   let q=j<0?nearestStroke(px,py,12/sc):null;if(j<0&&!q){bd=12/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;j=i;}});}
@@ -3051,7 +3147,10 @@ function junctionMeet(J){const geo=pageGeom(),c=jPage(J),lw=Math.max(2,widthIn()
 function pressDrag(e){const[px,py]=layerPoint(e),geo=pageGeom();if(press.j>=0&&!press.at)press.at=junctionMeet(S.junctions[press.j]);const at=press.j>=0?press.at:press.q;
   const[wx,wy]=pageToWorkInternal(at[0],at[1]);const[sx,sy]=workToSrc(wx,wy);
   const[ox,oy]=unrotVec((px-press.px)/geo.k,(py-press.py)/geo.k);
-  return{mode:'drag',sx,sy,dx:ox/S.sx,dy:oy/S.sy,r:reachWork()/S.sx,j:press.j>=0,whole:press.j<0&&$('fixReach').value==='line'};}
+  const r={mode:'drag',sx,sy,dx:ox/S.sx,dy:oy/S.sy,r:reachWork()/S.sx,j:press.j>=0,whole:press.j<0&&!press.dot&&$('fixReach').value==='line'};if(press.dot)r.dot=press.dot.id;return r;}
+// (the dots the person added on lines, where they are on the page now)
+function dotPage(f){const q=outPos(...srcToWork(f.sx,f.sy));return pageGeom().map(q[0],q[1]);}
+function dotAt(px,py,lim){let best=null,bd=lim;for(const f of S.fixes){if(f.mode!=='joint')continue;const p=dotPage(f),d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;best=f;}}return best;}
 // (the box being drawn, and the matching box on the other side that it will copy from)
 function areaPreview(px,py){const k=1/layerScale(),geo=pageGeom(),img=$('view'),cx=v=>Math.max(0,Math.min(img.naturalWidth,v)),cy=v=>Math.max(0,Math.min(img.naturalHeight,v)),b=[cx(Math.min(press.px,px)),cy(Math.min(press.py,py)),cx(Math.max(press.px,px)),cy(Math.max(press.py,py))];
   const mf=mirrorFn(S.areaFlip),corners=[[b[0],b[1]],[b[2],b[1]],[b[2],b[3]],[b[0],b[3]]].map(([x,y])=>{const o=outPos(...pageToWorkInternal(x,y)),q=mf(o[0],o[1]);return geo.map(q[0],q[1]);});
@@ -3080,7 +3179,9 @@ let hoverRaf=0;
 function showHover(px,py){const L=$('fixLayer'),old=L.querySelector('#hoverMark');if(old)old.remove();if(!S.fixMode||S.areaMode||S.drawMode||!S.strokes||press)return;
   const sc=layerScale(),k=1/sc,geo=pageGeom();let h='';
   let bj=-1,bd=7/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;bj=i;}});
-  if(bj>=0){const p=jPage(S.junctions[bj]);h=`<circle cx="${p[0]}" cy="${p[1]}" r="${11*k}" fill="none" stroke="var(--fix)" stroke-width="${3*k}"/>`;}
+  const dot=dotAt(px,py,8/sc);
+  if(dot){const p=dotPage(dot);h=`<circle cx="${p[0]}" cy="${p[1]}" r="${11*k}" fill="none" stroke="var(--fix)" stroke-width="${3*k}"/>`;}
+  else if(bj>=0){const p=jPage(S.junctions[bj]);h=`<circle cx="${p[0]}" cy="${p[1]}" r="${11*k}" fill="none" stroke="var(--fix)" stroke-width="${3*k}"/>`;}
   else{const P=S.strokes,o=S.offs,lim=12/sc;let bs=-1,bi=-1,bb=Infinity;
     for(let s=0;s+1<o.length;s++)for(let j=o[s];j<o[s+1];j++){const q=geo.map(P[2*j],P[2*j+1]),d=Math.hypot(q[0]-px,q[1]-py);if(d<bb){bb=d;bs=s;bi=j;}}
     if(bs>=0&&bb<lim){const lw=Math.max(2,widthIn()*S.workPPI),[i0,i1]=stretchTools(P,o,lw).piece(bs,bi);let d='';
@@ -3115,7 +3216,7 @@ $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
     f.ox=0;f.oy=0;S.areaPending=f;drawFixLayer();pendingMenu();return;}
   if(!p.dragging){press=null;fixClick(p.px,p.py);return;}
   const d=pressDrag(e);press=null;if(Math.hypot(d.dx,d.dy)<0.3){drawFixLayer();return;}
-  S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();S.fixes.push(d);saveFixes();redrawDrags();});
+  S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();S.fixes.push(d);if(p.dot){p.dot.sx+=d.dx;p.dot.sy+=d.dy;}saveFixes();redrawDrags();});
 $('fixLayer').addEventListener('pointercancel',()=>{press=null;drawFixLayer();});
 // (a box just drawn waits here: its copy-from box can be dragged into place first, then it is applied)
 function pendingMenu(){const f=S.areaPending;if(!f)return;const b=areaPageBox(f);
@@ -3208,7 +3309,7 @@ function addedLineMenu(L,px,py){S.fixSel={pt:[px,py]};drawFixLayer();
   pop.querySelector('[data-act="other"]').onclick=()=>{const q=nearestStroke(px,py,30/layerScale());if(q)pointMenu(q[0],q[1]);else closeFixPop();};}
 // (drawing: drag from one point to another; an end near a line snaps onto it)
 function setDrawMode(on){S.drawMode=on;S.drawLine=null;$('fixDraw').setAttribute('aria-pressed',String(on));$('fixLayer').classList.toggle('picking-area',on);
-  $('fixHelp').textContent=on?'Drag from one line to another to add a straight lead line. Ends near a line snap onto it (Esc to stop).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
+  $('fixHelp').textContent=on?'Drag from one line to another to add a straight lead line. Ends near a line snap onto it (Esc to stop).':'Click a dot or a line to choose how it should look, or drag it to reshape it. To bend a line at a spot of your own, click the line and choose Add a dot here, then drag the dot.';}
 function snapEnd(px,py){const q=nearestStroke(px,py,14/layerScale());if(q){const r=[q[0],q[1]];r.snap=true;return r;}return[px,py];}
 $('fixDraw').addEventListener('click',()=>{closeFixPop();setAreaMode(false);S.symPending=null;setDrawMode(!S.drawMode);drawFixLayer();});
 
@@ -3260,7 +3361,7 @@ function checkMarkup(k){let h='';for(const m of S.checkMarks){h+=`<polygon class
 S.checkRun=0;
 $('fixCheck').addEventListener('click',()=>{S.checkOn=!S.checkOn;$('fixCheck').setAttribute('aria-pressed',String(S.checkOn));if(S.checkOn){$('note').textContent='Checking the pieces…';runCheck();}else{S.checkMarks=null;$('note').textContent='';drawFixLayer();}});
 function setAreaMode(on){if(!on&&S.areaPending)S.areaPending=null;S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixAreaFlip').hidden=!on;$('fixLayer').classList.toggle('picking-area',on);$('mat').classList.toggle('picking-area',on);
-  $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
+  $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it. To bend a line at a spot of your own, click the line and choose Add a dot here, then drag the dot.';}
 S.areaFlip='lr';$('fixAreaFlip').addEventListener('change',e=>{S.areaFlip=e.target.value;});
 $('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;S.symPending=null;if(S.drawMode)setDrawMode(false);setAreaMode(!S.areaMode);});
 $('fixBtn').addEventListener('click',()=>{if(!S.go&&!S.fixMode)setMode('drawn');S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);setDrawMode(false);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
@@ -3305,6 +3406,7 @@ $('smooth').addEventListener('input',()=>{updateLabels();schedule(run,350);});
 $('invert').addEventListener('change',()=>{if(S.src){findCrop();prepare();}});
 $('dropText').addEventListener('change',()=>schedule(run,0));
 $('keepGaps').addEventListener('change',()=>schedule(run,0));
+$('joinPieces').addEventListener('change',()=>schedule(run,0));
 $('dropIslands').addEventListener('change',()=>schedule(run,0));
 $('exactShapes').addEventListener('change',()=>{$('squareUp').disabled=!$('exactShapes').checked;schedule(run,0);});
 $('squareUp').addEventListener('change',()=>schedule(run,0));

@@ -1,6 +1,7 @@
 // Circles inside circles: a small ring standing alone inside a piece, touching no other line (the middle of a
 // star, a dot in an eye). It would make the piece around it a ring of glass with a hole, which can't be cut, so it is
-// left out. A closed line that anything else touches or lands on is part of the pattern and stays.
+// left out. A closed line that anything else touches or lands on is part of the pattern and stays, and so does one
+// out in the open, not inside any piece.
 function dropIslands(strokes,med){
   const cell=Math.max(8,Math.round(med)),G=new Map(),key=(y,x)=>((y/cell)|0)*100000+((x/cell)|0);
   const put=(y,x,s)=>{const kk=key(y,x);let L=G.get(kk);if(!L)G.set(kk,L=[]);L.push(s);};
@@ -13,5 +14,11 @@ function dropIslands(strokes,med){
     if(y1-y0>H/4||x1-x0>W/4)return;
     // (nothing else within about a line width of it)
     for(const q of Q){const cy=(q[0]/cell)|0,cx=(q[1]/cell)|0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const L=G.get((cy+dy)*100000+cx+dx);if(L&&L.some(t=>t!==s))return;}}
+    // (and only inside a piece: lines all round it. A shape out in the open, such as a circle standing above the rest of
+    // a design, is part of the picture and stays; rays from its middle out to the picture's edge meet no other line)
+    const cy=(y0+y1)/2,cx=(x0+x1)/2;
+    for(let a=0;a<8;a++){const dy=Math.sin(a*Math.PI/4),dx=Math.cos(a*Math.PI/4);let hit=false;
+      for(let t=0;;t+=cell/2){const y=cy+dy*t,x=cx+dx*t;if(y<0||x<0||y>=H||x>=W)break;const L=G.get(key(y,x));if(L&&L.some(o=>o!==s)){hit=true;break;}}
+      if(!hit)return;}
     drop.add(s);});
   return drop.size?strokes.filter((_,s)=>!drop.has(s)):strokes;}

@@ -74,7 +74,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,keepGaps:$('keepGaps').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,keepGaps:$('keepGaps').checked,joinPieces:$('joinPieces').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
   lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
 // A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
@@ -410,7 +410,7 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
   h+=`<button data-act="smooth" aria-pressed="${near.some(f=>f.mode==='smooth')}">Smooth this line (one even curve between its joints)</button>`;
   h+=`<button data-act="straight" aria-pressed="${near.some(f=>f.mode==='straight')}">Straighten this line (between its joints)</button>`;
   h+=`<button data-act="remove">Remove this line (between its joints)</button>`;
-  h+=`<button data-act="joint" aria-pressed="${near.some(f=>f.mode==='joint')}">Add a joint here (Smooth and Straighten then stop at it)</button>`;
+  h+=`<button data-act="joint" aria-pressed="${near.some(f=>f.mode==='joint')}">${near.some(f=>f.mode==='joint')?'Take away the dot here':'Add a dot here (drag it to bend the line between its joints; Smooth and Straighten stop at it)'}</button>`;
   h+=`<button data-act="mirror" aria-pressed="${near.some(f=>f.mode==='mirror')}">Mirror the matching line from the other side…</button>`;
   const areasHere=S.fixes.filter(f=>{if(f.mode!=='area')return false;const b=areaPageBox(f);return px>b[0]&&px<b[2]&&py>b[1]&&py<b[3];});
   if(areasHere.length)h+=`<button data-act="unarea">Remove the mirrored area here</button>`;
@@ -430,7 +430,7 @@ function pointMenu(px,py){const[wx,wy]=pageToWorkInternal(px,py);const[sx,sy]=wo
     // again takes it away; Smooth or Straighten replaces a Smooth or Straighten of the same stretch only, so
     // the stretches on either side of a joint keep theirs; Automatic takes everything here away)
     if(act==='remove'){const mine=stretchAt(sx,sy);if(!S.fixes.some(f=>f.mode==='remove'&&stretchAt(f.sx,f.sy)===mine))S.fixes.push({sx,sy,mode:'remove'});}
-    else if(act==='joint'){const had=near.filter(f=>f.mode==='joint');S.fixes=S.fixes.filter(f=>!had.includes(f));if(!had.length)S.fixes.push({sx,sy,mode:'joint'});}
+    else if(act==='joint'){const had=near.filter(f=>f.mode==='joint');S.fixes=S.fixes.filter(f=>!had.includes(f));if(!had.length)S.fixes.push({sx,sy,mode:'joint',id:'d'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)});}
     else if(act==='auto')S.fixes=S.fixes.filter(f=>!near.includes(f));
     else{const kinds=act==='smooth'||act==='straight'?['smooth','straight']:['corner','round','fillet'];
       const mine=stretchAt(sx,sy),gone=S.fixes.filter(f=>kinds.includes(f.mode)&&(act==='smooth'||act==='straight'?stretchAt(f.sx,f.sy)===mine:near.includes(f)));
@@ -493,7 +493,11 @@ function applyOneDrag(P,offs,d){const n=offs.length-1;const[ax,ay]=outPos(...src
     if(bs>=0)pull(bs,bi,vx,vy,R);}
   else{let bs=-1,bi=-1,bd=2*lw;for(let s=0;s<n;s++)for(let j=offs[s];j<offs[s+1];j++){const dd=Math.hypot(P[2*j]-ax,P[2*j+1]-ay);if(dd<bd){bd=dd;bs=s;bi=j;}}
     if(bs<0)return moved;
-    if(d.whole){// the whole stretch between its joints moves as one; past a joint the line eases back, and lines
+    if(d.dot){// a dot the person added: the line bends there, easing off to nothing at the joints on either side
+      const T=stretchTools(orig,offs,lw),[i0,i1]=T.piece(bs,bi,d.dot),a=offs[bs],L=arc(bs);
+      for(let j=i0;j<=i1;j++){const w=j===bi?1:j<bi?1-smooth01((L[bi-a]-L[j-a])/((L[bi-a]-L[i0-a])||1)):1-smooth01((L[j-a]-L[bi-a])/((L[i1-a]-L[bi-a])||1));
+        if(w>0){P[2*j]+=vx*w;P[2*j+1]+=vy*w;}}moved.add(bs);}
+    else if(d.whole){// the whole stretch between its joints moves as one; past a joint the line eases back, and lines
       // that meet it at a joint move their ends with it
       const T=stretchTools(orig,offs,lw),[i0,i1]=T.piece(bs,bi),a=offs[bs],b=offs[bs+1],L=arc(bs),ease=Math.min(R,14*lw);
       for(let j=a;j<b;j++){const g=j<i0?L[i0-a]-L[j-a]:j>i1?L[j-a]-L[i1-a]:0,w=1-smooth01(g/ease);if(w>0){P[2*j]+=vx*w;P[2*j+1]+=vy*w;}}moved.add(bs);
@@ -525,13 +529,13 @@ function patternMidX(){const P=S.rawStrokes;let lo=Infinity,hi=-Infinity;for(let
 // (shared by the fixes that reshape one stretch of a line between its joints: mirror, smooth, straighten)
 function stretchTools(P,offs,lw){const n=offs.length-1,orig=Float32Array.from(P);
   // each picked line is taken between its joints: its own ends, and the spots where other lines end on it
-  const piece=(s0,i)=>{const a=offs[s0],b=offs[s0+1]-1;let lo=a,hi=b;
+  const piece=(s0,i,skip)=>{const a=offs[s0],b=offs[s0+1]-1;let lo=a,hi=b;
     for(let s=0;s<n;s++){if(s===s0)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;
       for(const e of[sa,sb-1]){let bj=-1,bd=1.2*lw;for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(d<bd){bd=d;bj=j;}}
         if(bj<0)continue;const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
         if(fromA<1.5*lw||fromB<1.5*lw)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}}
     // (joints the person added on this line count too)
-    for(const f of S.fixes){if(f.mode!=='joint')continue;const[jx,jy]=outPos(...srcToWork(f.sx,f.sy));let bj=-1,bd=1.5*lw;
+    for(const f of S.fixes){if(f.mode!=='joint'||(skip&&f.id===skip))continue;const[jx,jy]=outPos(...srcToWork(f.sx,f.sy));let bj=-1,bd=1.5*lw;
       for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-jx,orig[2*j+1]-jy);if(d<bd){bd=d;bj=j;}}if(bj<0||bj===i)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}
     return[lo,hi];};
   // how each end of the stretch is held: partway along the line, or where other lines end too (the point of a
@@ -687,6 +691,9 @@ $('fixLayer').addEventListener('pointerdown',e=>{if(e.button!==0)return;const[px
   if(S.areaMode){if(S.areaPending)cancelPending();closeFixPop();press={area:true,px,py,x0:e.clientX,y0:e.clientY,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}
   {const af=S.fixes.filter(f=>f.mode==='area');for(let i=0;i<af.length;i++){const g=gripAt(areaSrcPoly(af[i],i));if(Math.hypot(g[0]-px,g[1]-py)<14/sc){closeFixPop();
       press={grip:af[i],px,py,x0:e.clientX,y0:e.clientY,d:[0,0],dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}}
+  // (a dot the person added takes the drag when it starts right on it: the line bends there, between its joints)
+  {const f=dotAt(px,py,8/sc);if(f){if(!f.id)f.id='d'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+      press={px,py,x0:e.clientX,y0:e.clientY,j:-1,q:dotPage(f),dot:f,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}
   // (a drag takes a joint, and all the lines meeting there, only when it starts right on its dot; otherwise the line)
   let j=-1,bd=7/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;j=i;}});
   let q=j<0?nearestStroke(px,py,12/sc):null;if(j<0&&!q){bd=12/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;j=i;}});}
@@ -702,7 +709,10 @@ function junctionMeet(J){const geo=pageGeom(),c=jPage(J),lw=Math.max(2,widthIn()
 function pressDrag(e){const[px,py]=layerPoint(e),geo=pageGeom();if(press.j>=0&&!press.at)press.at=junctionMeet(S.junctions[press.j]);const at=press.j>=0?press.at:press.q;
   const[wx,wy]=pageToWorkInternal(at[0],at[1]);const[sx,sy]=workToSrc(wx,wy);
   const[ox,oy]=unrotVec((px-press.px)/geo.k,(py-press.py)/geo.k);
-  return{mode:'drag',sx,sy,dx:ox/S.sx,dy:oy/S.sy,r:reachWork()/S.sx,j:press.j>=0,whole:press.j<0&&$('fixReach').value==='line'};}
+  const r={mode:'drag',sx,sy,dx:ox/S.sx,dy:oy/S.sy,r:reachWork()/S.sx,j:press.j>=0,whole:press.j<0&&!press.dot&&$('fixReach').value==='line'};if(press.dot)r.dot=press.dot.id;return r;}
+// (the dots the person added on lines, where they are on the page now)
+function dotPage(f){const q=outPos(...srcToWork(f.sx,f.sy));return pageGeom().map(q[0],q[1]);}
+function dotAt(px,py,lim){let best=null,bd=lim;for(const f of S.fixes){if(f.mode!=='joint')continue;const p=dotPage(f),d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;best=f;}}return best;}
 // (the box being drawn, and the matching box on the other side that it will copy from)
 function areaPreview(px,py){const k=1/layerScale(),geo=pageGeom(),img=$('view'),cx=v=>Math.max(0,Math.min(img.naturalWidth,v)),cy=v=>Math.max(0,Math.min(img.naturalHeight,v)),b=[cx(Math.min(press.px,px)),cy(Math.min(press.py,py)),cx(Math.max(press.px,px)),cy(Math.max(press.py,py))];
   const mf=mirrorFn(S.areaFlip),corners=[[b[0],b[1]],[b[2],b[1]],[b[2],b[3]],[b[0],b[3]]].map(([x,y])=>{const o=outPos(...pageToWorkInternal(x,y)),q=mf(o[0],o[1]);return geo.map(q[0],q[1]);});
@@ -731,7 +741,9 @@ let hoverRaf=0;
 function showHover(px,py){const L=$('fixLayer'),old=L.querySelector('#hoverMark');if(old)old.remove();if(!S.fixMode||S.areaMode||S.drawMode||!S.strokes||press)return;
   const sc=layerScale(),k=1/sc,geo=pageGeom();let h='';
   let bj=-1,bd=7/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;bj=i;}});
-  if(bj>=0){const p=jPage(S.junctions[bj]);h=`<circle cx="${p[0]}" cy="${p[1]}" r="${11*k}" fill="none" stroke="var(--fix)" stroke-width="${3*k}"/>`;}
+  const dot=dotAt(px,py,8/sc);
+  if(dot){const p=dotPage(dot);h=`<circle cx="${p[0]}" cy="${p[1]}" r="${11*k}" fill="none" stroke="var(--fix)" stroke-width="${3*k}"/>`;}
+  else if(bj>=0){const p=jPage(S.junctions[bj]);h=`<circle cx="${p[0]}" cy="${p[1]}" r="${11*k}" fill="none" stroke="var(--fix)" stroke-width="${3*k}"/>`;}
   else{const P=S.strokes,o=S.offs,lim=12/sc;let bs=-1,bi=-1,bb=Infinity;
     for(let s=0;s+1<o.length;s++)for(let j=o[s];j<o[s+1];j++){const q=geo.map(P[2*j],P[2*j+1]),d=Math.hypot(q[0]-px,q[1]-py);if(d<bb){bb=d;bs=s;bi=j;}}
     if(bs>=0&&bb<lim){const lw=Math.max(2,widthIn()*S.workPPI),[i0,i1]=stretchTools(P,o,lw).piece(bs,bi);let d='';
@@ -766,7 +778,7 @@ $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
     f.ox=0;f.oy=0;S.areaPending=f;drawFixLayer();pendingMenu();return;}
   if(!p.dragging){press=null;fixClick(p.px,p.py);return;}
   const d=pressDrag(e);press=null;if(Math.hypot(d.dx,d.dy)<0.3){drawFixLayer();return;}
-  S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();S.fixes.push(d);saveFixes();redrawDrags();});
+  S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();S.fixes.push(d);if(p.dot){p.dot.sx+=d.dx;p.dot.sy+=d.dy;}saveFixes();redrawDrags();});
 $('fixLayer').addEventListener('pointercancel',()=>{press=null;drawFixLayer();});
 // (a box just drawn waits here: its copy-from box can be dragged into place first, then it is applied)
 function pendingMenu(){const f=S.areaPending;if(!f)return;const b=areaPageBox(f);
@@ -859,7 +871,7 @@ function addedLineMenu(L,px,py){S.fixSel={pt:[px,py]};drawFixLayer();
   pop.querySelector('[data-act="other"]').onclick=()=>{const q=nearestStroke(px,py,30/layerScale());if(q)pointMenu(q[0],q[1]);else closeFixPop();};}
 // (drawing: drag from one point to another; an end near a line snaps onto it)
 function setDrawMode(on){S.drawMode=on;S.drawLine=null;$('fixDraw').setAttribute('aria-pressed',String(on));$('fixLayer').classList.toggle('picking-area',on);
-  $('fixHelp').textContent=on?'Drag from one line to another to add a straight lead line. Ends near a line snap onto it (Esc to stop).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
+  $('fixHelp').textContent=on?'Drag from one line to another to add a straight lead line. Ends near a line snap onto it (Esc to stop).':'Click a dot or a line to choose how it should look, or drag it to reshape it. To bend a line at a spot of your own, click the line and choose Add a dot here, then drag the dot.';}
 function snapEnd(px,py){const q=nearestStroke(px,py,14/layerScale());if(q){const r=[q[0],q[1]];r.snap=true;return r;}return[px,py];}
 $('fixDraw').addEventListener('click',()=>{closeFixPop();setAreaMode(false);S.symPending=null;setDrawMode(!S.drawMode);drawFixLayer();});
 
@@ -911,7 +923,7 @@ function checkMarkup(k){let h='';for(const m of S.checkMarks){h+=`<polygon class
 S.checkRun=0;
 $('fixCheck').addEventListener('click',()=>{S.checkOn=!S.checkOn;$('fixCheck').setAttribute('aria-pressed',String(S.checkOn));if(S.checkOn){$('note').textContent='Checking the pieces…';runCheck();}else{S.checkMarks=null;$('note').textContent='';drawFixLayer();}});
 function setAreaMode(on){if(!on&&S.areaPending)S.areaPending=null;S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixAreaFlip').hidden=!on;$('fixLayer').classList.toggle('picking-area',on);$('mat').classList.toggle('picking-area',on);
-  $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it.';}
+  $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it. To bend a line at a spot of your own, click the line and choose Add a dot here, then drag the dot.';}
 S.areaFlip='lr';$('fixAreaFlip').addEventListener('change',e=>{S.areaFlip=e.target.value;});
 $('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;S.symPending=null;if(S.drawMode)setDrawMode(false);setAreaMode(!S.areaMode);});
 $('fixBtn').addEventListener('click',()=>{if(!S.go&&!S.fixMode)setMode('drawn');S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);setDrawMode(false);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
@@ -956,6 +968,7 @@ $('smooth').addEventListener('input',()=>{updateLabels();schedule(run,350);});
 $('invert').addEventListener('change',()=>{if(S.src){findCrop();prepare();}});
 $('dropText').addEventListener('change',()=>schedule(run,0));
 $('keepGaps').addEventListener('change',()=>schedule(run,0));
+$('joinPieces').addEventListener('change',()=>schedule(run,0));
 $('dropIslands').addEventListener('change',()=>schedule(run,0));
 $('exactShapes').addEventListener('change',()=>{$('squareUp').disabled=!$('exactShapes').checked;schedule(run,0);});
 $('squareUp').addEventListener('change',()=>schedule(run,0));
