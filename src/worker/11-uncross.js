@@ -58,3 +58,41 @@ function reachLines(strokes,med){
     if(best==null)continue;const hit=[p[0]+dir[0]*best,p[1]+dir[1]*best],add=[];const m=Math.max(1,Math.ceil(best));for(let i=1;i<=m;i++)add.push([p[0]+dir[0]*best*i/m,p[1]+dir[1]*best*i/m]);void hit;
     strokes[s]=e?Q.concat(add):add.reverse().concat(Q);}
   return strokes;}
+
+// Keep narrow gaps: a traced line that cuts across open paper (where tidying has pulled it straight past a bend, or
+// joined it to the wrong joint) is laid back along the line as drawn: the Change width only trace, which follows the
+// middle of the ink, between the same two ends.
+function followDrawn(strokes,drawn,dmap,med){
+  const on=new Uint8Array(W*H);
+  for(const Q of drawn)for(let k=1;k<Q.length;k++){const a=Q[k-1],b=Q[k],n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])));
+    for(let t=0;t<=n;t++){const y=Math.round(a[0]+(b[0]-a[0])*t/n),x=Math.round(a[1]+(b[1]-a[1])*t/n);if(y>=0&&x>=0&&y<H&&x<W)on[y*W+x]=1;}}
+  const dense=Q=>{const out=[Q[0]];for(let k=1;k<Q.length;k++){const a=Q[k-1],b=Q[k],n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])));for(let t=1;t<=n;t++)out.push([a[0]+(b[0]-a[0])*t/n,a[1]+(b[1]-a[1])*t/n]);}return out;};
+  const paperRun=Q=>{let run=0,best=0;for(const q of dense(Q)){const y=Math.round(q[0]),x=Math.round(q[1]);if(y>=0&&x>=0&&y<H&&x<W&&dmap[y*W+x]<0.5){run++;if(run>best)best=run;}else run=0;}return best;};
+  const nearOn=(p,R)=>{let best=-1,bd=1e9;const py=Math.round(p[0]),px=Math.round(p[1]);for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){const y=py+dy,x=px+dx;if(y<0||x<0||y>=H||x>=W||!on[y*W+x])continue;const d=dx*dx+dy*dy;if(d<bd){bd=d;best=y*W+x;}}return best;};
+  const len=Q=>{let L=0;for(let k=1;k<Q.length;k++)L+=Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]);return L;};
+  return strokes.map(Q=>{if(Q.length<3)return Q;const pr=paperRun(Q);if(pr<0.6*med)return Q;
+    const R=Math.ceil(1.5*med),s=nearOn(Q[0],R),t=nearOn(Q[Q.length-1],R);if(s<0||t<0||s===t)return Q;
+    // (shortest way along the drawn lines, kept to the neighbourhood of this line)
+    let y0=1e9,x0=1e9,y1=-1e9,x1=-1e9;for(const q of Q){y0=Math.min(y0,q[0]);y1=Math.max(y1,q[0]);x0=Math.min(x0,q[1]);x1=Math.max(x1,q[1]);}
+    const m=3*med;y0-=m;x0-=m;y1+=m;x1+=m;const L0=len(Q),lim=1.6*L0+2*med;
+    const dist=new Map(),prev=new Map(),heap=[];const push=(d,i)=>{heap.push([d,i]);let c=heap.length-1;while(c>0){const p=(c-1)>>1;if(heap[p][0]<=heap[c][0])break;[heap[p],heap[c]]=[heap[c],heap[p]];c=p;}};
+    const pop=()=>{const top=heap[0],last=heap.pop();if(heap.length){heap[0]=last;let c=0;for(;;){const l=2*c+1,r=l+1;let m2=c;if(l<heap.length&&heap[l][0]<heap[m2][0])m2=l;if(r<heap.length&&heap[r][0]<heap[m2][0])m2=r;if(m2===c)break;[heap[m2],heap[c]]=[heap[c],heap[m2]];c=m2;}}return top;};
+    dist.set(s,0);push(0,s);let found=false;
+    while(heap.length){const[d,i]=pop();if(d>dist.get(i))continue;if(i===t){found=true;break;}if(d>lim)break;const y=(i/W)|0,x=i%W;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const Y=y+dy,X=x+dx;if(Y<y0||X<x0||Y>y1||X>x1||Y<0||X<0||Y>=H||X>=W)continue;const j=Y*W+X;if(!on[j])continue;
+        const nd=d+(dx&&dy?1.4142:1);if(nd<(dist.has(j)?dist.get(j):1e18)){dist.set(j,nd);prev.set(j,i);push(nd,j);}}}
+    if(!found)return Q;const path=[];for(let i=t;i!==undefined;i=prev.get(i)){path.push([(i/W)|0,i%W]);if(i===s)break;}path.reverse();
+    // (evened out a little, every couple of pixels, and joined to this line's own two ends)
+    const full=[Q[0].slice()].concat(path,[Q[Q.length-1].slice()]);let sm=full;
+    // (smoothed well, a dozen pixels either way, the two ends held where they are)
+    for(let it=0;it<3;it++)sm=sm.map((q,i)=>{if(i===0||i===sm.length-1)return q;const R2=Math.min(12,i,sm.length-1-i);let a=0,b=0,c=0;for(let j=i-R2;j<=i+R2;j++){a+=sm[j][0];b+=sm[j][1];c++;}return[a/c,b/c];});
+    const out=[Q[0].slice()];for(let i=2;i<sm.length-2;i+=2)out.push(sm[i]);out.push(Q[Q.length-1].slice());
+    // (and no sharp bend: the drawn trace can wobble where lines meet; a line that would come out kinked is left as it was)
+    const turn=R=>{let mx=0;const st=Math.max(2,Math.round(0.25*med/2));for(let i=st;i<R.length-st;i++){const a=R[i-st],b=R[i],c=R[i+st];const v1=[b[0]-a[0],b[1]-a[1]],v2=[c[0]-b[0],c[1]-b[1]];const n1=Math.hypot(...v1),n2=Math.hypot(...v2);if(n1<1e-6||n2<1e-6)continue;mx=Math.max(mx,Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/(n1*n2)))));}return mx;};
+    if(turn(out)>Math.max(0.6,turn(Q)+0.2))return Q;
+    // (only a fix of the stretch that strayed: the new way stays near the old line, a line width or so, and is not
+    // much longer; otherwise the drawn lines lead somewhere else and the line is left as it was)
+    const Ln=len(out);if(Ln>1.15*L0+0.5*med)return Q;
+    const DQ=dense(Q);for(let i=0;i<out.length;i+=2){const q=out[i];let bd=1e18;for(let j=0;j<DQ.length;j+=2){const d=(DQ[j][0]-q[0])**2+(DQ[j][1]-q[1])**2;if(d<bd)bd=d;}if(bd>(1.0*med)**2)return Q;}
+    return paperRun(out)<pr?out:Q;});}
+

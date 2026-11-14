@@ -78,7 +78,10 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const pairDev=Math.max(angDeg(neg(da[0]),db[bp]),angDeg(neg(da[1]),db[1-bp]));   // both lines must run straight through
       // (Keep narrow gaps: a curve that touches a straight line, such as a border, and runs along it for a moment before
       // turning away: the straight line runs on through, so the two joints are one, even though the curve bends there)
-      const kiss=opt.keepGaps&&doubled&&[0,1].some(q=>angDeg(neg(da[q]),db[q?1-bp:bp])<=10&&angDeg(neg(da[q]),link)<25);
+      const side=v=>Math.sign(link[0]*v[1]-link[1]*v[0]);
+      // (the curve's two arms leave on the same side of the straight line; two lines meeting a straight line from opposite
+      // sides a little apart are two separate joints and stay so)
+      const kiss=opt.keepGaps&&doubled&&[0,1].some(q=>{const sb=q?1-bp:bp;return angDeg(neg(da[q]),db[sb])<=10&&angDeg(neg(da[q]),link)<25&&side(da[1-q])===side(db[1-sb]);});
       if((best<60&&pairDev<=20&&spread>8&&along<60&&doubled)||kiss){union(A,B);edges.splice(i,1);changed=true;break;}}}
   // a V whose tip sits on another line through a very short stub (the two sides of a petal meeting
   // right at the line): the sides meet the line itself, at one point
@@ -695,7 +698,11 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   // leg of a narrow arch runs down beside a line into a long wedge of ink; it lands where the ink joins instead)
   const overPaper=(a,h)=>{const L=Math.hypot(h[0]-a[0],h[1]-a[1]);let off=0;for(let t=0;t<=L;t+=1){const yy=Math.round(a[0]+(h[0]-a[0])*t/(L||1)),xx=Math.round(a[1]+(h[1]-a[1])*t/(L||1));
       if(yy>=0&&xx>=0&&yy<H&&xx<W&&dmap[yy*W+xx]<0.5)off++;}return off>Math.max(3,0.5*med)&&off>0.5*L;};
-  const meet=(e,F,fallback)=>{let h=meet0(e,F,fallback);if(fallback&&h&&e.anchor&&Math.hypot(h[0]-fallback[0],h[1]-fallback[1])>2.5*med&&overPaper(e.anchor,h)&&!overPaper(e.anchor,fallback))h=fallback;if(!fallback||!h||Math.hypot(h[0]-fallback[0],h[1]-fallback[1])<=2.5*med)return h;
+  const overPaper2=(a,h)=>{const L=Math.hypot(h[0]-a[0],h[1]-a[1]);let off=0;for(let t=0;t<=L;t+=1){const yy=Math.round(a[0]+(h[0]-a[0])*t/(L||1)),xx=Math.round(a[1]+(h[1]-a[1])*t/(L||1));
+      if(yy>=0&&xx>=0&&yy<H&&xx<W&&dmap[yy*W+xx]<0.5)off++;}return off>Math.max(3,1.0*med)&&off>0.4*L;};
+  const paperOn=(a,h)=>{const L=Math.hypot(h[0]-a[0],h[1]-a[1]);let off=0;for(let t=0;t<=L;t+=1){const yy=Math.round(a[0]+(h[0]-a[0])*t/(L||1)),xx=Math.round(a[1]+(h[1]-a[1])*t/(L||1));
+      if(yy>=0&&xx>=0&&yy<H&&xx<W&&dmap[yy*W+xx]<0.5)off++;}return off;};
+  const meet=(e,F,fallback)=>{let h=meet0(e,F,fallback);if(fallback&&h&&e.anchor&&((Math.hypot(h[0]-fallback[0],h[1]-fallback[1])>2.5*med&&overPaper(e.anchor,h))||(opt.keepGaps&&overPaper2(e.anchor,h)&&paperOn(e.anchor,fallback)<=2))&&!overPaper(e.anchor,fallback))h=fallback;if(!fallback||!h||Math.hypot(h[0]-fallback[0],h[1]-fallback[1])<=2.5*med)return h;
     let bi=0,bd=Infinity;F.forEach((f,q)=>{const d=Math.hypot(f[0]-h[0],f[1]-h[1]);if(d<bd){bd=d;bi=q;}});
     const a=F[Math.max(0,bi-4)],b=F[Math.min(F.length-1,bi+4)],t=[b[0]-a[0],b[1]-a[1]],tn=Math.hypot(t[0],t[1])||1;
     const ang=Math.asin(Math.min(1,Math.abs(e.dir[0]*t[1]-e.dir[1]*t[0])/tn))*180/Math.PI;if(ang>=25)return h;
@@ -794,7 +801,11 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       if(sd(pa,a.e.anchor)!==sd(pb,b.e.anchor))continue;
       const mid=[(pa[0]+pb[0])/2,(pa[1]+pb[1])/2];let best=null,bd=Infinity;
       for(const f of F){if(Math.hypot(f[0]-mid[0],f[1]-mid[1])>gap)continue;let s2=0;for(const e of[a.e,b.e]){const vx=f[0]-e.anchor[0],vy=f[1]-e.anchor[1];const c=vx*e.dir[1]-vy*e.dir[0];s2+=c*c;}if(s2<bd){bd=s2;best=f;}}
-      if(!best)continue;land.set(a.kk,best.slice());land.set(b.kk,best.slice());done.add(a.kk);done.add(b.kk);}
+      if(!best)continue;
+      // (Keep narrow gaps: not when either side would have to cross open paper to reach the shared point, as where two
+      // lines reach the line beside each other with a sliver of glass between them)
+      if(opt.keepGaps&&[a.e,b.e].some(e=>e.anchor&&paperOn(e.anchor,best)>0.5*med))continue;
+      land.set(a.kk,best.slice());land.set(b.kk,best.slice());done.add(a.kk);done.add(b.kk);}
     // a line that slides into the curve at a shallow angle, from the same side as another line that
     // leaves just ahead of it, joins the curve where that other line leaves (they meet at one point)
     for(const a of its){if(done.has(a.kk)||(landAng.get(a.kk)??90)>=34)continue;const pa=land.get(a.kk);const fw=[-a.e.dir[0],-a.e.dir[1]];
