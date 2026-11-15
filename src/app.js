@@ -44,6 +44,7 @@ function loadImage(img,name,isSample){
   // (the size this picture was last used at here, or the size a saved PNG says it was made at; otherwise the
   // longest side stays as it is and the other follows the picture)
   let known=null;try{known=JSON.parse(localStorage.getItem(sizeKey())||'null');}catch(e){}if(!known&&!isSample)known=S.fileSize;S.fileSize=null;
+  if(!known&&S.pdfDpi)known={w:S.crop.w/S.pdfDpi,h:S.crop.h/S.pdfDpi,lock:true};S.pdfDpi=0;
   if(known&&known.w>0&&known.h>0){$('lockRatio').checked=!!known.lock;$('sizeW').value=fit2(known.w);$('sizeH').value=fit2(known.h);updateLabels();}
   else if(!isSample||$('lockRatio').checked){$('lockRatio').checked=true;const z=sizeIn(),L=Math.max(z.w,z.h);const r=S.crop.h/S.crop.w;
     if(r>=1){$('sizeH').value=fit2(L);$('sizeW').value=fit2(L/r);}else{$('sizeW').value=fit2(L);$('sizeH').value=fit2(L*r);}}
@@ -977,7 +978,30 @@ document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',(
 document.querySelectorAll('[data-zoom]').forEach(b=>b.addEventListener('click',()=>{S.zoom=b.dataset.zoom;
   document.querySelectorAll('[data-zoom]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));applyZoom();}));
 
-function loadFile(file){if(!file||!/^image\//.test(file.type)){setStatus('That file is not an image. Try a PNG or JPG.',false);return;}S.axes=null;
+// ---- PDF patterns: a page is drawn at a known resolution with pdf.js (loaded the first time a PDF is opened), and
+// the pattern's size comes from the page itself, so it opens at the size it prints at.
+const PDFJS_ROOT='https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/',PDFJS=PDFJS_ROOT+'build/';let pdfLib=null,pdfDoc=null,pdfName='';
+async function getPdfLib(){if(pdfLib)return pdfLib;const lib=await import(PDFJS+'pdf.min.mjs');
+  // (the reader's helper runs on this page, since a helper from another site can't start here)
+  if(!globalThis.pdfjsWorker)globalThis.pdfjsWorker=await import(PDFJS+'pdf.worker.min.mjs');lib.GlobalWorkerOptions.workerSrc=PDFJS+'pdf.worker.min.mjs';
+  return pdfLib=lib;}
+async function openPdf(file){setStatus('Opening the PDF…',true);
+  // (wasmUrl: a scanned page needs pdf.js's image decoders)
+  try{const lib=await getPdfLib();if(pdfDoc)try{pdfDoc.destroy();}catch(e){}
+    pdfDoc=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer()),wasmUrl:PDFJS_ROOT+'wasm/',standardFontDataUrl:PDFJS_ROOT+'standard_fonts/',cMapUrl:PDFJS_ROOT+'cmaps/'}).promise;pdfName=file.name.replace(/\.[^.]+$/,'');
+    const sel=$('pdfPage');sel.innerHTML='';for(let i=1;i<=pdfDoc.numPages;i++){const o=document.createElement('option');o.value=i;o.textContent='Page '+i+' of '+pdfDoc.numPages;sel.appendChild(o);}
+    sel.hidden=pdfDoc.numPages<2;await showPdfPage(1);}
+  catch(e){setStatus(/import|fetch|module/i.test(String(e&&e.message))?'Could not load the PDF reader. Check the internet connection and try again.':'Could not read that PDF. Try saving the page as PNG.',false);}}
+async function showPdfPage(n){const page=await pdfDoc.getPage(n),v1=page.getViewport({scale:1});
+  // (about 200 pixels an inch, less for a big page so the picture stays a workable size)
+  const inch=Math.max(v1.width,v1.height)/72,dpi=Math.min(200,4200/inch),vp=page.getViewport({scale:dpi/72});
+  const c=document.createElement('canvas');c.width=Math.round(vp.width);c.height=Math.round(vp.height);const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+  await page.render({canvasContext:g,viewport:vp}).promise;S.axes=null;S.fileSize=null;S.pdfDpi=c.width/(v1.width/72);
+  loadImage(c,pdfName+(pdfDoc.numPages>1?'-p'+n:''),false);}
+$('pdfPage').addEventListener('change',e=>{if(pdfDoc)showPdfPage(+e.target.value).catch(()=>setStatus('Could not read that page of the PDF.',false));});
+function loadFile(file){if(file&&(file.type==='application/pdf'||/\.pdf$/i.test(file.name||''))){openPdf(file);return;}
+  if(pdfDoc){try{pdfDoc.destroy();}catch(e){}pdfDoc=null;}$('pdfPage').hidden=true;
+  if(!file||!/^image\//.test(file.type)){setStatus('That file is not a picture or PDF. Try a PNG, JPG or PDF.',false);return;}S.axes=null;
   const url=URL.createObjectURL(file);const img=new Image();S.fileSize=null;
   {const m=/-(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)in-/.exec(file.name);if(m)S.fileSize={w:+m[1],h:+m[2],lock:false};}
   img.onload=async()=>{try{const meta=readPngSize(await file.arrayBuffer());if(meta)S.fileSize=meta;}catch(e){}loadImage(img,file.name.replace(/\.[^.]+$/,''),false);URL.revokeObjectURL(url);};

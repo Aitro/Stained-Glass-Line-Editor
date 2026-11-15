@@ -15,7 +15,8 @@
     <h1>Lead Line Leveler</h1>
     <div class="file-name" id="fileName">sample-pattern</div>
     <div class="actions">
-      <label class="btn" for="fileInput">Open pattern image<input id="fileInput" type="file" accept="image/*"></label>
+      <select id="pdfPage" hidden aria-label="PDF page to open" title="Page of the PDF to open"></select>
+      <label class="btn" for="fileInput">Open pattern<input id="fileInput" type="file" accept="image/*,application/pdf,.pdf"></label>
       <button id="saveSvg" disabled>Save SVG</button>
       <button id="saveDxf" disabled title="Each glass piece as a closed cut line, with the lead gap between pieces: for Silhouette and other cutters">Save DXF for cutter</button>
       <button class="primary" id="savePng" disabled>Save PNG</button>
@@ -144,7 +145,7 @@
       <button id="fixUndo" disabled>Undo</button>
       <button id="fixClear" disabled>Clear all fixes</button>
     </div>
-    <div class="drop-note" id="note">Drop an image on the mat, paste one, or use Open pattern image. Overlay shows the new lines in red over the original. 100% zoom is 300 pixels per inch.</div>
+    <div class="drop-note" id="note">Drop a picture or PDF on the mat, paste a picture, or use Open pattern. Overlay shows the new lines in red over the original. 100% zoom is 300 pixels per inch.</div>
   </main>
 </div>
 
