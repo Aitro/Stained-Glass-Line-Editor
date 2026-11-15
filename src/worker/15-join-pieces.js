@@ -91,6 +91,7 @@ function joinPieces(m,dropBits){
   let bits=0;if(dropBits){const box=new Map();for(let i=0;i<N;i++){const c=lab[i];if(c<0||c===main)continue;const y=(i/W)|0,x=i-y*W;let b=box.get(c);if(!b)box.set(c,b=[y,y,x,x]);
       if(y<b[0])b[0]=y;if(y>b[1])b[1]=y;if(x<b[2])b[2]=x;if(x>b[3])b[3]=x;}
     for(const[c,b]of box){if(Math.max(b[1]-b[0],b[3]-b[2])>10*R||isShape(c))continue;for(let y=b[0];y<=b[1];y++)for(let x=b[2];x<=b[3];x++){const i=y*W+x;if(lab[i]===c){m[i]=0;}}bits++;}}
+  joinMode=mode;
   return{R,filled,bars,bits,main:size[main]};}
 
 // Join pieces drawn apart, after the lines are traced: a stretch of line with no glass beside it goes.
@@ -192,9 +193,9 @@ function hugNarrow(strokes,m,dmap,med){
   const endsAll=[];strokes.forEach((S,t)=>{if(S&&S.length>1){endsAll.push([S[0],t]);endsAll.push([S[S.length-1],t]);}});
   const res=strokes.map((Q,qi)=>{
     const cum=[0];for(let k=1;k<Q.length;k++)cum.push(cum[k-1]+Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]));const Lt=cum[cum.length-1];
-    // (stretches where the line sits well out in a wide gap, next to a much narrower piece; each followed out each way
+    // (stretches where the line sits well out in a wide gap (half again the usual distance), next to a much narrower piece; each followed out each way
     // for as long as the gap is still wider than usual)
-    const core=Q.map(q=>moveFor(q,1.3));const dv=Q.map(()=>null);
+    const core=Q.map(q=>moveFor(q,1.5));const dv=Q.map(()=>null);
     let k=0;while(k<Q.length){if(!core[k]){k++;continue;}let j=k;while(j+1<Q.length&&core[j+1])j++;
       let joined=false;for(const[e,t]of endsAll){if(t===qi)continue;for(let i=k;i<=j&&!joined;i++)if(Math.hypot(Q[i][0]-e[0],Q[i][1]-e[1])<1.0*med)joined=true;if(joined)break;}
       if(!joined&&cum[j]-cum[k]>=1.5*med&&cum[k]>=1.5*med&&Lt-cum[j]>=1.5*med){   // (a stretch in the open, not the swelling at a joint)
@@ -221,3 +222,72 @@ function hugNarrow(strokes,m,dmap,med){
       const n=out.length;let c=0;for(let s=0;s<n;s++){const k=end?n-1-s:s;if(s>0){const p=end?k+1:k-1;c+=Math.hypot(strokes[t][k][0]-strokes[t][p][0],strokes[t][k][1]-strokes[t][p][1]);}
         if(c>1.5*med)break;const f=1-c/(1.5*med),w=f*f*(3-2*f);out[k]=[out[k][0]+v[0]*w,out[k][1]+v[1]*w];}}
     return out;});}
+
+// (squared distances inside a box, to the set pixels of src (w×h))
+function edtBox(src,w,h){const N=Math.max(w,h),f=new Float64Array(N),d=new Float64Array(N),v=new Int32Array(N),z=new Float64Array(N+1),out=new Float32Array(w*h);
+  for(let x=0;x<w;x++){for(let y=0;y<h;y++)f[y]=src[y*w+x]?0:INF;edt1d(f,h,d,v,z);for(let y=0;y<h;y++)out[y*w+x]=d[y];}
+  for(let y=0;y<h;y++){const o=y*w;for(let x=0;x<w;x++)f[x]=out[o+x];edt1d(f,w,d,v,z);for(let x=0;x<w;x++)out[o+x]=d[x];}
+  return out;}
+
+// Where a narrow piece (a staff passing behind a loop) sits in a wide patch of ink left by the joining, the glass
+// around it is grown into that ink: each wider piece takes the ink nearer to it, up to one lead width from the narrow
+// piece and leaving a lead width between itself and the next piece. The line then lands on the narrow piece's own
+// edge, and the narrow piece keeps its shape.
+let joinMode=0,staffPieces=null;   // (the narrow pieces staffWins worked round, and the lead's half width there, for keepOffStaff)
+function staffWins(m,mode){staffPieces=null;
+  const N=W*H,lab=new Int32Array(N).fill(-1),st=new Int32Array(N);let nl=0;const box=[];
+  for(let i=0;i<N;i++){if(m[i]||lab[i]>=0)continue;let sp=0;st[sp++]=i;lab[i]=nl;const b=[1e9,-1,1e9,-1,0,0];
+    while(sp){const j=st[--sp],y=(j/W)|0,x=j-y*W;b[4]++;if(y<b[0])b[0]=y;if(y>b[1])b[1]=y;if(x<b[2])b[2]=x;if(x>b[3])b[3]=x;if(x===0||y===0||x===W-1||y===H-1)b[5]=1;
+      for(const k of[x>0?j-1:-1,x<W-1?j+1:-1,y>0?j-W:-1,y<H-1?j+W:-1])if(k>=0&&!m[k]&&lab[k]<0){lab[k]=nl;st[sp++]=k;}}
+    box.push(b);nl++;}
+  const ia=new Uint8Array(N);for(let i=0;i<N;i++)ia[i]=m[i]?1:0;const dI=edt(ia),rad=new Float32Array(nl);
+  for(let i=0;i<N;i++)if(lab[i]>=0){const v=dI[i];if(v>rad[lab[i]])rad[lab[i]]=v;}for(let c=0;c<nl;c++)rad[c]=Math.sqrt(rad[c]);
+  const L=2*mode;let grown=0;const log=[];
+  for(let P=0;P<nl;P++){const b=box[P];if(b[5]||b[4]<(3*L)*(3*L)||rad[P]>2.2*L||Math.max(b[1]-b[0],b[3]-b[2])>8*L)continue;   // (only a short narrow strip standing on its own inside a loop)
+    const pad=Math.ceil(4*L),y0=Math.max(0,b[0]-pad),y1=Math.min(H-1,b[1]+pad),x0=Math.max(0,b[2]-pad),x1=Math.min(W-1,b[3]+pad),w=x1-x0+1,h=y1-y0+1;
+    const ids=new Map();for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const c=lab[y*W+x];if(c>=0&&!ids.has(c))ids.set(c,null);}
+    let wide=false;for(const c of ids.keys())if(c!==P&&!box[c][5]&&rad[P]<=0.5*rad[c])wide=true;if(!wide)continue;
+    for(const c of ids.keys()){const s=new Uint8Array(w*h);for(let y=0;y<h;y++)for(let x=0;x<w;x++)s[y*w+x]=lab[(y+y0)*W+x+x0]===c?1:0;ids.set(c,edtBox(s,w,h));}
+    const dP=ids.get(P),own=new Int32Array(w*h).fill(-1);let cnt=0;
+    for(let k=0;k<w*h;k++){const y=((k/w)|0)+y0,x=k%w+x0;if(!m[y*W+x])continue;const p=Math.sqrt(dP[k]);if(p<L||p>3*L)continue;
+      let A=-1,dA=1e18,dB=1e18;for(const[c,d]of ids){if(c===P)continue;const v=d[k];if(v<dA){dB=dA;dA=v;A=c;}else if(v<dB)dB=v;}
+      if(A<0||box[A][5]||rad[P]>0.5*rad[A])continue;if(Math.sqrt(dB)-Math.sqrt(dA)<L)continue;own[k]=A;cnt++;}
+    if(cnt<10*L*L)continue;   // (a real patch of ink, not the swelling where lines meet)
+    // (grown out from each piece's own edge through the ink it takes)
+    let sp=0;const seen=new Uint8Array(w*h);
+    for(let k=0;k<w*h;k++)if(own[k]>=0&&ids.get(own[k])[k]<=2.1){seen[k]=1;st[sp++]=k;}
+    let add=0;while(sp){const k=st[--sp];const y=(k/w)|0,x=k-y*w,A=own[k];m[(y+y0)*W+x+x0]=0;lab[(y+y0)*W+x+x0]=A;add++;
+      for(const q of[x>0?k-1:-1,x<w-1?k+1:-1,y>0?k-w:-1,y<h-1?k+w:-1])if(q>=0&&own[q]===A&&!seen[q]){seen[q]=1;st[sp++]=q;}}
+    grown+=add;log.push([P,b[2],b[0],b[3],b[1],add]);
+    if(!staffPieces)staffPieces={mask:new Uint8Array(N),half:mode};for(let y=b[0];y<=b[1];y++)for(let x=b[2];x<=b[3];x++)if(lab[y*W+x]===P)staffPieces.mask[y*W+x]=1;}
+  return grown;}
+
+// Lines kept off those narrow pieces: a point closer to one than half a lead (where a line cut across a corner on its
+// way to a joint) is pushed straight out to that distance, so the line goes round the corner.
+function keepOffStaff(strokes,med){
+  if(!staffPieces)return strokes;const{mask,half}=staffPieces,d=edt(mask);
+  // (distance to those pieces, read between pixels so the push is smooth)
+  const D=(y,x)=>{y=Math.max(0,Math.min(H-1.001,y));x=Math.max(0,Math.min(W-1.001,x));const y0=Math.floor(y),x0=Math.floor(x),fy=y-y0,fx=x-x0,i=y0*W+x0,
+    a=Math.sqrt(d[i]),b=Math.sqrt(d[i+1]),c=Math.sqrt(d[i+W]),e=Math.sqrt(d[i+W+1]);return(a*(1-fx)+b*fx)*(1-fy)+(c*(1-fx)+e*fx)*fy;};
+  const push=R=>R.map(q=>{let y=q[0],x=q[1];for(let it=0;it<8;it++){const v=D(y,x);if(v>=half-0.2)break;
+      const gy=D(y+1.5,x)-D(y-1.5,x),gx=D(y,x+1.5)-D(y,x-1.5),n=Math.hypot(gy,gx);if(n<1e-6)break;y+=gy/n*(half-v);x+=gx/n*(half-v);}return[y,x];});
+  const out=strokes.map(Q=>{if(!Q.some(q=>D(q[0],q[1])<half-0.2))return Q;
+    const cum=[0];for(let k=1;k<Q.length;k++)cum.push(cum[k-1]+Math.hypot(Q[k][0]-Q[k-1][0],Q[k][1]-Q[k-1][1]));
+    // (the stretch to work on: the pushed points and a little either side)
+    const near=Q.map(q=>D(q[0],q[1])<half+0.6*med);let R=push(Q);
+    for(let pass=0;pass<4;pass++){const S=R.map((p,k)=>{if(!near[k]||k===0||k===R.length-1)return p;let sy=0,sx=0,sw=0;
+        for(let j=k;j>=0&&cum[k]-cum[j]<=0.4*med;j--){sy+=R[j][0];sx+=R[j][1];sw++;}for(let j=k+1;j<R.length&&cum[j]-cum[k]<=0.4*med;j++){sy+=R[j][0];sx+=R[j][1];sw++;}return[sy/sw,sx/sw];});
+      R=push(S);}
+    return R;});
+  // (a pushed line that set off from a joint now first runs back along the line it joined before turning down the
+  // piece's side: that part is dropped, and the line starts where it leaves the other line)
+  return out.map((R,t)=>{if(R===strokes[t]||R.length<4)return R;let S=R;
+    for(const end of[0,1]){const E=strokes[t][end?strokes[t].length-1:0];if(D(E[0],E[1])>half+0.6*med)continue;const part=[];
+      strokes.forEach((Q,u)=>{if(u===t)return;for(const q of Q)if(Math.hypot(q[0]-E[0],q[1]-E[1])<2.5){part.push(out[u]);return;}});
+      if(!part.length)continue;const nearOf=p=>{let bd=1e18,bq=null;for(const Q of part)for(let i=1;i<Q.length;i++){const a=Q[i-1],b=Q[i],vy=b[0]-a[0],vx=b[1]-a[1],L2=vy*vy+vx*vx||1;
+          let f=((p[0]-a[0])*vy+(p[1]-a[1])*vx)/L2;f=Math.max(0,Math.min(1,f));const y=a[0]+vy*f,x=a[1]+vx*f,dd=Math.hypot(p[0]-y,p[1]-x);if(dd<bd){bd=dd;bq=[y,x];}}return[bd,bq];};
+      const n=S.length,idx=k=>end?n-1-k:k;let c=0,K=-1;
+      for(let k=0;k<n-2;k++){if(k>0)c+=Math.hypot(S[idx(k)][0]-S[idx(k-1)][0],S[idx(k)][1]-S[idx(k-1)][1]);if(c>2*med)break;if(nearOf(S[idx(k)])[0]<=0.25*med)K=k;}
+      if(K<1)continue;const q=nearOf(S[idx(K)])[1];
+      S=end?S.slice(0,n-1-K).concat([q]):[q].concat(S.slice(K+1));}
+    return S;});}

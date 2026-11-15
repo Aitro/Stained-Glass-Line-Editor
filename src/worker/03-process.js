@@ -66,7 +66,7 @@ function process(p){
   if(p.dropText!==false)dropText(m);
   // pieces drawn as separate outlines with narrow gaps between them: the gaps become shared lines (and numbers left
   // standing on their own in the pieces are taken out there)
-  if(p.joinPieces&&!colorIn)joinPieces(m,p.dropText!==false);
+  joinMode=0;if(p.joinPieces&&!colorIn)joinPieces(m,p.dropText!==false);
   // estimate typical line thickness from ridge of distance map
   const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;
   let dbg=edt(bg);const ridge=[];
@@ -74,6 +74,9 @@ function process(p){
     if(d>=dbg[i-1]&&d>=dbg[i+1]&&d>=dbg[i-W]&&d>=dbg[i+W])ridge.push(2*Math.sqrt(d)-1);}
   ridge.sort((a,b)=>a-b);const med=ridge.length?ridge[ridge.length>>1]:3;
   const u=Math.max(1.5,med/1.75); // working unit ≈ one source-pixel line width
+  // (joined pieces: the glass round a narrow piece standing in a wide patch of ink is grown up to it; done after the
+  // usual line width is measured, so the rest of the pattern is traced just as before)
+  staffPieces=null;if(p.joinPieces&&!colorIn&&joinMode)staffWins(m,joinMode);
   // close gaps narrower than ~2/3 of a line width (hollow or skipping marker strokes),
   // using distance maps: grow the lines by r, then shrink them back by r
   // (not for colored patterns: they are clean drawings where every gap, however thin, is glass)
@@ -124,6 +127,7 @@ function process(p){
   if(p.keepGaps&&!p.asDrawn)built.strokes=joinMerged(built.strokes,dmap,med);
   if((p.keepGaps||p.joinPieces)&&!p.asDrawn)built.strokes=reachLines(built.strokes,med);
   if(p.joinPieces&&!p.asDrawn&&!colorIn)built.strokes=hugNarrow(built.strokes,m,dmap,med);
+  if(p.joinPieces&&!p.asDrawn&&!colorIn)built.strokes=keepOffStaff(built.strokes,med);
   if(p.joinPieces&&!p.asDrawn&&!colorIn)built.strokes=dropDoubles(built.strokes,dmap,med);
   if(p.dropIslands!==false)built.strokes=dropIslands(built.strokes,med);
   if(!p.asDrawn)built.strokes=roundTouches(built.strokes,med,dmap,+p.newHalf);
