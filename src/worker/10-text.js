@@ -9,7 +9,11 @@ function dropText(m){
   // (a typical line's thickness: the thick end of the widths along the middles of all the ink, since writing,
   // though there may be a lot of it, is short next to the lines)
   const rid=[];for(let y=1;y<H-1;y+=2)for(let x=1;x<W-1;x+=2){const i=y*W+x,v=d[i];if(v<1)continue;if(v>=d[i-1]&&v>=d[i+1]&&v>=d[i-W]&&v>=d[i+W])rid.push(2*Math.sqrt(v)-1);}
-  if(rid.length<50)return 0;rid.sort((a,b)=>a-b);const wLine=rid[Math.floor(rid.length*0.75)];if(wLine<4)return 0;
+  if(rid.length<50)return 0;rid.sort((a,b)=>a-b);
+  // (the most common width in the thicker part, not a fixed share up: a heavy border all round the pattern can be a
+  // quarter of all the ink and would otherwise be taken for the usual line, making every inside line look thin)
+  const lo=rid[Math.floor(rid.length*0.4)],hist=new Map();for(const v of rid)if(v>=lo){const b=Math.round(v);hist.set(b,(hist.get(b)||0)+1);}
+  let wLine=rid[Math.floor(rid.length*0.75)],best=0;for(const[b,c]of hist)if(c>best){best=c;wLine=Math.max(lo,b);}if(wLine<4)return 0;
   const seen=new Uint8Array(W*H),st=new Int32Array(W*H),cells=[];let dropped=0;
   for(let s=0;s<W*H;s++){if(!m[s]||seen[s])continue;let sp=0,x0=W,y0=H,x1=0,y1=0,wMax=0;cells.length=0;st[sp++]=s;seen[s]=1;
     while(sp){const i=st[--sp];cells.push(i);const x=i%W,y=(i/W)|0;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;const w=2*Math.sqrt(d[i])-1;if(w>wMax)wMax=w;
