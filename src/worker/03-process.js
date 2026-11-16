@@ -74,6 +74,13 @@ function process(p){
     if(d>=dbg[i-1]&&d>=dbg[i+1]&&d>=dbg[i-W]&&d>=dbg[i+W])ridge.push(2*Math.sqrt(d)-1);}
   ridge.sort((a,b)=>a-b);const med=ridge.length?ridge[ridge.length>>1]:3;
   const u=Math.max(1.5,med/1.75); // working unit ≈ one source-pixel line width
+  // (a piece of black glass: ink filled in far wider than any lead line, five line widths and more, is glass, not
+  // lead; it is hollowed out to a lead line's width round its edge, so its own outline is traced)
+  if(!p.joinPieces&&!p.asDrawn){const core=6.25*med*med,keep=0.81*med*med,st=[];let any=0;const hol=new Uint8Array(W*H);
+    for(let i=0;i<W*H;i++)if(m[i]&&dbg[i]>=core&&!hol[i]){const reg=[i];hol[i]=1;st.push(i);
+      while(st.length){const j=st.pop(),y=(j/W)|0,x=j-y*W;for(const k of[x>0?j-1:-1,x<W-1?j+1:-1,y>0?j-W:-1,y<H-1?j+W:-1])if(k>=0&&m[k]&&!hol[k]&&dbg[k]>=keep){hol[k]=1;st.push(k);reg.push(k);}}
+      if(reg.length>=50*med*med){for(const j of reg)m[j]=0;any=1;}}   // (a piece big enough to cut: a filled dot, like a nose, is paint)
+    if(any){for(let i=0;i<W*H;i++)bg[i]=m[i]?0:1;dbg=edt(bg);}}
   // (joined pieces: the glass round a narrow piece standing in a wide patch of ink is grown up to it; done after the
   // usual line width is measured, so the rest of the pattern is traced just as before)
   staffPieces=null;if(p.joinPieces&&!colorIn&&joinMode)staffWins(m,joinMode);

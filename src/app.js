@@ -1003,7 +1003,10 @@ function loadFile(file){if(file&&(file.type==='application/pdf'||/\.pdf$/i.test(
   if(pdfDoc){try{pdfDoc.destroy();}catch(e){}pdfDoc=null;}$('pdfPage').hidden=true;
   if(!file||!/^image\//.test(file.type)){setStatus('That file is not a picture or PDF. Try a PNG, JPG or PDF.',false);return;}S.axes=null;
   const url=URL.createObjectURL(file);const img=new Image();S.fileSize=null;
-  {const m=/-(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)in-/.exec(file.name);if(m)S.fileSize={w:+m[1],h:+m[2],lock:false};}
+  // (a resolution in the name, like koi-fish-7x8in-300dpi.png, gives the true size from the pixels themselves: the
+  // size in the name is often the panel's alone, while the picture may also hold a note box beside it)
+  S.pdfDpi=0;{const d=/(?:^|[-_ ])(\d{2,4})\s*dpi(?:[-_. ]|$)/i.exec(file.name);if(d&&+d[1]>=50)S.pdfDpi=+d[1];
+    const m=/-(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)in-/.exec(file.name);if(m&&!S.pdfDpi)S.fileSize={w:+m[1],h:+m[2],lock:false};}
   img.onload=async()=>{try{const meta=readPngSize(await file.arrayBuffer());if(meta)S.fileSize=meta;}catch(e){}loadImage(img,file.name.replace(/\.[^.]+$/,''),false);URL.revokeObjectURL(url);};
   img.onerror=()=>setStatus('Could not read that image. Try exporting it as PNG or JPG.',false);img.src=url;}
 $('fileInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
