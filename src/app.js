@@ -1024,7 +1024,29 @@ function zipOne(name,data){const enc=new TextEncoder(),fn=enc.encode(name),body=
   w32(cd,0,0x02014b50);w16(cd,4,20);w16(cd,6,20);w16(cd,8,0x0800);w16(cd,10,0);w16(cd,12,dt);w16(cd,14,dd);w32(cd,16,crc);w32(cd,20,body.length);w32(cd,24,body.length);w16(cd,28,fn.length);w32(cd,42,0);cd.set(fn,46);
   w32(end,0,0x06054b50);w16(end,8,1);w16(end,10,1);w32(end,12,cd.length);w32(end,16,lh.length+body.length);
   return new Blob([lh,body,cd,end],{type:'application/zip'});}
+// ---- Where saves go, when the page is opened as a file on the computer: a chosen folder (remembered from one visit
+// to the next; the browser asks once a visit before writing there), or else a save box that opens where the last
+// save went. Browsers without these (and Claude's viewer) save to Downloads as before.
+const canPick=!window.claude&&typeof window.showSaveFilePicker==='function';
+const fsDb=()=>new Promise((ok,no)=>{const r=indexedDB.open('lead-line-leveler',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);});
+async function kvGet(k){try{const db=await fsDb();return await new Promise(ok=>{const q=db.transaction('kv').objectStore('kv').get(k);q.onsuccess=()=>ok(q.result);q.onerror=()=>ok(null);});}catch(e){return null;}}
+async function kvSet(k,v){try{const db=await fsDb();await new Promise(ok=>{const t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=ok;t.onerror=ok;});}catch(e){}}
+function showFolder(){$('saveFolder').textContent='Save folder: '+(S.saveDir?S.saveDir.name:'ask each time');}
+if(canPick&&typeof window.showDirectoryPicker==='function'){$('saveFolder').hidden=false;kvGet('saveDir').then(h=>{if(h){S.saveDir=h;showFolder();}});
+  $('saveFolder').addEventListener('click',async()=>{try{const h=await window.showDirectoryPicker({id:'lll-save',mode:'readwrite',startIn:S.saveDir||'downloads'});
+      S.saveDir=h;await kvSet('saveDir',h);showFolder();$('note').textContent='Saves now go into the '+h.name+' folder.';}
+    catch(e){if(e&&e.name!=='AbortError')$('note').textContent='Could not use that folder.';}});}
+const saveTypes={png:['PNG picture','image/png'],svg:['SVG drawing','image/svg+xml'],dxf:['DXF cut file','application/dxf'],zip:['Zip','application/zip']};
+async function saveLocal(data,ext){const name=fname(ext),blob=data instanceof Blob?data:new Blob([data],{type:(saveTypes[ext]||[,'application/octet-stream'])[1]});
+  if(S.saveDir){try{let ok=await S.saveDir.queryPermission({mode:'readwrite'});if(ok!=='granted')ok=await S.saveDir.requestPermission({mode:'readwrite'});
+      if(ok==='granted'){const fh=await S.saveDir.getFileHandle(name,{create:true}),w=await fh.createWritable();await w.write(blob);await w.close();
+        $('note').textContent='Saved '+name+' in the '+S.saveDir.name+' folder.';return true;}}
+    catch(e){}}
+  try{const t=saveTypes[ext];const fh=await window.showSaveFilePicker({id:'lll-save',suggestedName:name,startIn:S.saveDir||'downloads',types:t?[{description:t[0],accept:{[t[1]]:['.'+ext]}}]:undefined});
+    const w=await fh.createWritable();await w.write(blob);await w.close();$('note').textContent='Saved '+fh.name+'.';return true;}
+  catch(e){if(e&&e.name==='AbortError'){$('note').textContent='Save cancelled.';return true;}return false;}}
 async function save(data,ext){const note=$('note');
+  if(canPick&&await saveLocal(data,ext))return;
   if(!S.dl&&!window.claude){const blob=data instanceof Blob?data:new Blob([data],{type:ext==='svg'?'image/svg+xml':'application/octet-stream'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname(ext);document.body.appendChild(a);a.click();
     setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);note.textContent='Saved '+fname(ext)+'.';return;}

@@ -131,6 +131,7 @@ function process(p){
   if(p.joinPieces&&!p.asDrawn&&!colorIn)built.strokes=dropDoubles(built.strokes,dmap,med);
   if(p.dropIslands!==false)built.strokes=dropIslands(built.strokes,med);
   if(!p.asDrawn)built.strokes=roundTouches(built.strokes,med,dmap,+p.newHalf);
+  if(!p.asDrawn&&!colorIn&&p.exact&&p.square)built.strokes=squareBorder(built.strokes,med,built.junctions);
   if(!p.asDrawn&&!colorIn)built.strokes=smoothOutline(built.strokes,m,med,built.junctions);
   const strokes=built.strokes;
   const fl=[],fo=[0],cl=[],co=[0];for(const f of built.fillets){for(const q of f.fill)fl.push(q[1]+0.5,q[0]+0.5);fo.push(fl.length/2);for(const q of f.curve)cl.push(q[1]+0.5,q[0]+0.5);co.push(cl.length/2);}
