@@ -63,7 +63,7 @@ function process(p){
   const lines=Array.isArray(p.lines)?p.lines.filter(L=>L&&[L.ax,L.ay,L.bx,L.by].every(isFinite)):[];
   if(lines.length){const lw=inkWidth(m);for(const L of lines)drawSeg(m,L.ax,L.ay,L.bx,L.by,lw/2);}
   // numbers and labels written in the pieces: small separate bits of ink drawn much thinner than the lines
-  if(p.dropText!==false)dropText(m);
+  if(p.dropText!==false){dropWords(m);dropText(m);}
   // pieces drawn as separate outlines with narrow gaps between them: the gaps become shared lines (and numbers left
   // standing on their own in the pieces are taken out there)
   joinMode=0;if(p.joinPieces&&!colorIn)joinPieces(m,p.dropText!==false);
