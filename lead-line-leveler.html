@@ -1962,9 +1962,12 @@ function dropText(m){
     while(sp){const i=st[--sp],x=i%W,y=(i/W)|0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const j=Y*W+X;if(m[j]&&!thin[j]&&!lab[j]){lab[j]=nl;st[sp++]=j;}}}}
   const seen2=new Uint8Array(W*H);
   for(let s=0;s<W*H;s++){if(!thin[s]||seen2[s])continue;let sp=0,x0=W,y0=H,x1=0,y1=0;cells.length=0;st[sp++]=s;seen2[s]=1;
-    let la=0,two=false;
+    let la=0,two=false,cy0=1e9,cy1=-1,cx0=1e9,cx1=-1;
     while(sp){const i=st[--sp];cells.push(i);const x=i%W,y=(i/W)|0;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;
-      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const j=Y*W+X;if(thin[j]&&!seen2[j]){seen2[j]=1;st[sp++]=j;}else if(lab[j]){if(!la)la=lab[j];else if(lab[j]!==la)two=true;}}}
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const j=Y*W+X;if(thin[j]&&!seen2[j]){seen2[j]=1;st[sp++]=j;}else if(lab[j]){if(!la)la=lab[j];else if(lab[j]!==la)two=true;if(Y<cy0)cy0=Y;if(Y>cy1)cy1=Y;if(X<cx0)cx0=X;if(X>cx1)cx1=X;}}}
+    // (a thin stretch meeting thick ink at two places well apart is a line running between them, even where all the
+    // thick ink is one joined piece, as it is in a connected pattern; writing touches a line in one spot)
+    if(cy1>=0&&Math.max(cy1-cy0,cx1-cx0)>1.2*wLine)two=true;
     // (writing: small, never cut off by the picture's edge (a border line the scan clipped is thin but is lead), and more than a few line widths of it, so a line's rounded end or a corner's tip is not taken)
     const size=Math.max(x1-x0,y1-y0),edge=x0<=2||y0<=2||x1>=W-3||y1>=H-3;if(!edge&&!two&&size<=15*wLine&&size>=1.2*wLine&&cells.length>=wLine*wLine*0.6){for(const i of cells)m[i]=0;dropped++;}}
   return dropped;}
@@ -2778,10 +2781,16 @@ function squareBorder(strokes,med,junctions){
   // (near a rectangle all the way round: nearly every border point within a couple of lead widths of a side)
   const tol=Math.max(2.5*med,0.012*Math.max(bw,bh));
   const dist=q=>{const dy=Math.max(T-q[0],0,q[0]-B),dx=Math.max(Lx-q[1],0,q[1]-Rx);if(dy>0||dx>0)return Math.hypot(dy,dx);return Math.min(q[0]-T,B-q[0],q[1]-Lx,Rx-q[1]);};
+  let onlyCorners=null;
   let near=0;for(const q of P)if(dist(q)<=tol)near++;if(near<0.97*P.length)return strokes;
   // (a border already drawn true, its sides straight and level (squared up with the other exact lines), is left as it is:
   // this is for one drawn by hand)
-  {const dv=P.map(dist).sort((a,b)=>a-b);if(dv[Math.floor(dv.length*0.9)]<1.5)return strokes;}
+  {const dv=P.map(dist).sort((a,b)=>a-b);
+    // (but rounded corners on straight sides are squared all the same)
+    const nearC=q=>Math.min(Math.abs(q[0]-T),Math.abs(q[0]-B))<4*tol&&Math.min(Math.abs(q[1]-Lx),Math.abs(q[1]-Rx))<4*tol;
+    const round=P.some(q=>nearC(q)&&dist(q)>1.5),trueSides=dv[Math.floor(dv.length*0.9)]<1.5;if(!round&&trueSides)return strokes;
+    // (with the sides already true, only the corners are touched)
+    if(trueSides)onlyCorners=nearC;}
   // (each border point onto the nearest side; where a line turns from one side to the next, the true corner)
   const snap=(q,hv)=>{const c=[[Math.abs(q[0]-T),0],[Math.abs(q[0]-B),1],[Math.abs(q[1]-Lx),2],[Math.abs(q[1]-Rx),3]].filter(v=>!hv||(hv==='h')===(v[1]<2)).sort((a,b)=>a[0]-b[0])[0][1];
     const y=Math.min(B,Math.max(T,q[0])),x=Math.min(Rx,Math.max(Lx,q[1]));return{s:c,p:c===0?[T,x]:c===1?[B,x]:c===2?[y,Lx]:[y,Rx]};};
@@ -2799,8 +2808,8 @@ function squareBorder(strokes,med,junctions){
     for(const end of[0,1]){let k=end?n-1:0;const step=end?-1:1;const tail=[];while(k>=0&&k<n&&!mk[k]&&dist(Q[k])<=tol){tail.push(k);k+=step;}
       if(k>=0&&k<n&&mk[k]&&tail.length)for(const j of tail)mk[j]=mk[k];}});
   const res=strokes.map((Q,t)=>{const mk=marks[t];if(!mk)return Q;let any=false;const R=[];let last=-1;
-    for(let k=0;k<Q.length;k++){if(mk[k]==='c'){any=true;continue;}   // (a rounded corner: dropped, the true corner goes in its place)
-      const sd=mk[k]?snap(Q[k],mk[k]):null;if(!sd||Math.abs((sd.s<2?sd.p[0]-Q[k][0]:sd.p[1]-Q[k][1]))>tol||dist(Q[k])>tol){R.push(Q[k]);last=-1;continue;}const v=sd;any=true;
+    for(let k=0;k<Q.length;k++){if(mk[k]==='c'&&(!onlyCorners||onlyCorners(Q[k]))){any=true;continue;}   // (a rounded corner: dropped, the true corner goes in its place)
+      const sd=mk[k]&&(!onlyCorners||onlyCorners(Q[k]))?snap(Q[k],mk[k]):null;if(!sd||Math.abs((sd.s<2?sd.p[0]-Q[k][0]:sd.p[1]-Q[k][1]))>tol||dist(Q[k])>tol){R.push(Q[k]);last=-1;continue;}const v=sd;any=true;
       if(last>=0&&v.s!==last){const c=corner(last,v.s);if(c)R.push(c);}R.push(v.p);last=v.s;}
     // (a border line that ends at a corner ends exactly on it, so the two sides meeting there close up)
     if(any)for(const end of[0,1]){const k=end?R.length-1:0,q=R[k];const cy=Math.abs(q[0]-T)<=tol?T:Math.abs(q[0]-B)<=tol?B:null,cx=Math.abs(q[1]-Lx)<=tol?Lx:Math.abs(q[1]-Rx)<=tol?Rx:null;
@@ -2808,7 +2817,7 @@ function squareBorder(strokes,med,junctions){
     return any?R:Q;});
   // (a line ending on the border moves its end with it, eased back along itself)
   const moved=[];res.forEach((R,t)=>{if(R!==strokes[t])moved.push(t);});if(!moved.length)return strokes;
-  const shiftAt=(p,skip)=>{let bd=Math.max(2.5,0.8*med),v=null;for(const u of moved){if(u===skip)continue;const Q=strokes[u];for(const q of Q){const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd&&marks[u]){bd=d;const R=res[u],j=Q.indexOf(q);const s=(R.length===Q.length&&j>=0)?R[j]:(dist(q)<=tol?snap(q).p:q);v=[s[0]-q[0],s[1]-q[1]];}}}return v;};
+  const shiftAt=(p,skip)=>{let bd=Math.max(2.5,0.8*med),v=null;for(const u of moved){if(u===skip)continue;const Q=strokes[u];for(const q of Q){const d=Math.hypot(q[0]-p[0],q[1]-p[1]);if(d<bd&&marks[u]){bd=d;const R=res[u],j=Q.indexOf(q);const s=(R.length===Q.length&&j>=0)?R[j]:(dist(q)<=tol&&(!onlyCorners||onlyCorners(q))?snap(q).p:q);v=[s[0]-q[0],s[1]-q[1]];}}}return v;};
   const fin=res.map((R,t)=>{if(R!==strokes[t]||R.length<2)return R;let o=R;
     for(const end of[0,1]){const e=R[end?R.length-1:0];let v=shiftAt(e,t);if(!v||Math.hypot(v[0],v[1])<0.05)continue;if(o===R)o=R.slice();
       // (a line meeting the border at an angle is run on, or cut back, along its own heading to the moved border, rather

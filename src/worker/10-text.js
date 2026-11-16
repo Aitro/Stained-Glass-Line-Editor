@@ -31,9 +31,12 @@ function dropText(m){
     while(sp){const i=st[--sp],x=i%W,y=(i/W)|0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const j=Y*W+X;if(m[j]&&!thin[j]&&!lab[j]){lab[j]=nl;st[sp++]=j;}}}}
   const seen2=new Uint8Array(W*H);
   for(let s=0;s<W*H;s++){if(!thin[s]||seen2[s])continue;let sp=0,x0=W,y0=H,x1=0,y1=0;cells.length=0;st[sp++]=s;seen2[s]=1;
-    let la=0,two=false;
+    let la=0,two=false,cy0=1e9,cy1=-1,cx0=1e9,cx1=-1;
     while(sp){const i=st[--sp];cells.push(i);const x=i%W,y=(i/W)|0;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;
-      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const j=Y*W+X;if(thin[j]&&!seen2[j]){seen2[j]=1;st[sp++]=j;}else if(lab[j]){if(!la)la=lab[j];else if(lab[j]!==la)two=true;}}}
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const j=Y*W+X;if(thin[j]&&!seen2[j]){seen2[j]=1;st[sp++]=j;}else if(lab[j]){if(!la)la=lab[j];else if(lab[j]!==la)two=true;if(Y<cy0)cy0=Y;if(Y>cy1)cy1=Y;if(X<cx0)cx0=X;if(X>cx1)cx1=X;}}}
+    // (a thin stretch meeting thick ink at two places well apart is a line running between them, even where all the
+    // thick ink is one joined piece, as it is in a connected pattern; writing touches a line in one spot)
+    if(cy1>=0&&Math.max(cy1-cy0,cx1-cx0)>1.2*wLine)two=true;
     // (writing: small, never cut off by the picture's edge (a border line the scan clipped is thin but is lead), and more than a few line widths of it, so a line's rounded end or a corner's tip is not taken)
     const size=Math.max(x1-x0,y1-y0),edge=x0<=2||y0<=2||x1>=W-3||y1>=H-3;if(!edge&&!two&&size<=15*wLine&&size>=1.2*wLine&&cells.length>=wLine*wLine*0.6){for(const i of cells)m[i]=0;dropped++;}}
   return dropped;}
