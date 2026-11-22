@@ -40,10 +40,26 @@ function traceAsDrawn(sk,u,dmap,p){
     if(done)break;}
   // (two lines crossing: thinning splits the crossing into two joints a few pixels apart, with a short bridge between.
   // Left alone, the bridge shows as a little spike once each joint is straightened; the two joints are one crossing)
-  if(p&&p.asDrawn)for(let guard=0;guard<ch.length;guard++){const deg=new Map();for(const c of ch)for(const k of[c.a,c.b])if(k!=null)deg.set(k,(deg.get(k)||0)+1);
-    const i=ch.findIndex(c=>c.a!=null&&c.b!=null&&c.a!==c.b&&deg.get(c.a)>=3&&deg.get(c.b)>=3&&len(c.P)<3*u);if(i<0)break;
+  // (a very short bridge always; a longer one, as lines crossing at a shallow angle leave, only where its ink is the doubled
+  // thickness of two lines overlapping, not one plain line between two separate joints; each joint is merged once)
+  if(p&&p.asDrawn){const ds=[];for(const c of ch)for(let i=0;i<c.P.length;i+=4){const q=c.P[i];ds.push(dmap[Math.round(q[0])*W+Math.round(q[1])]||0);}ds.sort((x,y)=>x-y);
+   const rL=Math.max(1,ds[ds.length>>1]||u),merged=new Set();
+   const thick=c=>{let mn=Infinity;for(let i=1;i<c.P.length-1;i++){const q=c.P[i];mn=Math.min(mn,dmap[Math.round(q[0])*W+Math.round(q[1])]||0);}return c.P.length<3||mn>=1.3*rL;};
+   // (each line through a crossing comes out the far side in line with how it went in: the other lines at one joint pair up
+   // with lines at the other, head on and on one straight path. Two separate joints side by side leave their lines offset)
+   const away=(c,k)=>{const P=c.a===k?c.P:c.P.slice().reverse(),C=cent[k];let j=1,L=0;while(j<P.length-1&&L<3*u){L+=Math.hypot(P[j][0]-P[j-1][0],P[j][1]-P[j-1][1]);j++;}
+     const d=[P[j][0]-C[0],P[j][1]-C[1]],l=Math.hypot(d[0],d[1]);return l<1e-6?null:[d[0]/l,d[1]/l];};
+   const straightThrough=(br,all)=>{const ka=br.a,kb=br.b,A=all.filter(c=>c!==br&&(c.a===ka||c.b===ka)),B=all.filter(c=>c!==br&&(c.a===kb||c.b===kb));
+     if(A.length!==2||B.length!==2)return false;const ca=cent[ka],cb=cent[kb];
+     for(const x of A){const tx=away(x,ka);if(!tx)return false;let ok=false;
+       for(const y of B){const ty=away(y,kb);if(!ty)continue;if(tx[0]*ty[0]+tx[1]*ty[1]>-0.85)continue;
+         const off=Math.abs((cb[0]-ca[0])*tx[1]-(cb[1]-ca[1])*tx[0]);if(off<=Math.min(2.5*rL,0.8*len(br.P)))ok=true;}
+       if(!ok)return false;}return true;};
+   for(let guard=0;guard<ch.length;guard++){const deg=new Map();for(const c of ch)for(const k of[c.a,c.b])if(k!=null)deg.set(k,(deg.get(k)||0)+1);
+    const i=ch.findIndex(c=>c.a!=null&&c.b!=null&&c.a!==c.b&&deg.get(c.a)>=3&&deg.get(c.b)>=3&&(len(c.P)<3*u||!merged.has(c.a)&&!merged.has(c.b)&&len(c.P)<6*u&&straightThrough(c,ch)));if(i<0)break;
+    const longOne=len(ch[i].P)>=3*u;
     const ka=ch[i].a,kb=ch[i].b;cent[ka]=[(cent[ka][0]+cent[kb][0])/2,(cent[ka][1]+cent[kb][1])/2];if(free.has(kb))free.add(ka);ch.splice(i,1);
-    for(const c of ch){if(c.a===kb||c.a===ka){c.a=ka;c.P[0]=cent[ka].slice();}if(c.b===kb||c.b===ka){c.b=ka;c.P[c.P.length-1]=cent[ka].slice();}}}
+    for(const c of ch){if(c.a===kb||c.a===ka){c.a=ka;c.P[0]=cent[ka].slice();}if(c.b===kb||c.b===ka){c.b=ka;c.P[c.P.length-1]=cent[ka].slice();}}if(longOne)merged.add(ka);}}
   // (joints: where thick ink meets, the middle of the ink curves in toward the blob's center, which would show
   // as a hook on each line once the lead is thinner. Each line keeps its own direction from outside the blob
   // straight in, and the lines meet at the one point closest to all of them)

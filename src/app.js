@@ -236,11 +236,12 @@ function makeOverlay(cb){const geo=pageGeom();const c=document.createElement('ca
 function buildSVG(geo){const offs=S.offs,n=offs.length-1;const useB=$('borderOn').checked&&S.hasBorder;
   const group=(pass,w)=>{let out=`<g fill="none" stroke="#000" stroke-width="${(w*OUT_PPI).toFixed(3)}" stroke-linecap="round" stroke-linejoin="miter" stroke-miterlimit="10">\n`;
     for(let s=0;s<n;s++){if((useB?S.borderFlags[s]:0)!==pass)continue;if(offs[s+1]-offs[s]<2)continue;let d='';
-      const P=allStrokePts(geo,widthIn(),borderIn())[s];
+      // (thinned to the points the curve needs, a third of a pixel either way: cutter programs choke on a point every pixel)
+      const P=rdp(allStrokePts(geo,widthIn(),borderIn())[s],0.35);
       P.forEach((p,j)=>{d+=(j===0?'M':'L')+p[0].toFixed(2)+','+p[1].toFixed(2);});if(isLoop(P,w))d+='Z';
       out+=`<path d="${d}"/>\n`;}return out+'</g>\n';};
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${(geo.pw/OUT_PPI).toFixed(4)}in" height="${(geo.ph/OUT_PPI).toFixed(4)}in" viewBox="0 0 ${geo.pw} ${geo.ph}">\n`+
-    ($('transparent').checked?'':'<rect width="100%" height="100%" fill="#fff"/>\n')+group(0,widthIn())+(useB?group(1,borderIn()):'')+filletSVG(geo)+'</svg>\n';}
+group(0,widthIn())+(useB?group(1,borderIn()):'')+filletSVG(geo)+'</svg>\n';}
 function filletSVG(geo){const fp=filletPaths(geo);if(!fp.length)return'';const d=P=>P.map((p,j)=>(j?'L':'M')+p[0].toFixed(2)+','+p[1].toFixed(2)).join('');
   return '<g fill="#000" stroke="none">\n'+fp.map(f=>'<path d="'+d(f.poly)+'Z"/>').join('\n')+'\n</g>\n<g fill="none" stroke="#000" stroke-width="'+(widthIn()*OUT_PPI).toFixed(3)+'" stroke-linecap="round">\n'+fp.map(f=>'<path d="'+d(f.cur)+'"/>').join('\n')+'\n</g>\n';}
 
