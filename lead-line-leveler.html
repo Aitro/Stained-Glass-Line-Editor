@@ -2075,8 +2075,8 @@ function dropText(m){
 // writing and are taken out, with anything else left standing on its own among them (an underline, a ©).
 // (the height of the piece labels found, when a pattern is numbered all over: used later to clear label scraps that
 // touched a line and so could not be lifted off as marks of their own)
-let labelH=0,labelBoxes=[];
-function dropWords(m){labelH=0;labelBoxes=[];
+let labelH=0,labelBoxes=[],touchBoxes=[];
+function dropWords(m){labelH=0;labelBoxes=[];touchBoxes=[];
   const N=W*H,lab=new Int32Array(N).fill(-1),st=new Int32Array(N),C=[];let n=0;
   for(let i=0;i<N;i++){if(!m[i]||lab[i]>=0)continue;let sp=0;st[sp++]=i;lab[i]=n;const c={id:n,x0:1e9,y0:1e9,x1:-1,y1:-1,cnt:0,edge:false};
     while(sp){const j=st[--sp],y=(j/W)|0,x=j-y*W;c.cnt++;if(x<c.x0)c.x0=x;if(x>c.x1)c.x1=x;if(y<c.y0)c.y0=y;if(y>c.y1)c.y1=y;if(x===0||y===0||x===W-1||y===H-1)c.edge=true;
@@ -2120,10 +2120,15 @@ function dropWords(m){labelH=0;labelBoxes=[];
     for(const c of R)gone[c.id]=1;const g=2*(y1-y0+1);blocks.push([x0-g,y0-g,x1+g,y1+g]);lblH.push(y1-y0+1);}
   // (short labels of one or two blobs: on their own they could be anything, but a pattern numbered all over has many
   // of them, all of one height: the same height as the labels found in full)
-  const shortRows=[];for(const R of rows.values()){if(R.length>2)continue;let x0=1e9,y0=1e9,x1=-1,y1=-1;for(const c of R){x0=Math.min(x0,c.x0);y0=Math.min(y0,c.y0);x1=Math.max(x1,c.x1);y1=Math.max(y1,c.y1);}
-    if(x1-x0+1>=1.8*(y1-y0+1)&&R.some(wideBlob))shortRows.push({R,h:y1-y0+1,box:[x0,y0,x1,y1]});}
+  const shortRows=[],touchRows=[];for(const R of rows.values()){if(R.length>2)continue;let x0=1e9,y0=1e9,x1=-1,y1=-1;for(const c of R){x0=Math.min(x0,c.x0);y0=Math.min(y0,c.y0);x1=Math.max(x1,c.x1);y1=Math.max(y1,c.y1);}
+    // (or what is left of a label whose first letter touched a line and went with it: a short number set right
+    // beside the line)
+    const h=y1-y0+1,beside=()=>{const r=Math.round(1.5*h);for(let y=y0;y<=y1;y++)for(const[a,b]of[[x0-r,x0-1],[x1+1,x1+r]])for(let x=Math.max(0,a);x<=Math.min(W-1,b);x++)if(lab[y*W+x]===big.id)return true;return false;};
+    if(x1-x0+1>=1.8*h&&R.some(wideBlob))shortRows.push({R,h,box:[x0,y0,x1,y1]});else if(x1-x0+1>=1.2*h&&beside())touchRows.push({R,h,box:[x0,y0,x1,y1]});}
   if(lblH.length+shortRows.length>=8&&lblH.length>=3){const hs=lblH.slice().sort((a,b)=>a-b),hm=hs[hs.length>>1];labelH=lblH.length+shortRows.length>=8?hm:0;const like=shortRows.filter(r=>r.h>=0.65*hm&&r.h<=1.5*hm);
-    for(const r of like){for(const c of r.R)gone[c.id]=1;const g=2*r.h;blocks.push([r.box[0]-g,r.box[1]-g,r.box[2]+g,r.box[3]+g]);}}
+    for(const r of like){for(const c of r.R)gone[c.id]=1;const g=2*r.h;blocks.push([r.box[0]-g,r.box[1]-g,r.box[2]+g,r.box[3]+g]);}
+    // (kept apart: used only to smooth the line where such a label's letter was taken off it)
+    if(labelH)for(const r of touchRows)if(r.h>=0.65*hm&&r.h<=1.5*hm){const g=2*r.h;touchBoxes.push([r.box[0]-g,r.box[1]-g,r.box[2]+g,r.box[3]+g]);}}
   if(!blocks.length)return 0;
   // (anything else standing on its own among the writing goes with it, a logo or an underline too, and so on out
   // from there: a short word or a ® next to it)
@@ -2143,6 +2148,43 @@ function dropLabelScraps(strokes,lh,u){if(!lh)return strokes;const len=S=>{let L
   const loose=(S,si,p)=>{const cy=(p[0]/cell)|0,cx=(p[1]/cell)|0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const L=grid.get((cy+dy)+','+(cx+dx));if(!L)continue;
       for(const[sj,q]of L)if(sj!==si&&Math.hypot(q[0]-p[0],q[1]-p[1])<=2*u)return false;}return true;};
   const near=q=>labelBoxes.some(b=>q[1]>=b[0]-lh&&q[1]<=b[2]+lh&&q[0]>=b[1]-lh&&q[0]<=b[3]+lh);
+  // (a label touching a line from beside it can leave a small notch or jog on the line where its letter was taken
+  // off. Where a line runs right through a label's box and runs smooth on both sides of it, its stretch inside the
+  // box is put back on the smooth path the two sides make: a gentle curve fitted to the line either side)
+  {const TB=labelBoxes.concat(touchBoxes),inB=q=>TB.some(b=>q[1]>=b[0]-0.25*lh&&q[1]<=b[2]+0.25*lh&&q[0]>=b[1]-0.25*lh&&q[0]<=b[3]+0.25*lh);
+    for(const S of strokes){const n=S.length;if(n<8)continue;const cum=[0];for(let i=1;i<n;i++)cum.push(cum[i-1]+Math.hypot(S[i][0]-S[i-1][0],S[i][1]-S[i-1][1]));
+      const ins=S.map(inB);
+      for(let a=1;a<n-1;a++){if(!ins[a]||ins[a-1])continue;let b=a;while(b<n-1&&ins[b+1])b++;if(b>=n-1)break;
+        const runL=cum[b]-cum[a];if(runL<0.5*lh||runL>6*lh){a=b;continue;}
+        // (the line either side: 2 label heights each way, clear of the box)
+        let p0=a-1;while(p0>0&&cum[a-1]-cum[p0-1]<=2*lh&&!ins[p0-1])p0--;let q1=b+1;while(q1<n-1&&cum[q1+1]-cum[b+1]<=2*lh&&!ins[q1+1])q1++;
+        if(cum[a-1]-cum[p0]<1.5*lh||cum[q1]-cum[b+1]<1.5*lh){a=b;continue;}
+        const O=S[p0],E=S[q1],dl=Math.hypot(E[0]-O[0],E[1]-O[1]);if(dl<1e-6){a=b;continue;}const dv=[(E[0]-O[0])/dl,(E[1]-O[1])/dl];
+        const T=q=>(q[0]-O[0])*dv[0]+(q[1]-O[1])*dv[1],Sd=q=>(q[1]-O[1])*dv[0]-(q[0]-O[0])*dv[1];
+        // (it must run on through the box, not turn back)
+        let mono=true;for(let k=p0+1;k<=q1;k++)if(T(S[k])<T(S[k-1])-0.5){mono=false;break;}if(!mono){a=b;continue;}
+        // (a gentle curve, s = c0 + c1 t + c2 t^2, fitted to the two sides only)
+        const out=[];for(let k=p0;k<a;k++)out.push(k);for(let k=b+1;k<=q1;k++)out.push(k);
+        const M=[[0,0,0],[0,0,0],[0,0,0]],r=[0,0,0];for(const k of out){const t=T(S[k])/dl,s=Sd(S[k]),f=[1,t,t*t];for(let x=0;x<3;x++){r[x]+=f[x]*s;for(let y=0;y<3;y++)M[x][y]+=f[x]*f[y];}}
+        const det=A=>A[0][0]*(A[1][1]*A[2][2]-A[1][2]*A[2][1])-A[0][1]*(A[1][0]*A[2][2]-A[1][2]*A[2][0])+A[0][2]*(A[1][0]*A[2][1]-A[1][1]*A[2][0]);
+        const D=det(M);if(Math.abs(D)<1e-9){a=b;continue;}const c=[0,1,2].map(x=>det(M.map((row,i)=>row.map((v,j)=>j===x?r[i]:v)))/D);
+        const fit=k=>{const t=T(S[k])/dl;return c[0]+c[1]*t+c[2]*t*t;};
+        let ss=0,om=0;for(const k of out){const e=Sd(S[k])-fit(k);ss+=e*e;om=Math.max(om,Math.abs(e));}
+        if(Math.sqrt(ss/out.length)>0.08*lh||om>0.2*lh){a=b;continue;}
+        let im=0;for(let k=a;k<=b;k++)im=Math.max(im,Math.abs(Sd(S[k])-fit(k)));
+        if(im<0.5*u||im>lh){a=b;continue;}
+        // (a line that is smooth right through the box, a wave's crest say, is left as drawn: only a short sharp jog that
+        // a smooth curve over the whole stretch cannot follow is a notch)
+        {const K=5,A=[...Array(K)].map(()=>Array(K+1).fill(0));for(let k=p0;k<=q1;k++){const t=2*T(S[k])/dl-1,s=Sd(S[k]),f=[1,t,t*t,t*t*t,t*t*t*t];for(let x=0;x<K;x++){A[x][K]+=f[x]*s;for(let y=0;y<K;y++)A[x][y]+=f[x]*f[y];}}
+          let ok=true;for(let cI=0;cI<K;cI++){let pv=cI;for(let rI=cI+1;rI<K;rI++)if(Math.abs(A[rI][cI])>Math.abs(A[pv][cI]))pv=rI;if(Math.abs(A[pv][cI])<1e-12){ok=false;break;}[A[cI],A[pv]]=[A[pv],A[cI]];
+            for(let rI=0;rI<K;rI++){if(rI===cI)continue;const f=A[rI][cI]/A[cI][cI];for(let x=cI;x<=K;x++)A[rI][x]-=f*A[cI][x];}}
+          if(!ok){a=b;continue;}const cc=A.map((row,i)=>row[K]/row[i]);let rm=0;
+          for(let k=a;k<=b;k++){const t=2*T(S[k])/dl-1;rm=Math.max(rm,Math.abs(Sd(S[k])-(cc[0]+cc[1]*t+cc[2]*t*t+cc[3]*t*t*t+cc[4]*t*t*t*t)));}
+          if(rm<0.5*u){a=b;continue;}}
+        // (put back on the curve, easing in and out over the half label height either side)
+        const ease=0.5*lh;for(let k=p0;k<=q1;k++){let w=1;if(k<a)w=Math.max(0,1-(cum[a]-cum[k])/ease);else if(k>b)w=Math.max(0,1-(cum[k]-cum[b])/ease);if(w<=0)continue;
+          const t=T(S[k]),s=Sd(S[k]),s2=s+w*(fit(k)-s);S[k]=[O[0]+t*dv[0]-s2*dv[1],O[1]+t*dv[1]+s2*dv[0]];}
+        a=b;}}}
   // (a label run into the line itself: the line takes a little detour through it, out and back within a label's
   // size. The detour is cut out and the line runs straight across)
   for(const S of strokes){if(S.length<8)continue;const cum=[0];for(let i=1;i<S.length;i++)cum.push(cum[i-1]+Math.hypot(S[i][0]-S[i-1][0],S[i][1]-S[i-1][1]));
