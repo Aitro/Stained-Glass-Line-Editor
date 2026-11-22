@@ -15,7 +15,8 @@ worker.onmessage=e=>{const m=e.data;
     if(S.pending){S.pending=false;run();return;}
     S.rawStrokes=m.pts;S.rawOffs=m.offs;S.rawHw=m.hw;S.rawFill=m.fill;S.rawFcurve=m.fcurve;S.areaCache=null;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;if(m.axes)S.axes=m.axes;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];S.strokes=applyDrags();markBorder();render();drawFixLayer();
     if(S.symWaiting&&S.symPending){S.symWaiting=false;if(symAxisOf(S.symPending)){drawFixLayer();symMenu();}}
-    setStatus('Done in '+(m.ms/1000).toFixed(1)+' s',false);}
+    if(m.rect&&!m.rect.ok){setStatus('No oval border found to make rectangular ('+(m.ms/1000).toFixed(1)+' s)',false);return;}
+    setStatus('Done in '+(m.ms/1000).toFixed(1)+' s'+(m.rect&&m.rect.ok?' · border made rectangular, '+m.rect.pieces+' border pieces':''),false);}
   else if(m.type==='error'){S.running=false;setStatus('Could not process this image: '+m.message,false);}};
 function setStatus(t,busy){$('statusText').textContent=t;$('status').classList.toggle('busy',!!busy);}
 
@@ -75,7 +76,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,keepGaps:$('keepGaps').checked,joinPieces:$('joinPieces').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,ovalToRect:$('ovalToRect').checked,keepGaps:$('keepGaps').checked,joinPieces:$('joinPieces').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
   lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
 // A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
@@ -969,6 +970,7 @@ $('threshAuto').addEventListener('change',()=>{if($('threshAuto').checked)$('thr
 $('smooth').addEventListener('input',()=>{updateLabels();schedule(run,350);});
 $('invert').addEventListener('change',()=>{if(S.src){findCrop();prepare();}});
 $('dropText').addEventListener('change',()=>schedule(run,0));
+$('ovalToRect').addEventListener('change',()=>schedule(run,0));
 $('keepGaps').addEventListener('change',()=>schedule(run,0));
 $('joinPieces').addEventListener('change',()=>schedule(run,0));
 $('dropIslands').addEventListener('change',()=>schedule(run,0));

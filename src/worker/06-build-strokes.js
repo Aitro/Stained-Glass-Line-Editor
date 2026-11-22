@@ -483,9 +483,61 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     if(lineOk)return ln;
     if(ci&&ci.dev<=tolCirc(L)&&ci.sweep>=20&&L>=12*med&&ci.r<3*Math.max(W,H))return ci;
     return null;};
-  const project=(pr,p)=>{if(pr.type==='line'){const t=(p[0]-pr.c[0])*pr.d[0]+(p[1]-pr.c[1])*pr.d[1];return[pr.c[0]+t*pr.d[0],pr.c[1]+t*pr.d[1]];}
+  // (an oval: hand-drawn ovals wander a little more than circles, so the allowance grows with the oval's size;
+  // and it has to be clearly an oval, not a circle and not some other long curve)
+  const tolOval=e=>Math.max(2,0.35*med,0.0025*(e.a+e.b));
+  const ovalOk=(e,P)=>{const ar=Math.max(e.a,e.b)/Math.min(e.a,e.b);
+    return ar>=1.03&&ar<=4&&e.dev<=1.6*tolOval(e)&&e.rms<=0.4*tolOval(e)&&Math.min(e.a,e.b)>=8*med&&Math.max(e.a,e.b)<1.5*Math.max(W,H)&&ellCover(e,P)>=250;};
+  // (an oval broken into pieces by the lines that meet it: from each long curved stretch, follow on through the
+  // joints, always taking the stretch that carries straight on, and fit one ellipse to all of it)
+  const findOvals=pcs=>{const C=[];
+    // (a short straight-looking stretch between two close joints can be part of an oval too)
+    pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr&&r.pr.type==='line'&&r.b-r.a>=20*med)return;if(r.b-r.a<2)return;
+      const P=r.pts||realPts(pc.Q,pc.w,r.a,r.b);const Q=pc.Q,k=Math.max(1,Math.min(Math.round(4*med),Math.floor((r.b-r.a)/2)));
+      const dA=[Q[r.a][0]-Q[r.a+k][0],Q[r.a][1]-Q[r.a+k][1]],dB=[Q[r.b][0]-Q[r.b-k][0],Q[r.b][1]-Q[r.b-k][1]];
+      const nn=v=>{const l=Math.hypot(v[0],v[1])||1;return[v[0]/l,v[1]/l];};
+      C.push({pc,r,P,L:r.b-r.a,e:[Q[r.a],Q[r.b]],d:[nn(dA),nn(dB)]});}));
+    const used=new Set(),found=[];
+    const order=C.map((_,i)=>i).sort((i,j)=>C[j].L-C[i].L);
+    for(const si of order){if(used.has(si)||C[si].L<15*med)continue;const set=[si],inSet=new Set([si]);
+      // (each open end: the point and the way the curve is heading out of it)
+      const tips=[{p:C[si].e[0],d:C[si].d[0]},{p:C[si].e[1],d:C[si].d[1]}];let closed=false;
+      for(const tip of tips){for(let guard=0;guard<200;guard++){let best=null,bc=Math.cos(25*Math.PI/180);
+          for(let j=0;j<C.length;j++){if(used.has(j))continue;for(let s2=0;s2<2;s2++){const q=C[j].e[s2];if(Math.hypot(q[0]-tip.p[0],q[1]-tip.p[1])>2.5*u)continue;
+              const cs=-(C[j].d[s2][0]*tip.d[0]+C[j].d[s2][1]*tip.d[1]);if(cs>bc){bc=cs;best=[j,s2];}}}
+          if(!best)break;const[j,s2]=best;if(inSet.has(j)){closed=true;break;}set.push(j);inSet.add(j);tip.p=C[j].e[1-s2];tip.d=C[j].d[1-s2];}
+        if(closed)break;}
+      if(set.length<2)continue;
+      // (each stretch's own points, junction bridges left out; a stretch can run on past the oval into
+      // another line, like a cloud line carrying straight on from it, so the fit leaves out what lies well off it)
+      const own=i=>{const{pc,r}=C[i],o=[];for(let k=r.a;k<=r.b;k++)if(!(pc.w[k]<0.5))o.push(k);return o;};
+      const idx=set.map(own);let P=[].concat(...set.map((i,n)=>idx[n].map(k=>C[i].pc.Q[k])));
+      let el=fitEllipse(P);if(!el)continue;
+      for(let pass=0;pass<3;pass++){const lim=Math.max(3*tolOval(el),2*med);const P2=P.filter(p=>ellDist(el,p)<=lim);if(P2.length<30)break;const e2=fitEllipse(P2);if(!e2)break;el=e2;P=P2;}
+      // (then each stretch: all of it on the oval, or the part from one end that is; the rest stays its own line)
+      const tol=1.6*tolOval(el),take=[];
+      set.forEach((i,n)=>{const{pc,r}=C[i],ks=idx[n];if(!ks.length)return;const ok=ks.map(k=>ellDist(el,pc.Q[k])<=tol);
+        if(ok.every(Boolean)){take.push({i,a:r.a,b:r.b});return;}
+        let pa=0;while(pa<ok.length&&ok[pa])pa++;let pb=0;while(pb<ok.length&&ok[ok.length-1-pb])pb++;
+        if(Math.max(pa,pb)<3*med)return;
+        if(pa>=pb)take.push({i,a:r.a,b:ks[pa-1],split:true});else take.push({i,a:ks[ks.length-pb],b:r.b,split:true});});
+      if(take.length<2)continue;
+      const Pt=[].concat(...take.map(t=>{const{pc}=C[t.i],o=[];for(let k=t.a;k<=t.b;k++)if(!(pc.w[k]<0.5))o.push(pc.Q[k]);return o;}));
+      const L=take.reduce((s2,t)=>s2+(t.b-t.a),0);if(L<30*med)continue;
+      const ef=fitEllipse(Pt);if(!ef||!ovalOk(ef,Pt))continue;
+      // (a circle is a circle: left to the circle fitting)
+      const ci=fitCircle(Pt);if(ci&&ci.dev<=tolCirc(L))continue;
+      for(const t of take){const{pc,r}=C[t.i];used.add(t.i);const pts=[];for(let k=t.a;k<=t.b;k++)if(!(pc.w[k]<0.5))pts.push(pc.Q[k]);
+        if(!t.split){r.pr=ef;r.pts=pts;r.L=r.b-r.a;continue;}
+        const j=pc.runs.indexOf(r);const on={a:t.a,b:t.b,pr:ef,pts,L:t.b-t.a},rest=t.a===r.a?{a:t.b,b:r.b,pr:null}:{a:r.a,b:t.a,pr:null};
+        pc.runs.splice(j,1,...(t.a===r.a?[on,rest]:[rest,on]));}
+      found.push(ef);}
+    return found;};
+  const project=(pr,p)=>{if(pr.type==='ellipse')return ellProject(pr,p);if(pr.type==='line'){const t=(p[0]-pr.c[0])*pr.d[0]+(p[1]-pr.c[1])*pr.d[1];return[pr.c[0]+t*pr.d[0],pr.c[1]+t*pr.d[1]];}
     const dx=p[0]-pr.c[0],dy=p[1]-pr.c[1],dd=Math.hypot(dx,dy)||1e-9;return[pr.c[0]+dx/dd*pr.r,pr.c[1]+dy/dd*pr.r];};
   const intersect=(A,B,ref)=>{let cands=[];
+    if(A.type==='ellipse'||B.type==='ellipse'){const E_=A.type==='ellipse'?A:B,O_=A.type==='ellipse'?B:A;cands=ellCross(E_,O_);
+      let best=null,bd=Infinity;for(const p of cands){const d=Math.hypot(p[0]-ref[0],p[1]-ref[1]);if(d<bd){bd=d;best=p;}}return bd<=3*u?best:null;}
     const lineAsPts=l=>l;
     if(A.type==='line'&&B.type==='line'){const det=A.d[0]*(-B.d[1])+B.d[0]*A.d[1];if(Math.abs(det)<1e-6)return null;
       const rx=B.c[0]-A.c[0],ry=B.c[1]-A.c[1];const t=(rx*(-B.d[1])+B.d[0]*ry)/det;cands=[[A.c[0]+t*A.d[0],A.c[1]+t*A.d[1]]];}
@@ -499,6 +551,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     return bd<=3*u?best:null;};
   const sampleRun=(pr,p0,p1,ref)=>{const out=[p0];
     if(pr.type==='line'){const L=Math.hypot(p1[0]-p0[0],p1[1]-p0[1]),n=Math.max(1,Math.ceil(L));for(let i=1;i<=n;i++){const t=i/n;out.push([p0[0]+t*(p1[0]-p0[0]),p0[1]+t*(p1[1]-p0[1])]);}return out;}
+    if(pr.type==='ellipse'){const t0=ellParam(pr,p0),t1=ellParam(pr,p1),tm=ellParam(pr,ref);const nm=x=>{x%=2*Math.PI;return x<0?x+2*Math.PI:x;};
+      let span=nm(t1-t0);if(nm(tm-t0)>span)span=span-2*Math.PI;const n=Math.max(2,Math.ceil(Math.abs(span)*Math.max(pr.a,pr.b)));
+      for(let i=1;i<=n;i++)out.push(ellPoint(pr,t0+span*i/n));out[out.length-1]=p1.slice();return out;}
     const a0=Math.atan2(p0[1]-pr.c[1],p0[0]-pr.c[0]),a1=Math.atan2(p1[1]-pr.c[1],p1[0]-pr.c[0]);
     // go round the same way the original line does (decided by a point in the middle of the run)
     const am=Math.atan2(ref[1]-pr.c[1],ref[0]-pr.c[0]);const norm=x=>{while(x<0)x+=2*Math.PI;while(x>=2*Math.PI)x-=2*Math.PI;return x;};
@@ -508,6 +563,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   const analyze=pc=>{const{Q,w}=pc;pc.runs=[];
     if(pc.loop){const P=realPts(Q,w,0,Q.length-1);const L=Q.length;const ci=P.length>=10?fitCircle(P):null;
       if(ci&&ci.dev<=tolCirc(L)&&ci.r<3*Math.max(W,H)){pc.full=ci;pc.runs=[{a:0,b:Q.length-1,pr:ci,pts:P,L}];return;}
+      // (an oval drawn round on its own: an exact ellipse)
+      if(P.length>=30&&L>=30*med){const el=fitEllipse(P);if(el&&ovalOk(el,P)){pc.full=el;pc.runs=[{a:0,b:Q.length-1,pr:el,pts:P,L}];return;}}
       // not a whole circle: open the loop at a junction crossing and treat it like an open chain
       let st=0;for(let i=0;i<Q.length;i++)if(w[i]<0.5){st=i;break;}
       pc.Q=[...Q.slice(st),...Q.slice(0,st+1)];pc.w=[...w.slice(st),...w.slice(0,st+1)];pc.cs=[0,pc.Q.length-1];pc.loopOpened=true;}
@@ -550,7 +607,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   // fit stretches of the same straight line / circle together, across chains
   const mergePrims=pcs=>{const runs=[];pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr)runs.push(r);}));
     const par=runs.map((_,i)=>i);const fd=i=>par[i]===i?i:(par[i]=fd(par[i]));
-    for(let i=0;i<runs.length;i++)for(let j=i+1;j<runs.length;j++){const A=runs[i].pr,B=runs[j].pr;if(A.type!==B.type)continue;
+    for(let i=0;i<runs.length;i++)for(let j=i+1;j<runs.length;j++){const A=runs[i].pr,B=runs[j].pr;if(A.type!==B.type||A.type==='ellipse')continue;
       if(A.type==='line'){if(Math.abs(A.d[0]*B.d[0]+A.d[1]*B.d[1])<Math.cos(Math.PI/180))continue;
         if(Math.abs((B.c[0]-A.c[0])*A.n[0]+(B.c[1]-A.c[1])*A.n[1])>0.4*med)continue;}
       else if(Math.hypot(A.c[0]-B.c[0],A.c[1]-B.c[1])>0.6*med||Math.abs(A.r-B.r)>0.6*med)continue;
@@ -565,7 +622,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     // a stretch that continues straight on from a long line or circle, and lies on it, becomes
     // part of it (so a circular border broken up by junctions is one exact circle)
     const strong=[];const tot=new Map();pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr)tot.set(r.pr,(tot.get(r.pr)||0)+r.L);}));
-    tot.forEach((L,pr)=>{if(pr.type==='line'?L>=25*med:L>=40*med)strong.push({pr,L,tol:pr.type==='line'?tolLine(L):tolCirc(L)});});
+    tot.forEach((L,pr)=>{if(pr.type==='line'?L>=25*med:L>=40*med)strong.push({pr,L,tol:pr.type==='line'?tolLine(L):pr.type==='ellipse'?tolOval(pr):tolCirc(L)});});
     const endsOf=pr=>{const o=[];pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr===pr){o.push(pc.Q[r.a],pc.Q[r.b]);}}));return o;};
     let changed=true,guard=0;
     while(changed&&guard++<6){changed=false;
@@ -593,6 +650,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const L=rs.reduce((s,r)=>s+r.L,0);if(dv>3*tolLine(L))return;        // squaring would move it too far: leave it
       pr.c=c;pr.d=d;pr.n=nn;pr.dev=dv;});};
   const renderPC=pc=>{if(pc.loop&&!opt.exact){const Z=smoothPiece(pc.Q,pc.w,u,strength,true);return[...Z,Z[0]];}
+    if(pc.full&&pc.full.type==='ellipse'){const e=pc.full,t0=ellParam(e,pc.Q[0]),tq=ellParam(e,pc.Q[Math.floor(pc.Q.length/4)]);
+      let d=tq-t0;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;const sg=d>=0?1:-1;
+      const n=Math.max(16,Math.ceil(2*Math.PI*Math.max(e.a,e.b))),out=[];for(let i=0;i<=n;i++)out.push(ellPoint(e,t0+sg*2*Math.PI*i/n));return out;}
     if(pc.full){const c=pc.full,a0=Math.atan2(pc.Q[0][1]-c.c[1],pc.Q[0][0]-c.c[0]);
       const sgn=(()=>{const q=pc.Q[Math.floor(pc.Q.length/4)];const am=Math.atan2(q[1]-c.c[1],q[0]-c.c[0]);let d=am-a0;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d>=0?1:-1;})();
       const n=Math.max(16,Math.ceil(2*Math.PI*c.r)),out=[];for(let i=0;i<=n;i++){const an=a0+sgn*2*Math.PI*i/n;out.push([c.c[0]+c.r*Math.cos(an),c.c[1]+c.r*Math.sin(an)]);}return out;}
@@ -615,7 +675,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         // where a free curve carries straight on from an exact line / circle (no corner there), ease
         // it out of that shape's own direction over a short stretch, so the joint has no kink
         const ri=runs.indexOf(r),cset=new Set(pc.cs||[]);
-        const ext=(pr,p,toward,len)=>{let t=pr.type==='line'?pr.d.slice():[-(p[1]-pr.c[1]),p[0]-pr.c[0]];const tn=norm2(t)||1;t=[t[0]/tn,t[1]/tn];
+        const ext=(pr,p,toward,len)=>{if(pr.type==='ellipse'){let t=ellParam(pr,p);const tg=ellTangent(pr,t);const sg=((toward[0]-p[0])*tg[0]+(toward[1]-p[1])*tg[1])>=0?1:-1;
+            const o2=[];for(let k2=0;k2<len;k2++){o2.push(ellPoint(pr,t));const g=ellTangent(pr,t);t+=sg/(Math.hypot(g[0],g[1])||1);}o2[0]=p.slice();return o2;}
+          let t=pr.type==='line'?pr.d.slice():[-(p[1]-pr.c[1]),p[0]-pr.c[0]];const tn=norm2(t)||1;t=[t[0]/tn,t[1]/tn];
           if((toward[0]-p[0])*t[0]+(toward[1]-p[1])*t[1]<0)t=[-t[0],-t[1]];const o2=[];
           if(pr.type==='line'){for(let k2=0;k2<len;k2++)o2.push([p[0]+k2*t[0],p[1]+k2*t[1]]);return o2;}
           const a0=Math.atan2(p[1]-pr.c[1],p[0]-pr.c[0]);const sg=Math.sign((p[0]-pr.c[0])*t[1]-(p[1]-pr.c[1])*t[0])||1;
@@ -663,7 +725,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     return out;};
   const fitAll=()=>{const pcs=chains.map(C=>C.dead?null:prepChain(C));
     pcs.forEach(pc=>{if(pc){if(opt.exact)analyze(pc);else{pc.runs=[];if(pc.loop){pc.cs=[0,pc.Q.length-1];}for(let c=0;c<(pc.cs||[]).length-1;c++)pc.runs.push({a:pc.cs[c],b:pc.cs[c+1],pr:null});}}});
-    if(opt.exact){mergePrims(pcs.filter(Boolean));if(opt.square)squareUp(pcs.filter(Boolean));}
+    if(opt.exact){findOvals(pcs.filter(Boolean));mergePrims(pcs.filter(Boolean));if(opt.square)squareUp(pcs.filter(Boolean));}
     return pcs.map(pc=>pc?renderPC(pc):[]);};
   // pass 1
   const stemNodes=new Map();

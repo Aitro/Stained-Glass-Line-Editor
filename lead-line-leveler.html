@@ -281,6 +281,7 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
           <label class="check"><input id="threshAuto" type="checkbox" checked><span>Pick the cutoff automatically</span></label>
           <label class="check"><input id="invert" type="checkbox"><span>Lines are light on a dark background</span></label>
           <label class="check"><input id="dropText" type="checkbox" checked><span>Remove numbers and labels<br><span class="hint">Small bits of ink written much thinner than the lines, like piece numbers, are left out</span></span></label>
+          <label class="check"><input id="ovalToRect" type="checkbox"><span>Make an oval border rectangular<br><span class="hint">For a panel with a band of border pieces between two ovals: the picture inside is kept, its lines are carried out to a rectangle, and the band becomes a rectangular border the same width, with mitred corners</span></span></label>
           <label class="check"><input id="dropIslands" type="checkbox" checked><span>Remove circles inside pieces<br><span class="hint">A small ring that touches no other line (a circle within a circle) can't be cut in glass, so it is left out</span></span></label>
           <label class="check"><input id="joinPieces" type="checkbox"><span>Join pieces drawn apart<br><span class="hint">For designs where every piece has its own outline with a thin white gap between pieces: each gap becomes one shared lead line, and a shape standing on its own is joined to the nearest line</span></span></label>
           <label class="check"><input id="keepGaps" type="checkbox"><span>Keep narrow gaps between lines<br><span class="hint">For clean, crowded drawings: lines drawn close together, and the thin tips of pieces, are traced as drawn instead of being run together. Leave off for scans with broken or hollow lines</span></span></label>
@@ -471,7 +472,9 @@ function process(p){
   const lines=Array.isArray(p.lines)?p.lines.filter(L=>L&&[L.ax,L.ay,L.bx,L.by].every(isFinite)):[];
   if(lines.length){const lw=inkWidth(m);for(const L of lines)drawSeg(m,L.ax,L.ay,L.bx,L.by,lw/2);}
   // numbers and labels written in the pieces: small separate bits of ink drawn much thinner than the lines
-  if(p.dropText!==false){dropWords(m);dropText(m);}
+  if(p.dropText!==false){dropOutside(m);dropWords(m);dropText(m);}
+  // (an oval border made rectangular, when asked)
+  let rectInfo=null;if(p.ovalToRect)rectInfo=ovalToRect(m);
   // pieces drawn as separate outlines with narrow gaps between them: the gaps become shared lines (and numbers left
   // standing on their own in the pieces are taken out there)
   joinMode=0;if(p.joinPieces&&!colorIn)joinPieces(m,p.dropText!==false);
@@ -545,6 +548,7 @@ function process(p){
   if(p.joinPieces&&!p.asDrawn&&!colorIn)built.strokes=keepOffStaff(built.strokes,med);
   if(p.joinPieces&&!p.asDrawn&&!colorIn)built.strokes=dropDoubles(built.strokes,dmap,med);
   if(p.dropIslands!==false)built.strokes=dropIslands(built.strokes,med);
+  if(p.dropText!==false)built.strokes=dropLabelScraps(built.strokes,labelH,u);
   if(!p.asDrawn)built.strokes=roundTouches(built.strokes,med,dmap,+p.newHalf);
   if(!p.asDrawn&&!colorIn&&p.exact&&p.square)built.strokes=squareBorder(built.strokes,med,built.junctions);
   if(!p.asDrawn&&!colorIn)built.strokes=smoothOutline(built.strokes,m,med,built.junctions);
@@ -558,7 +562,7 @@ function process(p){
     const hw=raw.map((_,i)=>{const a=raw.slice(Math.max(0,i-75),Math.min(raw.length,i+76)).sort((p,q)=>p-q);return a[Math.floor(a.length*0.4)];});
     S.forEach((q,i)=>{flat.push(q[1]+0.5,q[0]+0.5);hwf.push(hw[i]);});offs.push(flat.length/2);}
   const junctions=(built.junctions||[]).map(J=>({x:J.p[1]+0.5,y:J.p[0]+0.5,wx:J.q[1],wy:J.q[0],arms:J.arms,pairs:J.pairs,fixed:J.fixed}));
-  return{axes:axesOut,junctions,pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
+  return{rect:rectInfo,axes:axesOut,junctions,pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
 
 // ===================================================================== curve stage
 // Trace the centerline into a graph of lines and junctions, rebuild junctions the way a
@@ -1230,9 +1234,61 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     if(lineOk)return ln;
     if(ci&&ci.dev<=tolCirc(L)&&ci.sweep>=20&&L>=12*med&&ci.r<3*Math.max(W,H))return ci;
     return null;};
-  const project=(pr,p)=>{if(pr.type==='line'){const t=(p[0]-pr.c[0])*pr.d[0]+(p[1]-pr.c[1])*pr.d[1];return[pr.c[0]+t*pr.d[0],pr.c[1]+t*pr.d[1]];}
+  // (an oval: hand-drawn ovals wander a little more than circles, so the allowance grows with the oval's size;
+  // and it has to be clearly an oval, not a circle and not some other long curve)
+  const tolOval=e=>Math.max(2,0.35*med,0.0025*(e.a+e.b));
+  const ovalOk=(e,P)=>{const ar=Math.max(e.a,e.b)/Math.min(e.a,e.b);
+    return ar>=1.03&&ar<=4&&e.dev<=1.6*tolOval(e)&&e.rms<=0.4*tolOval(e)&&Math.min(e.a,e.b)>=8*med&&Math.max(e.a,e.b)<1.5*Math.max(W,H)&&ellCover(e,P)>=250;};
+  // (an oval broken into pieces by the lines that meet it: from each long curved stretch, follow on through the
+  // joints, always taking the stretch that carries straight on, and fit one ellipse to all of it)
+  const findOvals=pcs=>{const C=[];
+    // (a short straight-looking stretch between two close joints can be part of an oval too)
+    pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr&&r.pr.type==='line'&&r.b-r.a>=20*med)return;if(r.b-r.a<2)return;
+      const P=r.pts||realPts(pc.Q,pc.w,r.a,r.b);const Q=pc.Q,k=Math.max(1,Math.min(Math.round(4*med),Math.floor((r.b-r.a)/2)));
+      const dA=[Q[r.a][0]-Q[r.a+k][0],Q[r.a][1]-Q[r.a+k][1]],dB=[Q[r.b][0]-Q[r.b-k][0],Q[r.b][1]-Q[r.b-k][1]];
+      const nn=v=>{const l=Math.hypot(v[0],v[1])||1;return[v[0]/l,v[1]/l];};
+      C.push({pc,r,P,L:r.b-r.a,e:[Q[r.a],Q[r.b]],d:[nn(dA),nn(dB)]});}));
+    const used=new Set(),found=[];
+    const order=C.map((_,i)=>i).sort((i,j)=>C[j].L-C[i].L);
+    for(const si of order){if(used.has(si)||C[si].L<15*med)continue;const set=[si],inSet=new Set([si]);
+      // (each open end: the point and the way the curve is heading out of it)
+      const tips=[{p:C[si].e[0],d:C[si].d[0]},{p:C[si].e[1],d:C[si].d[1]}];let closed=false;
+      for(const tip of tips){for(let guard=0;guard<200;guard++){let best=null,bc=Math.cos(25*Math.PI/180);
+          for(let j=0;j<C.length;j++){if(used.has(j))continue;for(let s2=0;s2<2;s2++){const q=C[j].e[s2];if(Math.hypot(q[0]-tip.p[0],q[1]-tip.p[1])>2.5*u)continue;
+              const cs=-(C[j].d[s2][0]*tip.d[0]+C[j].d[s2][1]*tip.d[1]);if(cs>bc){bc=cs;best=[j,s2];}}}
+          if(!best)break;const[j,s2]=best;if(inSet.has(j)){closed=true;break;}set.push(j);inSet.add(j);tip.p=C[j].e[1-s2];tip.d=C[j].d[1-s2];}
+        if(closed)break;}
+      if(set.length<2)continue;
+      // (each stretch's own points, junction bridges left out; a stretch can run on past the oval into
+      // another line, like a cloud line carrying straight on from it, so the fit leaves out what lies well off it)
+      const own=i=>{const{pc,r}=C[i],o=[];for(let k=r.a;k<=r.b;k++)if(!(pc.w[k]<0.5))o.push(k);return o;};
+      const idx=set.map(own);let P=[].concat(...set.map((i,n)=>idx[n].map(k=>C[i].pc.Q[k])));
+      let el=fitEllipse(P);if(!el)continue;
+      for(let pass=0;pass<3;pass++){const lim=Math.max(3*tolOval(el),2*med);const P2=P.filter(p=>ellDist(el,p)<=lim);if(P2.length<30)break;const e2=fitEllipse(P2);if(!e2)break;el=e2;P=P2;}
+      // (then each stretch: all of it on the oval, or the part from one end that is; the rest stays its own line)
+      const tol=1.6*tolOval(el),take=[];
+      set.forEach((i,n)=>{const{pc,r}=C[i],ks=idx[n];if(!ks.length)return;const ok=ks.map(k=>ellDist(el,pc.Q[k])<=tol);
+        if(ok.every(Boolean)){take.push({i,a:r.a,b:r.b});return;}
+        let pa=0;while(pa<ok.length&&ok[pa])pa++;let pb=0;while(pb<ok.length&&ok[ok.length-1-pb])pb++;
+        if(Math.max(pa,pb)<3*med)return;
+        if(pa>=pb)take.push({i,a:r.a,b:ks[pa-1],split:true});else take.push({i,a:ks[ks.length-pb],b:r.b,split:true});});
+      if(take.length<2)continue;
+      const Pt=[].concat(...take.map(t=>{const{pc}=C[t.i],o=[];for(let k=t.a;k<=t.b;k++)if(!(pc.w[k]<0.5))o.push(pc.Q[k]);return o;}));
+      const L=take.reduce((s2,t)=>s2+(t.b-t.a),0);if(L<30*med)continue;
+      const ef=fitEllipse(Pt);if(!ef||!ovalOk(ef,Pt))continue;
+      // (a circle is a circle: left to the circle fitting)
+      const ci=fitCircle(Pt);if(ci&&ci.dev<=tolCirc(L))continue;
+      for(const t of take){const{pc,r}=C[t.i];used.add(t.i);const pts=[];for(let k=t.a;k<=t.b;k++)if(!(pc.w[k]<0.5))pts.push(pc.Q[k]);
+        if(!t.split){r.pr=ef;r.pts=pts;r.L=r.b-r.a;continue;}
+        const j=pc.runs.indexOf(r);const on={a:t.a,b:t.b,pr:ef,pts,L:t.b-t.a},rest=t.a===r.a?{a:t.b,b:r.b,pr:null}:{a:r.a,b:t.a,pr:null};
+        pc.runs.splice(j,1,...(t.a===r.a?[on,rest]:[rest,on]));}
+      found.push(ef);}
+    return found;};
+  const project=(pr,p)=>{if(pr.type==='ellipse')return ellProject(pr,p);if(pr.type==='line'){const t=(p[0]-pr.c[0])*pr.d[0]+(p[1]-pr.c[1])*pr.d[1];return[pr.c[0]+t*pr.d[0],pr.c[1]+t*pr.d[1]];}
     const dx=p[0]-pr.c[0],dy=p[1]-pr.c[1],dd=Math.hypot(dx,dy)||1e-9;return[pr.c[0]+dx/dd*pr.r,pr.c[1]+dy/dd*pr.r];};
   const intersect=(A,B,ref)=>{let cands=[];
+    if(A.type==='ellipse'||B.type==='ellipse'){const E_=A.type==='ellipse'?A:B,O_=A.type==='ellipse'?B:A;cands=ellCross(E_,O_);
+      let best=null,bd=Infinity;for(const p of cands){const d=Math.hypot(p[0]-ref[0],p[1]-ref[1]);if(d<bd){bd=d;best=p;}}return bd<=3*u?best:null;}
     const lineAsPts=l=>l;
     if(A.type==='line'&&B.type==='line'){const det=A.d[0]*(-B.d[1])+B.d[0]*A.d[1];if(Math.abs(det)<1e-6)return null;
       const rx=B.c[0]-A.c[0],ry=B.c[1]-A.c[1];const t=(rx*(-B.d[1])+B.d[0]*ry)/det;cands=[[A.c[0]+t*A.d[0],A.c[1]+t*A.d[1]]];}
@@ -1246,6 +1302,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     return bd<=3*u?best:null;};
   const sampleRun=(pr,p0,p1,ref)=>{const out=[p0];
     if(pr.type==='line'){const L=Math.hypot(p1[0]-p0[0],p1[1]-p0[1]),n=Math.max(1,Math.ceil(L));for(let i=1;i<=n;i++){const t=i/n;out.push([p0[0]+t*(p1[0]-p0[0]),p0[1]+t*(p1[1]-p0[1])]);}return out;}
+    if(pr.type==='ellipse'){const t0=ellParam(pr,p0),t1=ellParam(pr,p1),tm=ellParam(pr,ref);const nm=x=>{x%=2*Math.PI;return x<0?x+2*Math.PI:x;};
+      let span=nm(t1-t0);if(nm(tm-t0)>span)span=span-2*Math.PI;const n=Math.max(2,Math.ceil(Math.abs(span)*Math.max(pr.a,pr.b)));
+      for(let i=1;i<=n;i++)out.push(ellPoint(pr,t0+span*i/n));out[out.length-1]=p1.slice();return out;}
     const a0=Math.atan2(p0[1]-pr.c[1],p0[0]-pr.c[0]),a1=Math.atan2(p1[1]-pr.c[1],p1[0]-pr.c[0]);
     // go round the same way the original line does (decided by a point in the middle of the run)
     const am=Math.atan2(ref[1]-pr.c[1],ref[0]-pr.c[0]);const norm=x=>{while(x<0)x+=2*Math.PI;while(x>=2*Math.PI)x-=2*Math.PI;return x;};
@@ -1255,6 +1314,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   const analyze=pc=>{const{Q,w}=pc;pc.runs=[];
     if(pc.loop){const P=realPts(Q,w,0,Q.length-1);const L=Q.length;const ci=P.length>=10?fitCircle(P):null;
       if(ci&&ci.dev<=tolCirc(L)&&ci.r<3*Math.max(W,H)){pc.full=ci;pc.runs=[{a:0,b:Q.length-1,pr:ci,pts:P,L}];return;}
+      // (an oval drawn round on its own: an exact ellipse)
+      if(P.length>=30&&L>=30*med){const el=fitEllipse(P);if(el&&ovalOk(el,P)){pc.full=el;pc.runs=[{a:0,b:Q.length-1,pr:el,pts:P,L}];return;}}
       // not a whole circle: open the loop at a junction crossing and treat it like an open chain
       let st=0;for(let i=0;i<Q.length;i++)if(w[i]<0.5){st=i;break;}
       pc.Q=[...Q.slice(st),...Q.slice(0,st+1)];pc.w=[...w.slice(st),...w.slice(0,st+1)];pc.cs=[0,pc.Q.length-1];pc.loopOpened=true;}
@@ -1297,7 +1358,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
   // fit stretches of the same straight line / circle together, across chains
   const mergePrims=pcs=>{const runs=[];pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr)runs.push(r);}));
     const par=runs.map((_,i)=>i);const fd=i=>par[i]===i?i:(par[i]=fd(par[i]));
-    for(let i=0;i<runs.length;i++)for(let j=i+1;j<runs.length;j++){const A=runs[i].pr,B=runs[j].pr;if(A.type!==B.type)continue;
+    for(let i=0;i<runs.length;i++)for(let j=i+1;j<runs.length;j++){const A=runs[i].pr,B=runs[j].pr;if(A.type!==B.type||A.type==='ellipse')continue;
       if(A.type==='line'){if(Math.abs(A.d[0]*B.d[0]+A.d[1]*B.d[1])<Math.cos(Math.PI/180))continue;
         if(Math.abs((B.c[0]-A.c[0])*A.n[0]+(B.c[1]-A.c[1])*A.n[1])>0.4*med)continue;}
       else if(Math.hypot(A.c[0]-B.c[0],A.c[1]-B.c[1])>0.6*med||Math.abs(A.r-B.r)>0.6*med)continue;
@@ -1312,7 +1373,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     // a stretch that continues straight on from a long line or circle, and lies on it, becomes
     // part of it (so a circular border broken up by junctions is one exact circle)
     const strong=[];const tot=new Map();pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr)tot.set(r.pr,(tot.get(r.pr)||0)+r.L);}));
-    tot.forEach((L,pr)=>{if(pr.type==='line'?L>=25*med:L>=40*med)strong.push({pr,L,tol:pr.type==='line'?tolLine(L):tolCirc(L)});});
+    tot.forEach((L,pr)=>{if(pr.type==='line'?L>=25*med:L>=40*med)strong.push({pr,L,tol:pr.type==='line'?tolLine(L):pr.type==='ellipse'?tolOval(pr):tolCirc(L)});});
     const endsOf=pr=>{const o=[];pcs.forEach(pc=>pc.runs.forEach(r=>{if(r.pr===pr){o.push(pc.Q[r.a],pc.Q[r.b]);}}));return o;};
     let changed=true,guard=0;
     while(changed&&guard++<6){changed=false;
@@ -1340,6 +1401,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
       const L=rs.reduce((s,r)=>s+r.L,0);if(dv>3*tolLine(L))return;        // squaring would move it too far: leave it
       pr.c=c;pr.d=d;pr.n=nn;pr.dev=dv;});};
   const renderPC=pc=>{if(pc.loop&&!opt.exact){const Z=smoothPiece(pc.Q,pc.w,u,strength,true);return[...Z,Z[0]];}
+    if(pc.full&&pc.full.type==='ellipse'){const e=pc.full,t0=ellParam(e,pc.Q[0]),tq=ellParam(e,pc.Q[Math.floor(pc.Q.length/4)]);
+      let d=tq-t0;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;const sg=d>=0?1:-1;
+      const n=Math.max(16,Math.ceil(2*Math.PI*Math.max(e.a,e.b))),out=[];for(let i=0;i<=n;i++)out.push(ellPoint(e,t0+sg*2*Math.PI*i/n));return out;}
     if(pc.full){const c=pc.full,a0=Math.atan2(pc.Q[0][1]-c.c[1],pc.Q[0][0]-c.c[0]);
       const sgn=(()=>{const q=pc.Q[Math.floor(pc.Q.length/4)];const am=Math.atan2(q[1]-c.c[1],q[0]-c.c[0]);let d=am-a0;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d>=0?1:-1;})();
       const n=Math.max(16,Math.ceil(2*Math.PI*c.r)),out=[];for(let i=0;i<=n;i++){const an=a0+sgn*2*Math.PI*i/n;out.push([c.c[0]+c.r*Math.cos(an),c.c[1]+c.r*Math.sin(an)]);}return out;}
@@ -1362,7 +1426,9 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
         // where a free curve carries straight on from an exact line / circle (no corner there), ease
         // it out of that shape's own direction over a short stretch, so the joint has no kink
         const ri=runs.indexOf(r),cset=new Set(pc.cs||[]);
-        const ext=(pr,p,toward,len)=>{let t=pr.type==='line'?pr.d.slice():[-(p[1]-pr.c[1]),p[0]-pr.c[0]];const tn=norm2(t)||1;t=[t[0]/tn,t[1]/tn];
+        const ext=(pr,p,toward,len)=>{if(pr.type==='ellipse'){let t=ellParam(pr,p);const tg=ellTangent(pr,t);const sg=((toward[0]-p[0])*tg[0]+(toward[1]-p[1])*tg[1])>=0?1:-1;
+            const o2=[];for(let k2=0;k2<len;k2++){o2.push(ellPoint(pr,t));const g=ellTangent(pr,t);t+=sg/(Math.hypot(g[0],g[1])||1);}o2[0]=p.slice();return o2;}
+          let t=pr.type==='line'?pr.d.slice():[-(p[1]-pr.c[1]),p[0]-pr.c[0]];const tn=norm2(t)||1;t=[t[0]/tn,t[1]/tn];
           if((toward[0]-p[0])*t[0]+(toward[1]-p[1])*t[1]<0)t=[-t[0],-t[1]];const o2=[];
           if(pr.type==='line'){for(let k2=0;k2<len;k2++)o2.push([p[0]+k2*t[0],p[1]+k2*t[1]]);return o2;}
           const a0=Math.atan2(p[1]-pr.c[1],p[0]-pr.c[0]);const sg=Math.sign((p[0]-pr.c[0])*t[1]-(p[1]-pr.c[1])*t[0])||1;
@@ -1410,7 +1476,7 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     return out;};
   const fitAll=()=>{const pcs=chains.map(C=>C.dead?null:prepChain(C));
     pcs.forEach(pc=>{if(pc){if(opt.exact)analyze(pc);else{pc.runs=[];if(pc.loop){pc.cs=[0,pc.Q.length-1];}for(let c=0;c<(pc.cs||[]).length-1;c++)pc.runs.push({a:pc.cs[c],b:pc.cs[c+1],pr:null});}}});
-    if(opt.exact){mergePrims(pcs.filter(Boolean));if(opt.square)squareUp(pcs.filter(Boolean));}
+    if(opt.exact){findOvals(pcs.filter(Boolean));mergePrims(pcs.filter(Boolean));if(opt.square)squareUp(pcs.filter(Boolean));}
     return pcs.map(pc=>pc?renderPC(pc):[]);};
   // pass 1
   const stemNodes=new Map();
@@ -1818,7 +1884,7 @@ onmessage=e=>{const m=e.data;
     // colored glass: the lines are the darkest group of all; split them from the darkest glass color
     if(m.colored){const lo=gray.filter(v=>v<otsuT);if(lo.length)otsuT=Math.min(otsuT,otsu(lo)+1);}postMessage({type:'loaded',otsu:otsuT,id:m.id});return;}
   if(m.type==='run'){const t0=Date.now();
-    try{const r=process(m.params);postMessage({type:'done',id:m.id,axes:r.axes,junctions:r.junctions,pts:r.pts,offs:r.offs,hw:r.hw,stats:r.stats,rot:r.rot,fill:r.fill,fcurve:r.fcurve,ms:Date.now()-t0},[r.pts.buffer,r.offs.buffer,r.hw.buffer]);}
+    try{const r=process(m.params);postMessage({type:'done',id:m.id,rect:r.rect,axes:r.axes,junctions:r.junctions,pts:r.pts,offs:r.offs,hw:r.hw,stats:r.stats,rot:r.rot,fill:r.fill,fcurve:r.fcurve,ms:Date.now()-t0},[r.pts.buffer,r.offs.buffer,r.hw.buffer]);}
     catch(err){postMessage({type:'error',id:m.id,message:String(err&&err.message||err)});}}};
 
 // A straight lead line of radius r from a to b, drawn into the mask.
@@ -2007,7 +2073,10 @@ function dropText(m){
 // row, like letters (at least three in a row, the row at least twice as long as it is tall, and many of them open
 // strokes with no hole, as most letters are, where a row of jewels or border tiles is all closed shapes), are
 // writing and are taken out, with anything else left standing on its own among them (an underline, a ©).
-function dropWords(m){
+// (the height of the piece labels found, when a pattern is numbered all over: used later to clear label scraps that
+// touched a line and so could not be lifted off as marks of their own)
+let labelH=0,labelBoxes=[];
+function dropWords(m){labelH=0;labelBoxes=[];
   const N=W*H,lab=new Int32Array(N).fill(-1),st=new Int32Array(N),C=[];let n=0;
   for(let i=0;i<N;i++){if(!m[i]||lab[i]>=0)continue;let sp=0;st[sp++]=i;lab[i]=n;const c={id:n,x0:1e9,y0:1e9,x1:-1,y1:-1,cnt:0,edge:false};
     while(sp){const j=st[--sp],y=(j/W)|0,x=j-y*W;c.cnt++;if(x<c.x0)c.x0=x;if(x>c.x1)c.x1=x;if(y<c.y0)c.y0=y;if(y>c.y1)c.y1=y;if(x===0||y===0||x===W-1||y===H-1)c.edge=true;
@@ -2019,7 +2088,12 @@ function dropWords(m){
   const par=new Int32Array(n).map((_,i)=>i),find=a=>{while(par[a]!==a)a=par[a]=par[par[a]];return a;};
   sm.sort((a,b)=>a.x0-b.x0);
   for(let i=0;i<sm.length;i++){const a=sm[i],ha=a.y1-a.y0+1;for(let j=i+1;j<sm.length;j++){const b=sm[j],hb=b.y1-b.y0+1,hm=Math.max(ha,hb);
-      if(b.x0-a.x1>1.2*hm)break;const ov=Math.min(a.y1,b.y1)-Math.max(a.y0,b.y0)+1;if(ov<0.5*Math.min(ha,hb)||hm>3*Math.min(ha,hb))continue;par[find(a.id)]=find(b.id);}}
+      if(b.x0-a.x1>1.2*hm)break;const ov=Math.min(a.y1,b.y1)-Math.max(a.y0,b.y0)+1;
+      // (a dash between a letter and a number, as in a piece label like H-40: short and flat, sitting at the middle
+      // height of the marks either side)
+      const flat=(c,h,o)=>{const w=c.x1-c.x0+1;return w>=1.3*h&&h<=0.45*o;},mid=(c,o)=>{const cy=(c.y0+c.y1)/2;return cy>o.y0&&cy<o.y1;};
+      if((flat(a,ha,hb)&&mid(a,b))||(flat(b,hb,ha)&&mid(b,a))){par[find(a.id)]=find(b.id);continue;}
+      if(ov<0.5*Math.min(ha,hb)||hm>3*Math.min(ha,hb))continue;par[find(a.id)]=find(b.id);}}
   const rows=new Map();for(const c of sm){const r=find(c.id);if(!rows.has(r))rows.set(r,[]);rows.get(r).push(c);}
   // (whether a mark closes round on itself: some paper inside its box that can't be reached from the box's edge)
   const holed=c=>{const w=c.x1-c.x0+3,h=c.y1-c.y0+3,seen=new Uint8Array(w*h);let sp=0;
@@ -2027,10 +2101,29 @@ function dropWords(m){
     for(let x=0;x<w;x++){seen[x]=1;st[sp++]=x;seen[(h-1)*w+x]=1;st[sp++]=(h-1)*w+x;}for(let y=0;y<h;y++){seen[y*w]=1;st[sp++]=y*w;seen[y*w+w-1]=1;st[sp++]=y*w+w-1;}
     while(sp){const k=st[--sp],y=(k/w)|0,x=k-y*w;for(const[X,Y]of[[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){if(X<0||Y<0||X>=w||Y>=h)continue;const q=Y*w+X;if(seen[q]||ink(X,Y))continue;seen[q]=1;st[sp++]=q;}}
     for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++)if(!seen[y*w+x]&&!ink(x,y))return true;return false;};
-  const gone=new Uint8Array(n),blocks=[];
+  const gone=new Uint8Array(n),blocks=[],lblH=[];
+  // (letters printed small, or blurred when a small picture is enlarged, run together into blobs wider than they are
+  // tall; small round decorations, a string of pearls or bubbles, stay about as wide as tall)
+  const wideBlob=c=>c.x1-c.x0+1>=1.8*(c.y1-c.y0+1);
   for(const R of rows.values()){if(R.length<3)continue;let x0=1e9,y0=1e9,x1=-1,y1=-1;for(const c of R){x0=Math.min(x0,c.x0);y0=Math.min(y0,c.y0);x1=Math.max(x1,c.x1);y1=Math.max(y1,c.y1);}
-    if(x1-x0<2*(y1-y0))continue;let open=0;for(const c of R)if(!holed(c))open++;if(open<0.4*R.length)continue;
-    for(const c of R)gone[c.id]=1;const g=2*(y1-y0+1);blocks.push([x0-g,y0-g,x1+g,y1+g]);}
+    if(x1-x0<2*(y1-y0))continue;let open=0;for(const c of R)if(!holed(c))open++;
+    if(R.filter(wideBlob).length>=2&&x1-x0>=3*(y1-y0))open=R.length;   // (words run together)
+    // (a word in a closed-up font: a long row of marks of quite different widths, where a row of pearls or bubbles
+    // would be all alike)
+    {const ws=R.map(c=>c.x1-c.x0+1);if(R.length>=3&&x1-x0>=4*(y1-y0)&&Math.max(...ws)>=2*Math.min(...ws))open=R.length;}
+    // (a piece label: a mark, a dash, then more marks of the same height; numbers close round on themselves (0, 4, 6, 8,
+    // 9) so the share of open marks does not tell, but small round decorations do not come with a dash between them)
+    const hs=R.map(c=>c.y1-c.y0+1),hT=Math.max(...hs),srt=R.slice().sort((a,b)=>a.x0-b.x0);
+    const isDash=c=>{const h=c.y1-c.y0+1,w=c.x1-c.x0+1;return w>=1.3*h&&h<=0.45*hT;};
+    const label=srt.length>=3&&srt.some((c,i)=>i>0&&i<srt.length-1&&isDash(c))&&srt.filter(c=>!isDash(c)).every(c=>c.y1-c.y0+1>=0.6*hT);
+    if(open<0.4*R.length&&!label)continue;
+    for(const c of R)gone[c.id]=1;const g=2*(y1-y0+1);blocks.push([x0-g,y0-g,x1+g,y1+g]);lblH.push(y1-y0+1);}
+  // (short labels of one or two blobs: on their own they could be anything, but a pattern numbered all over has many
+  // of them, all of one height: the same height as the labels found in full)
+  const shortRows=[];for(const R of rows.values()){if(R.length>2)continue;let x0=1e9,y0=1e9,x1=-1,y1=-1;for(const c of R){x0=Math.min(x0,c.x0);y0=Math.min(y0,c.y0);x1=Math.max(x1,c.x1);y1=Math.max(y1,c.y1);}
+    if(x1-x0+1>=1.8*(y1-y0+1)&&R.some(wideBlob))shortRows.push({R,h:y1-y0+1,box:[x0,y0,x1,y1]});}
+  if(lblH.length+shortRows.length>=8&&lblH.length>=3){const hs=lblH.slice().sort((a,b)=>a-b),hm=hs[hs.length>>1];labelH=lblH.length+shortRows.length>=8?hm:0;const like=shortRows.filter(r=>r.h>=0.65*hm&&r.h<=1.5*hm);
+    for(const r of like){for(const c of r.R)gone[c.id]=1;const g=2*r.h;blocks.push([r.box[0]-g,r.box[1]-g,r.box[2]+g,r.box[3]+g]);}}
   if(!blocks.length)return 0;
   // (anything else standing on its own among the writing goes with it, a logo or an underline too, and so on out
   // from there: a short word or a ® next to it)
@@ -2038,7 +2131,74 @@ function dropWords(m){
   while(more){more=false;for(const c of C){if(c===big||c.edge||gone[c.id])continue;let hit=false;for(const b of blocks)if(c.x0<=b[2]&&c.x1>=b[0]&&c.y0<=b[3]&&c.y1>=b[1]){hit=true;break;}if(!hit)continue;
       if(Math.max(c.x1-c.x0,c.y1-c.y0)>cap&&holed(c))continue;   // (a long rule under a heading goes too; a big closed shape stays)
       for(const b of blocks)if(c.x0<=b[2]&&c.x1>=b[0]&&c.y0<=b[3]&&c.y1>=b[1]){gone[c.id]=1;more=true;const g=Math.min(c.y1-c.y0+1,lim);blocks.push([c.x0-g,c.y0-g,c.x1+g,c.y1+g]);break;}}}
+  labelBoxes=blocks.slice();
   let k=0;for(let i=0;i<N;i++)if(lab[i]>=0&&gone[lab[i]]){m[i]=0;k++;}
+  return k;}
+
+// Label scraps: where a piece label touched a line it stays on the paper with the line, and traces as a short
+// squiggle beside it. In a pattern numbered all over, a short line no bigger than a label, with an end loose, is one.
+function dropLabelScraps(strokes,lh,u){if(!lh)return strokes;const len=S=>{let L=0;for(let i=1;i<S.length;i++)L+=Math.hypot(S[i][0]-S[i-1][0],S[i][1]-S[i-1][1]);return L;};
+  const grid=new Map(),cell=Math.max(4,lh),key=(y,x)=>((y/cell)|0)+','+((x/cell)|0);
+  strokes.forEach((S,si)=>{for(let i=0;i<S.length;i+=2){const k=key(S[i][0],S[i][1]);if(!grid.has(k))grid.set(k,[]);grid.get(k).push([si,S[i]]);}});
+  const loose=(S,si,p)=>{const cy=(p[0]/cell)|0,cx=(p[1]/cell)|0;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const L=grid.get((cy+dy)+','+(cx+dx));if(!L)continue;
+      for(const[sj,q]of L)if(sj!==si&&Math.hypot(q[0]-p[0],q[1]-p[1])<=2*u)return false;}return true;};
+  const near=q=>labelBoxes.some(b=>q[1]>=b[0]-lh&&q[1]<=b[2]+lh&&q[0]>=b[1]-lh&&q[0]<=b[3]+lh);
+  // (a label run into the line itself: the line takes a little detour through it, out and back within a label's
+  // size. The detour is cut out and the line runs straight across)
+  for(const S of strokes){if(S.length<8)continue;const cum=[0];for(let i=1;i<S.length;i++)cum.push(cum[i-1]+Math.hypot(S[i][0]-S[i-1][0],S[i][1]-S[i-1][1]));
+    for(let i=0;i<S.length-2;i++){let best=-1;
+      for(let j=i+2;j<S.length&&cum[j]-cum[i]<=4*lh;j++){const arc=cum[j]-cum[i];if(arc<0.8*lh)continue;
+        if(Math.hypot(S[j][0]-S[i][0],S[j][1]-S[i][1])<0.6*arc)best=j;}
+      if(best<0)continue;let mid=S[(i+best)>>1];if(!near(S[i])||!near(mid))continue;let far=0;for(let k=i;k<=best;k++)far=Math.max(far,Math.hypot(S[k][0]-S[i][0],S[k][1]-S[i][1]));if(far>2*lh)continue;
+      const A=S[i],B=S[best],n=best-i;for(let k=1;k<n;k++){const t=k/n;S[i+k]=[A[0]+t*(B[0]-A[0]),A[1]+t*(B[1]-A[1])];}i=best;}}
+  // (a label touching a line from beside it leaves a little bump on the line: next to where a label was found, a
+  // bump on one side only, with the line running smooth either side of it, is taken out. A wavy line goes both ways
+  // and so stays as drawn)
+  for(const S of strokes){const n=S.length;if(n<6*lh)continue;const R=Math.max(3,Math.round(1.2*lh));
+    const sm=S.map((_,i)=>{let a=0,b=0,c=0;for(let k=Math.max(0,i-R);k<=Math.min(n-1,i+R);k++){a+=S[k][0];b+=S[k][1];c++;}return[a/c,b/c];});
+    const sd=S.map((q,i)=>{const j0=Math.max(0,i-2),j1=Math.min(n-1,i+2),t=[S[j1][0]-S[j0][0],S[j1][1]-S[j0][1]],tl=Math.hypot(t[0],t[1])||1;return((q[0]-sm[i][0])*(-t[1])+(q[1]-sm[i][1])*t[0])/tl;});
+    const thr=Math.max(1.5*u,0.12*lh);
+    for(let i=R;i<n-R;i++){if(Math.abs(sd[i])<=thr||!near(S[i]))continue;let j=i;while(j<n-R&&Math.abs(sd[j])>0.4*thr&&Math.sign(sd[j])===Math.sign(sd[i]))j++;
+      let a=i;while(a>R&&Math.abs(sd[a-1])>0.4*thr&&Math.sign(sd[a-1])===Math.sign(sd[i]))a--;
+      if(j-a>2.5*lh){i=j;continue;}
+      // (smooth either side: no bump the other way close by)
+      let calm=true;for(let k=Math.max(0,a-Math.round(1.5*lh));k<Math.min(n,j+Math.round(1.5*lh));k++)if((k<a||k>=j)&&Math.sign(sd[k])!==Math.sign(sd[i])&&Math.abs(sd[k])>0.6*thr){calm=false;break;}
+      if(!calm){i=j;continue;}
+      const A=S[Math.max(0,a-2)],B=S[Math.min(n-1,j+1)],a0=Math.max(0,a-2),b0=Math.min(n-1,j+1);
+      for(let k=a0+1;k<b0;k++){const t=(k-a0)/(b0-a0),base=[A[0]+t*(B[0]-A[0]),A[1]+t*(B[1]-A[1])],sb=[sm[a0][0]+t*(sm[b0][0]-sm[a0][0]),sm[a0][1]+t*(sm[b0][1]-sm[a0][1])];
+        S[k]=[base[0]+(sm[k][0]-sb[0])*0.0,base[1]+(sm[k][1]-sb[1])*0.0];}
+      i=j;}}
+  // (a label stuck to a line from beside it can trace as a second short path between the same two points as the
+  // line, closing a sliver round the label: of two short paths joining the same two points, the straighter is the line)
+  const twin=new Set();{const E=strokes.map((S,si)=>S.length>=2?{si,a:S[0],b:S[S.length-1],L:len(S)}:null).filter(Boolean),same=(p,q)=>Math.hypot(p[0]-q[0],p[1]-q[1])<=2*u;
+    for(let i=0;i<E.length;i++)for(let j=i+1;j<E.length;j++){const A=E[i],B=E[j];if(A.L>=4*lh||B.L>=4*lh)continue;
+      if(!((same(A.a,B.a)&&same(A.b,B.b))||(same(A.a,B.b)&&same(A.b,B.a))))continue;const ch=Math.hypot(A.a[0]-A.b[0],A.a[1]-A.b[1]);if(ch<0.5*lh)continue;
+      twin.add(A.L/ch>B.L/ch?A.si:B.si);}}
+  return strokes.filter((S,si)=>{if(twin.has(si))return false;if(S.length<2)return true;const L=len(S);if(L>=4*lh)return true;
+    let y0=1e9,y1=-1e9,x0=1e9,x1=-1e9;for(const q of S){y0=Math.min(y0,q[0]);y1=Math.max(y1,q[0]);x0=Math.min(x0,q[1]);x1=Math.max(x1,q[1]);}
+    // (a label is flat: about as tall as a letter, up to three or so letters wide)
+    if(Math.min(y1-y0,x1-x0)>1.6*lh||Math.max(y1-y0,x1-x0)>3.2*lh)return true;if(loose(S,si,S[0])||loose(S,si,S[S.length-1]))return false;if(!near(S[S.length>>1]))return true;
+    // (or a little loop hanging off a line, both its ends back on that line close together)
+    return!(L<3*lh&&Math.hypot(S[0][0]-S[S.length-1][0],S[0][1]-S[S.length-1][1])<1.2*lh);});}
+
+// Outside the panel: when the pattern has a closed border (its biggest line runs right round the edges of its own
+// box, like a rectangle frame), anything wholly outside that box is no part of the panel: a title, a logo, a
+// designer's mark. A pattern with no such border keeps everything.
+function dropOutside(m){const N=W*H,lab=new Int32Array(N).fill(-1),st=new Int32Array(N),C=[];let n=0;
+  for(let i=0;i<N;i++){if(!m[i]||lab[i]>=0)continue;let sp=0;st[sp++]=i;lab[i]=n;const c={x0:1e9,y0:1e9,x1:-1,y1:-1,cnt:0};
+    while(sp){const j=st[--sp],y=(j/W)|0,x=j-y*W;c.cnt++;if(x<c.x0)c.x0=x;if(x>c.x1)c.x1=x;if(y<c.y0)c.y0=y;if(y>c.y1)c.y1=y;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(m[k]&&lab[k]<0){lab[k]=n;st[sp++]=k;}}}
+    C.push(c);n++;}
+  if(n<2)return 0;let bi=0;for(let i=1;i<n;i++)if(C[i].cnt>C[bi].cnt)bi=i;const B=C[bi];
+  if((B.x1-B.x0)<0.3*W||(B.y1-B.y0)<0.3*H)return 0;
+  // (is it a border: along each side of its box, its ink within a few pixels of that side nearly all the way)
+  const band=Math.max(3,Math.round(0.004*Math.max(W,H)));
+  const side=(horiz,at)=>{let hit=0,tot=0;const a=horiz?B.x0:B.y0,b=horiz?B.x1:B.y1;for(let t=a;t<=b;t++){tot++;let f=false;
+      for(let d=0;d<=band&&!f;d++){const v=horiz?(at===B.y0?at+d:at-d):(at===B.x0?at+d:at-d);const k=horiz?v*W+t:t*W+v;if(v>=0&&v<(horiz?H:W)&&lab[k]===bi)f=true;}if(f)hit++;}return hit/tot;};
+  if(Math.min(side(true,B.y0),side(true,B.y1),side(false,B.x0),side(false,B.x1))<0.9)return 0;
+  const g=band;let k=0;const gone=new Uint8Array(n);
+  for(let i=0;i<n;i++){if(i===bi)continue;const c=C[i];if(c.x1<B.x0-g||c.x0>B.x1+g||c.y1<B.y0-g||c.y0>B.y1+g)gone[i]=1;}
+  for(let i=0;i<N;i++)if(lab[i]>=0&&gone[lab[i]]){m[i]=0;k++;}
   return k;}
 // Where two traced lines cross close to the end of one of them (not at a joint), the drawing almost always has one
 // line ending on the other there, as where two lines run into a border through a wedge of ink. The line whose last
@@ -2900,6 +3060,163 @@ function squareBorder(strokes,med,junctions){
     return o;});
   if(junctions)for(const J of junctions){const v=shiftAt(J.p,-1);if(v)J.p=[J.p[0]+v[0],J.p[1]+v[1]];}
   return fin;}
+// ================================================================================================
+// Ovals: an exact ellipse for a drawn oval, the way a drawn circle becomes an exact circle.
+// An ellipse is {type:'ellipse', c:[centre], a, b (the two half-axes), th (turn of the a axis), dev}.
+// Fitted to the points directly (an algebraic fit, then nudged to the least distance from the points),
+// and the shared helpers the line building uses: the nearest point on it, where it crosses another
+// shape, and points along it.
+// ================================================================================================
+function ellPoint(e,t){const ct=Math.cos(e.th),st=Math.sin(e.th),x=e.a*Math.cos(t),y=e.b*Math.sin(t);
+  return[e.c[0]+x*ct-y*st,e.c[1]+x*st+y*ct];}
+function ellTangent(e,t){const ct=Math.cos(e.th),st=Math.sin(e.th),x=-e.a*Math.sin(t),y=e.b*Math.cos(t);return[x*ct-y*st,x*st+y*ct];}
+// (where a point sits round the ellipse, and the nearest point on it: a few Newton steps from straight out)
+function ellParam(e,p){const ct=Math.cos(e.th),st=Math.sin(e.th),dx=p[0]-e.c[0],dy=p[1]-e.c[1];
+  const u=(dx*ct+dy*st)/e.a,v=(-dx*st+dy*ct)/e.b;let t=Math.atan2(v,u);
+  for(let it=0;it<8;it++){const q=ellPoint(e,t),d1=ellTangent(e,t),ex=q[0]-p[0],ey=q[1]-p[1];
+    const ctt=Math.cos(e.th),stt=Math.sin(e.th),x2=-e.a*Math.cos(t),y2=-e.b*Math.sin(t),d2=[x2*ctt-y2*stt,x2*stt+y2*ctt];
+    const f=ex*d1[0]+ey*d1[1],fp=d1[0]*d1[0]+d1[1]*d1[1]+ex*d2[0]+ey*d2[1];if(Math.abs(fp)<1e-9)break;const step=f/fp;t-=step;if(Math.abs(step)<1e-7)break;}
+  return t;}
+function ellProject(e,p){return ellPoint(e,ellParam(e,p));}
+function ellDist(e,p){const q=ellProject(e,p);return Math.hypot(q[0]-p[0],q[1]-p[1]);}
+// (signed: inside the ellipse below zero, outside above; about a distance near the curve)
+function ellSide(e,p){const ct=Math.cos(e.th),st=Math.sin(e.th),dx=p[0]-e.c[0],dy=p[1]-e.c[1];
+  const u=(dx*ct+dy*st)/e.a,v=(-dx*st+dy*ct)/e.b;return(Math.hypot(u,v)-1)*Math.min(e.a,e.b);}
+// (the eigenvectors of a 3x3 matrix, for the algebraic fit: roots of its cubic, then each one's null direction)
+function eig3(M){const a=-(M[0][0]+M[1][1]+M[2][2]);
+  const b=M[0][0]*M[1][1]-M[0][1]*M[1][0]+M[0][0]*M[2][2]-M[0][2]*M[2][0]+M[1][1]*M[2][2]-M[1][2]*M[2][1];
+  const c=-(M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1])-M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0])+M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]));
+  const roots=[];const p=b-a*a/3,q=2*a*a*a/27-a*b/3+c,D=q*q/4+p*p*p/27;
+  if(D>1e-12*Math.max(1,Math.abs(q*q))){const s=Math.sqrt(D),u=Math.cbrt(-q/2+s),v=Math.cbrt(-q/2-s);roots.push(u+v-a/3);}
+  else{const r=Math.sqrt(Math.max(0,-p/3)),ph=Math.acos(Math.max(-1,Math.min(1,r>1e-12?-q/(2*r*r*r):0)));for(let k=0;k<3;k++)roots.push(2*r*Math.cos((ph+2*Math.PI*k)/3)-a/3);}
+  const out=[];for(const L of roots){const A=M.map((row,i)=>row.map((v,j)=>v-(i===j?L:0)));
+    const cr=(x,y)=>[x[1]*y[2]-x[2]*y[1],x[2]*y[0]-x[0]*y[2],x[0]*y[1]-x[1]*y[0]];
+    const cs=[cr(A[0],A[1]),cr(A[0],A[2]),cr(A[1],A[2])];let best=cs[0],bn=0;for(const v of cs){const n=Math.hypot(...v);if(n>bn){bn=n;best=v;}}
+    if(bn>1e-30)out.push(best.map(v=>v/bn));}
+  return out;}
+function fitEllipse(P){const n=P.length;if(n<8)return null;
+  // (centred and scaled first, so the sums stay well sized)
+  let mx=0,my=0;for(const p of P){mx+=p[0];my+=p[1];}mx/=n;my/=n;let sc=0;for(const p of P)sc+=Math.hypot(p[0]-mx,p[1]-my);sc=sc/n||1;
+  const S1=[[0,0,0],[0,0,0],[0,0,0]],S2=[[0,0,0],[0,0,0],[0,0,0]],S3=[[0,0,0],[0,0,0],[0,0,0]];
+  for(const p of P){const x=(p[0]-mx)/sc,y=(p[1]-my)/sc,d1=[x*x,x*y,y*y],d2=[x,y,1];
+    for(let i=0;i<3;i++)for(let j=0;j<3;j++){S1[i][j]+=d1[i]*d1[j];S2[i][j]+=d1[i]*d2[j];S3[i][j]+=d2[i]*d2[j];}}
+  const inv3=A=>{const[a,b,c]=A[0],[d,e,f]=A[1],[g,h,i]=A[2];const det=a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g);if(Math.abs(det)<1e-18)return null;
+    return[[(e*i-f*h)/det,(c*h-b*i)/det,(b*f-c*e)/det],[(f*g-d*i)/det,(a*i-c*g)/det,(c*d-a*f)/det],[(d*h-e*g)/det,(b*g-a*h)/det,(a*e-b*d)/det]];};
+  const mul=(A,B)=>A.map(r=>[0,1,2].map(j=>r[0]*B[0][j]+r[1]*B[1][j]+r[2]*B[2][j]));
+  const tr=A=>[0,1,2].map(i=>[A[0][i],A[1][i],A[2][i]]);
+  const S3i=inv3(S3);if(!S3i)return null;const T=mul(S3i,tr(S2)).map(r=>r.map(v=>-v));
+  const Mr=S1.map((r,i)=>r.map((v,j)=>v+mul(S2,T)[i][j]));
+  const M=[Mr[2].map(v=>v/2),Mr[1].map(v=>-v),Mr[0].map(v=>v/2)];
+  let a1=null;for(const v of eig3(M)){if(4*v[0]*v[2]-v[1]*v[1]>0){a1=v;break;}}if(!a1)return null;
+  const a2=[0,1,2].map(i=>T[i][0]*a1[0]+T[i][1]*a1[1]+T[i][2]*a1[2]);
+  const[A,B,C]=a1,[D,E,F]=a2;const den=B*B-4*A*C;if(den>=0)return null;
+  const x0=(2*C*D-B*E)/den,y0=(2*A*E-B*D)/den;const k=A*x0*x0+B*x0*y0+C*y0*y0+D*x0+E*y0+F;
+  const th=0.5*Math.atan2(B,A-C),cth=Math.cos(th),sth=Math.sin(th);
+  const Ap=A*cth*cth+B*cth*sth+C*sth*sth,Cp=A*sth*sth-B*cth*sth+C*cth*cth;
+  if(-k/Ap<=0||-k/Cp<=0)return null;
+  let e={type:'ellipse',c:[mx+sc*x0,my+sc*y0],a:sc*Math.sqrt(-k/Ap),b:sc*Math.sqrt(-k/Cp),th};
+  if(!isFinite(e.a)||!isFinite(e.b)||!isFinite(e.c[0]))return null;
+  // (then nudged to the least squared distance from the points: a few Gauss-Newton steps on centre, axes and turn)
+  const Ps=P.length>600?P.filter((_,i)=>i%Math.ceil(P.length/600)===0):P;
+  const res=f=>Ps.map(p=>ellSide(f,p));
+  for(let it=0;it<6;it++){const r0=res(e),par=[e.c[0],e.c[1],e.a,e.b,e.th],J=[];
+    for(let k2=0;k2<5;k2++){const h=k2===4?1e-4:Math.max(1e-3,1e-4*e.a);const q=par.slice();q[k2]+=h;
+      const f={type:'ellipse',c:[q[0],q[1]],a:q[2],b:q[3],th:q[4]};J.push(res(f).map((v,i)=>(v-r0[i])/h));}
+    const N=[...Array(5)].map(()=>Array(5).fill(0)),g=Array(5).fill(0);
+    for(let i=0;i<r0.length;i++)for(let p1=0;p1<5;p1++){g[p1]+=J[p1][i]*r0[i];for(let p2=0;p2<5;p2++)N[p1][p2]+=J[p1][i]*J[p2][i];}
+    for(let p1=0;p1<5;p1++)N[p1][p1]*=1.0001;
+    // (5x5 solve by elimination)
+    const Aug=N.map((r,i)=>[...r,g[i]]);let ok=true;
+    for(let c=0;c<5;c++){let pv=c;for(let r=c+1;r<5;r++)if(Math.abs(Aug[r][c])>Math.abs(Aug[pv][c]))pv=r;if(Math.abs(Aug[pv][c])<1e-14){ok=false;break;}
+      [Aug[c],Aug[pv]]=[Aug[pv],Aug[c]];for(let r=0;r<5;r++){if(r===c)continue;const f=Aug[r][c]/Aug[c][c];for(let k3=c;k3<6;k3++)Aug[r][k3]-=f*Aug[c][k3];}}
+    if(!ok)break;const st=Aug.map((r,i)=>r[5]/r[i]);if(!st.every(isFinite))break;
+    const f={type:'ellipse',c:[par[0]-st[0],par[1]-st[1]],a:par[2]-st[2],b:par[3]-st[3],th:par[4]-st[4]};
+    if(!(f.a>0&&f.b>0))break;const s0=r0.reduce((s,v)=>s+v*v,0),s1=res(f).reduce((s,v)=>s+v*v,0);if(s1>s0)break;e=f;}
+  let dev=0,ss=0;for(const p of P){const d=ellDist(e,p);dev=Math.max(dev,d);ss+=d*d;}e.dev=dev;e.rms=Math.sqrt(ss/P.length);
+  return e;}
+// (how far round the ellipse a set of points reaches, in degrees: the largest gap left uncovered taken off a full turn)
+function ellCover(e,P){const ts=P.map(p=>{let t=ellParam(e,p)%(2*Math.PI);if(t<0)t+=2*Math.PI;return t;}).sort((x,y)=>x-y);if(ts.length<2)return 0;
+  let gap=ts[0]+2*Math.PI-ts[ts.length-1];for(let i=1;i<ts.length;i++)gap=Math.max(gap,ts[i]-ts[i-1]);return 360-gap*180/Math.PI;}
+// (where an ellipse crosses another shape: walk round it and look for the other shape's side changing)
+function shapeSide(pr,p){if(pr.type==='line')return(p[0]-pr.c[0])*pr.n[0]+(p[1]-pr.c[1])*pr.n[1];
+  if(pr.type==='circle')return Math.hypot(p[0]-pr.c[0],p[1]-pr.c[1])-pr.r;return ellSide(pr,p);}
+function ellCross(E,O){const out=[],n=1440,f=t=>shapeSide(O,ellPoint(E,t));let t0=0,f0=f(0);
+  for(let i=1;i<=n;i++){const t1=2*Math.PI*i/n,f1=f(t1);if(f0===0)out.push(ellPoint(E,t0));else if(f0*f1<0){let lo=t0,hi=t1,flo=f0;
+      for(let k=0;k<40;k++){const m=(lo+hi)/2,fm=f(m);if(flo*fm<=0)hi=m;else{lo=m;flo=fm;}}out.push(ellPoint(E,(lo+hi)/2));}
+    t0=t1;f0=f1;}
+  return out;}
+// ================================================================================================
+// Oval border to rectangle: a panel with a band of border pieces between two ovals becomes a rectangular
+// panel. The picture inside the inner oval is kept; every line that ran into the inner oval is carried on,
+// curving gently, to meet the new inner rectangle square on; the band becomes a rectangular band the same
+// width, with mitred corners and as many pieces as the oval band had. Done on the line picture, before the
+// tracing, so the new lines are traced like any others.
+// ================================================================================================
+function ovalToRect(m){
+  const lw=Math.max(2,inkWidth(m)),r=lw/2;
+  // (the lines' middles, short spurs off them trimmed)
+  const sk=m.slice();thin(sk,W,H);
+  const nb=i=>{let c=0;const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&sk[Y*W+X])c++;}return c;};
+  for(let it=0;it<Math.round(3*lw);it++){const kill=[];for(let i=0;i<W*H;i++)if(sk[i]&&nb(i)<=1)kill.push(i);if(!kill.length)break;for(const i of kill)sk[i]=0;}
+  // (the centre: the middle of all the ink)
+  let x0=W,y0=H,x1=-1,y1=-1;for(let i=0;i<W*H;i++)if(sk[i]){const y=(i/W)|0,x=i-y*W;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}
+  if(x1<0)return{ok:false,why:'no lines'};const cx=(x0+x1)/2,cy=(y0+y1)/2,Rmax=Math.hypot(x1-x0,y1-y0);
+  // (along rays out from the centre: where each crosses a line. The last crossing is the outer oval)
+  const rays=[];for(let k=0;k<720;k++){const t=2*Math.PI*k/720,ct=Math.cos(t),st=Math.sin(t),hits=[];let run=null;
+    for(let s=0;s<Rmax;s+=0.5){const x=Math.round(cx+s*ct),y=Math.round(cy+s*st);if(x<0||y<0||x>=W||y>=H)break;const on=sk[y*W+x]||(x+1<W&&sk[y*W+x+1])||(y+1<H&&sk[(y+1)*W+x]);
+      if(on){if(run&&s-run[1]<=1.5)run[1]=s;else{run=[s,s];hits.push(run);}}}
+    rays.push({t,ct,st,hits:hits.map(h=>(h[0]+h[1])/2)});}
+  const outerPts=[];for(const R of rays)if(R.hits.length){const s=R.hits[R.hits.length-1];outerPts.push([cx+s*R.ct,cy+s*R.st]);}
+  let EO=fitEllipse(outerPts);if(!EO)return{ok:false,why:'no outer oval'};
+  for(let pass=0;pass<2;pass++){const P=outerPts.filter(p=>ellDist(EO,p)<2*lw);if(P.length<40)break;const e=fitEllipse(P);if(!e)break;EO=e;}
+  const cover=ellCover(EO,outerPts.filter(p=>ellDist(EO,p)<2*lw));
+  // (the inner oval: on each ray, the last crossing well inside the outer oval)
+  const radOf=(e,t)=>{const a=e.a,b=e.b,c=Math.cos(t-e.th),s=Math.sin(t-e.th);return a*b/Math.hypot(b*c,a*s);};
+  const innerPts=[];for(const R of rays){const ro=radOf(EO,R.t);for(let j=R.hits.length-1;j>=0;j--){if(ro-R.hits[j]>6*lw){innerPts.push([cx+R.hits[j]*R.ct,cy+R.hits[j]*R.st]);break;}}}
+  let EI=fitEllipse(innerPts);if(!EI)return{ok:false,why:'no inner oval'};
+  for(let pass=0;pass<3;pass++){const P=innerPts.filter(p=>ellDist(EI,p)<Math.max(2*lw,3));if(P.length<40)break;const e=fitEllipse(P);if(!e)break;EI=e;}
+  const coverI=ellCover(EI,innerPts.filter(p=>ellDist(EI,p)<2*lw));
+  const ar=e=>Math.max(e.a,e.b)/Math.min(e.a,e.b);
+  if(cover<300||coverI<300||ar(EO)>3||ar(EI)>3||Math.min(EI.a,EI.b)<0.4*Math.min(EO.a,EO.b))return{ok:false,why:'no oval border found'};
+  // (the rectangles: the outer one is the outer oval's box; the inner one is set in by the band's width)
+  const half=e=>[Math.hypot(e.a*Math.cos(e.th),e.b*Math.sin(e.th)),Math.hypot(e.a*Math.sin(e.th),e.b*Math.cos(e.th))];
+  const [hxO,hyO]=half(EO),[hxI,hyI]=half(EI),band=((hxO-hxI)+(hyO-hyI))/2,ocx=EO.c[0],ocy=EO.c[1];
+  const R0=[ocx-hxO,ocy-hyO,ocx+hxO,ocy+hyO],R1=[R0[0]+band,R0[1]+band,R0[2]-band,R0[3]-band];
+  // (how many border pieces: the lines crossing the band halfway between the ovals)
+  const mid={type:'ellipse',c:[(EO.c[0]+EI.c[0])/2,(EO.c[1]+EI.c[1])/2],a:(EO.a+EI.a)/2,b:(EO.b+EI.b)/2,th:EO.th};
+  let cross=0;{let prev=0,first=-1;const n=2000;for(let k=0;k<=n;k++){const q=ellPoint(mid,2*Math.PI*k/n),x=Math.round(q[0]),y=Math.round(q[1]);let on=0;
+      for(let d=-1;d<=1&&!on;d++)for(let e=-1;e<=1&&!on;e++){const X=x+d,Y=y+e;if(X>=0&&Y>=0&&X<W&&Y<H&&m[Y*W+X])on=1;}
+      if(on&&!prev)cross++;prev=on;}}
+  const pieces=Math.max(4,cross),extra=Math.max(0,pieces-4),Wr=R1[2]-R1[0],Hr=R1[3]-R1[1];
+  const per=Math.round(extra*Wr/(2*(Wr+Hr))),across=per+1,down=Math.max(1,Math.round((extra-2*per)/2)+1);
+  // (the picture inside the inner oval, kept; its loose ends at the inner oval carried on to the inner rectangle)
+  const sideI=p=>ellSide(EI,p),cut=Math.max(1.5*lw,0.012*Math.min(EI.a,EI.b));
+  const scene=new Uint8Array(W*H);for(let i=0;i<W*H;i++)if(sk[i]){const y=(i/W)|0,x=i-y*W;if(sideI([x,y])<-cut)scene[i]=1;}
+  const out=new Uint8Array(W*H);
+  for(let i=0;i<W*H;i++)if(scene[i]){const y=(i/W)|0,x=i-y*W;drawSeg(out,x,y,x,y,r);}
+  const sn=i=>{const y=(i/W)|0,x=i-y*W,o=[];for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&scene[Y*W+X])o.push(Y*W+X);}return o;};
+  let carried=0;const walk=Math.round(8*lw);const meets=[[],[],[],[]];   // (where lines meet the inner rectangle: top, bottom, left, right)
+  for(let i=0;i<W*H;i++){if(!scene[i])continue;if(sn(i).length!==1)continue;const y=(i/W)|0,x=i-y*W;if(sideI([x,y])<-0.12*Math.min(EI.a,EI.b))continue;
+    const path=[i],seen=new Set([i]);let cur=i;for(let k=0;k<walk;k++){const nx=sn(cur).filter(j=>!seen.has(j));if(!nx.length)break;cur=nx[0];seen.add(cur);path.push(cur);}
+    if(path.length<Math.max(6,2*lw))continue;const pe=[x,y],pq=[path[path.length-1]%W,(path[path.length-1]/W)|0];let v=[pe[0]-pq[0],pe[1]-pq[1]];const vl=Math.hypot(v[0],v[1])||1;v=[v[0]/vl,v[1]/vl];
+    // (which side of the inner rectangle it heads for, and how far)
+    let best=null;for(const[k,lo,hi]of[[0,R1[0],R1[2]],[1,R1[1],R1[3]]]){if(Math.abs(v[k])<1e-6)continue;for(const[bnd,sg]of[[lo,-1],[hi,1]]){const t=(bnd-pe[k])/v[k];if(t>0&&(!best||t<best.t))best={t,k,bnd,sg};}}
+    if(!best)continue;const{k,bnd,sg}=best,dist=Math.abs(bnd-pe[k]),o=1-k;
+    const T=[0,0];T[k]=bnd;T[o]=pe[o]+v[o]/Math.abs(v[k])*dist*0.45;const lo=o===0?R1[0]:R1[1],hi=o===0?R1[2]:R1[3];T[o]=Math.min(hi-0.35*band,Math.max(lo+0.35*band,T[o]));
+    const C1=[pe[0]+v[0]*dist*0.4,pe[1]+v[1]*dist*0.4],nrm=[0,0];nrm[k]=sg;const C2=[T[0]-nrm[0]*dist*0.35,T[1]-nrm[1]*dist*0.35];
+    let pr=pe;for(let s=1;s<=40;s++){const t=s/40,a=(1-t)**3,b=3*(1-t)**2*t,c=3*(1-t)*t*t,d=t**3;const q=[a*pe[0]+b*C1[0]+c*C2[0]+d*T[0],a*pe[1]+b*C1[1]+c*C2[1]+d*T[1]];drawSeg(out,pr[0],pr[1],q[0],q[1],r);pr=q;}
+    meets[k===1?(sg<0?0:1):(sg<0?2:3)].push(T[o]);carried++;}
+  // (the band: two rectangles, mitred corners, the pieces between)
+  const seg=(a,b)=>drawSeg(out,a[0],a[1],b[0],b[1],r);
+  for(const R of[R0,R1]){seg([R[0],R[1]],[R[2],R[1]]);seg([R[2],R[1]],[R[2],R[3]]);seg([R[2],R[3]],[R[0],R[3]]);seg([R[0],R[3]],[R[0],R[1]]);}
+  seg([R1[0],R1[1]],[R0[0],R0[1]]);seg([R1[2],R1[1]],[R0[2],R0[1]]);seg([R1[2],R1[3]],[R0[2],R0[3]]);seg([R1[0],R1[3]],[R0[0],R0[3]]);
+  // (a divider close to where a line meets the inner rectangle from inside is moved onto it, so the line runs
+  // straight on through the border, as the line under a balloon's basket did through the oval band)
+  const at=(lo,hi,j,n,list)=>{const x=lo+j/n*(hi-lo),sp=(hi-lo)/n;let best=x,bd=0.3*sp;for(const q of list){const d=Math.abs(q-x);if(d<bd){bd=d;best=q;}}return best;};
+  for(let j=1;j<across;j++){const xt=at(R1[0],R1[2],j,across,meets[0]),xb=at(R1[0],R1[2],j,across,meets[1]);seg([xt,R0[1]],[xt,R1[1]]);seg([xb,R1[3]],[xb,R0[3]]);}
+  for(let j=1;j<down;j++){const yl=at(R1[1],R1[3],j,down,meets[2]),yr=at(R1[1],R1[3],j,down,meets[3]);seg([R0[0],yl],[R1[0],yl]);seg([R1[2],yr],[R0[2],yr]);}
+  m.set(out);
+  return{ok:true,carried,across,down,pieces:2*across+2*down};}
 </script>
 
 <script>
@@ -2919,7 +3236,8 @@ worker.onmessage=e=>{const m=e.data;
     if(S.pending){S.pending=false;run();return;}
     S.rawStrokes=m.pts;S.rawOffs=m.offs;S.rawHw=m.hw;S.rawFill=m.fill;S.rawFcurve=m.fcurve;S.areaCache=null;S.offs=m.offs;S.hw=m.hw;S.stats=m.stats;S.rot=m.rot||0;if(m.axes)S.axes=m.axes;S.fill=m.fill;S.fcurve=m.fcurve;S.junctions=m.junctions||[];S.strokes=applyDrags();markBorder();render();drawFixLayer();
     if(S.symWaiting&&S.symPending){S.symWaiting=false;if(symAxisOf(S.symPending)){drawFixLayer();symMenu();}}
-    setStatus('Done in '+(m.ms/1000).toFixed(1)+' s',false);}
+    if(m.rect&&!m.rect.ok){setStatus('No oval border found to make rectangular ('+(m.ms/1000).toFixed(1)+' s)',false);return;}
+    setStatus('Done in '+(m.ms/1000).toFixed(1)+' s'+(m.rect&&m.rect.ok?' · border made rectangular, '+m.rect.pieces+' border pieces':''),false);}
   else if(m.type==='error'){S.running=false;setStatus('Could not process this image: '+m.message,false);}};
 function setStatus(t,busy){$('statusText').textContent=t;$('status').classList.toggle('busy',!!busy);}
 
@@ -2979,7 +3297,7 @@ function prepare(){if(!S.src)return;
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,keepGaps:$('keepGaps').checked,joinPieces:$('joinPieces').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,ovalToRect:$('ovalToRect').checked,keepGaps:$('keepGaps').checked,joinPieces:$('joinPieces').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
   lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
 // A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
@@ -3873,6 +4191,7 @@ $('threshAuto').addEventListener('change',()=>{if($('threshAuto').checked)$('thr
 $('smooth').addEventListener('input',()=>{updateLabels();schedule(run,350);});
 $('invert').addEventListener('change',()=>{if(S.src){findCrop();prepare();}});
 $('dropText').addEventListener('change',()=>schedule(run,0));
+$('ovalToRect').addEventListener('change',()=>schedule(run,0));
 $('keepGaps').addEventListener('change',()=>schedule(run,0));
 $('joinPieces').addEventListener('change',()=>schedule(run,0));
 $('dropIslands').addEventListener('change',()=>schedule(run,0));

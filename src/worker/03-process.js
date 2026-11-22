@@ -63,7 +63,9 @@ function process(p){
   const lines=Array.isArray(p.lines)?p.lines.filter(L=>L&&[L.ax,L.ay,L.bx,L.by].every(isFinite)):[];
   if(lines.length){const lw=inkWidth(m);for(const L of lines)drawSeg(m,L.ax,L.ay,L.bx,L.by,lw/2);}
   // numbers and labels written in the pieces: small separate bits of ink drawn much thinner than the lines
-  if(p.dropText!==false){dropWords(m);dropText(m);}
+  if(p.dropText!==false){dropOutside(m);dropWords(m);dropText(m);}
+  // (an oval border made rectangular, when asked)
+  let rectInfo=null;if(p.ovalToRect)rectInfo=ovalToRect(m);
   // pieces drawn as separate outlines with narrow gaps between them: the gaps become shared lines (and numbers left
   // standing on their own in the pieces are taken out there)
   joinMode=0;if(p.joinPieces&&!colorIn)joinPieces(m,p.dropText!==false);
@@ -137,6 +139,7 @@ function process(p){
   if(p.joinPieces&&!p.asDrawn&&!colorIn)built.strokes=keepOffStaff(built.strokes,med);
   if(p.joinPieces&&!p.asDrawn&&!colorIn)built.strokes=dropDoubles(built.strokes,dmap,med);
   if(p.dropIslands!==false)built.strokes=dropIslands(built.strokes,med);
+  if(p.dropText!==false)built.strokes=dropLabelScraps(built.strokes,labelH,u);
   if(!p.asDrawn)built.strokes=roundTouches(built.strokes,med,dmap,+p.newHalf);
   if(!p.asDrawn&&!colorIn&&p.exact&&p.square)built.strokes=squareBorder(built.strokes,med,built.junctions);
   if(!p.asDrawn&&!colorIn)built.strokes=smoothOutline(built.strokes,m,med,built.junctions);
@@ -150,7 +153,7 @@ function process(p){
     const hw=raw.map((_,i)=>{const a=raw.slice(Math.max(0,i-75),Math.min(raw.length,i+76)).sort((p,q)=>p-q);return a[Math.floor(a.length*0.4)];});
     S.forEach((q,i)=>{flat.push(q[1]+0.5,q[0]+0.5);hwf.push(hw[i]);});offs.push(flat.length/2);}
   const junctions=(built.junctions||[]).map(J=>({x:J.p[1]+0.5,y:J.p[0]+0.5,wx:J.q[1],wy:J.q[0],arms:J.arms,pairs:J.pairs,fixed:J.fixed}));
-  return{axes:axesOut,junctions,pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
+  return{rect:rectInfo,axes:axesOut,junctions,pts:new Float32Array(flat),offs:new Int32Array(offs),hw:new Float32Array(hwf),stats,rot:built.rot,fill:{pts:new Float32Array(fl),offs:new Int32Array(fo)},fcurve:{pts:new Float32Array(cl),offs:new Int32Array(co)}};}
 
 // ===================================================================== curve stage
 // Trace the centerline into a graph of lines and junctions, rebuild junctions the way a
