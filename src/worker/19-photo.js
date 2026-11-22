@@ -37,20 +37,24 @@ function photoLines(T,C){
   m=ero(dil(m,r2),r2);
   {const sz=comps(m,true);let big=1;for(const v of sz)if(v>big)big=v;for(let i=0;i<N;i++)if(m[i]&&sz[lab[i]]<0.002*big)m[i]=0;}
   const lw=Math.max(4,inkWidth(m));
-  // (holes: a pinhole, or a little dark ring of glass texture, is filled; a real small piece is light glass)
+  // (holes: a pinhole, or a little dark ring of glass texture, is filled; a real small piece, an eye or a nostril, is
+  // light glass and stays however small)
   const fillHoles=(lim,darkLim)=>{const inv=notM(m),sz=comps(inv,false),sum=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i])sum[lab[i]]+=mxBuf[i];
     // (and a sliver: a piece much narrower than the lead is wide, and long, is where two lines run side by side)
     const dd=edt(m),far=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i]&&dd[i]>far[lab[i]])far[lab[i]]=dd[i];
     for(let i=0;i<N;i++){const l=lab[i];if(!l)continue;const r=Math.sqrt(far[l]),sliver=r<0.6*lw&&sz[l]/(2*Math.max(1,r))>3*lw&&sz[l]<30*lw*lw;
-      if(sz[l]<lim||(sz[l]<darkLim&&sum[l]/sz[l]<75)||sliver)m[i]=1;}};
+      const mean=sum[l]/sz[l];if((sz[l]<lim&&(mean<120||sz[l]<0.25*lw*lw))||(sz[l]<darkLim&&mean<40)||(sliver&&mean<120))m[i]=1;}};
 
   // (along the middle; loose ends taken back, short lines on their own dropped; then once more, as the redrawing
   // closes rings that the first pass left)
   let sk=null;
-  for(let round=0;round<3;round++){fillHoles(round?2.5*lw*lw:1.3*lw*lw,16*lw*lw);sk=m.slice();thin(sk,W,H);
+  for(let round=0;round<3;round++){fillHoles(round?2.5*lw*lw:1.3*lw*lw,8*lw*lw);sk=m.slice();thin(sk,W,H);
     // (an end: one neighbour, or two that touch each other, as at the stair-stepped tip of a thinned line)
     const nbs=i=>{const o=[];const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&sk[Y*W+X])o.push(Y*W+X);}return o;};
     const nb=i=>{const o=nbs(i);if(o.length===2){const a=o[0],b=o[1];if(Math.abs(a%W-b%W)<=1&&Math.abs(((a/W)|0)-((b/W)|0))<=1)return 1;}return o.length;};
+    // (a lead line broken for a moment, by a reflection or a dark spot of glass beside it, is joined again: a loose end
+    // carried straight on to a line close ahead of it)
+    if(round===0)bridgeEnds(sk,lw,nb,nbs);
     const q=[];for(let i=0;i<N;i++)if(sk[i]&&nb(i)<=1)q.push(i);
     while(q.length){const i=q.pop();if(!sk[i]||nb(i)>1)continue;sk[i]=0;const y=(i/W)|0,x=i-y*W;
       for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(sk[k]&&nb(k)<=1)q.push(k);}}
@@ -90,4 +94,22 @@ function splitTips(sk,lw){const N=W*H;
     for(const b of others){const cut=Math.min(b.path.length-1,Math.round(1.5*lw));for(let q=0;q<cut;q++)sk[b.path[q]]=0;const a=xy(b.path[cut]);
       const steps=Math.ceil(Math.hypot(J2.c[0]-a[0],J2.c[1]-a[1])*2);for(let t=0;t<=steps;t++){const x=Math.round(a[0]+(J2.c[0]-a[0])*t/steps),y=Math.round(a[1]+(J2.c[1]-a[1])*t/steps);sk[y*W+x]=1;}}
     used.add(j.id);used.add(J2.id);n++;}
+  return n;}
+
+function bridgeEnds(sk,lw,nb,nbs){const N=W*H,ends=[];for(let i=0;i<N;i++)if(sk[i]&&nb(i)<=1)ends.push(i);
+  const reach=1.6*lw,walkN=Math.round(2*lw);let n=0;
+  for(const e of ends){const own=new Set([e]);let cur=e,path=[e];
+    // (only a long line ending in nothing: a short stub off a line is glass texture, and is taken back instead)
+    let ok=true;for(let k=0;k<3*lw;k++){const nx=nbs(cur).filter(j=>!own.has(j));if(nx.length!==1&&!(nx.length===2&&Math.abs(nx[0]%W-nx[1]%W)<=1&&Math.abs(((nx[0]/W)|0)-((nx[1]/W)|0))<=1)){ok=false;break;}cur=nx[0];own.add(cur);path.push(cur);}
+    if(!ok)continue;path.length=Math.min(path.length,walkN);
+    // (the line's own pixels further back are not a target either)
+    for(let k=0;k<3*walkN;k++){const nx=nbs(cur).filter(j=>!own.has(j));if(!nx.length)break;cur=nx[0];own.add(cur);}
+    const ex=e%W,ey=(e/W)|0,bx=path[path.length-1]%W,by=(path[path.length-1]/W)|0;let vx=ex-bx,vy=ey-by;const vl=Math.hypot(vx,vy)||1;vx/=vl;vy/=vl;
+    let best=-1,bd=Infinity;const R=Math.ceil(reach);
+    for(let dy=-R;dy<=R;dy++)for(let dx=-R;dx<=R;dx++){const X=ex+dx,Y=ey+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(!sk[k]||own.has(k))continue;
+      const d=Math.hypot(dx,dy);if(d<1.5||d>reach)continue;const c=(dx*vx+dy*vy)/d;if(c<0.85)continue;const score=d*(2-c);if(score<bd){bd=score;best=k;}}
+    if(best<0)continue;const X=best%W,Y=(best/W)|0,steps=Math.ceil(2*Math.hypot(X-ex,Y-ey));
+    // (and the gap itself dark in the photo, as lead under a reflection still is; not open glass)
+    let dk=0;for(let t=0;t<=steps;t++){const k=Math.round(ey+(Y-ey)*t/steps)*W+Math.round(ex+(X-ex)*t/steps);if(mxBuf[k]<100)dk++;}if(dk<0.6*(steps+1))continue;
+    for(let t=0;t<=steps;t++)sk[Math.round(ey+(Y-ey)*t/steps)*W+Math.round(ex+(X-ex)*t/steps)]=1;n++;}
   return n;}
