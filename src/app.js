@@ -72,11 +72,13 @@ function prepare(){if(!S.src)return;
   // (Line drawings done in colored ink keep the usual brightness, so their lines still show.)
   let colored=0,seen=0;for(let i=0;i<ww*wh;i+=7){const r=d[4*i],gg=d[4*i+1],b=d[4*i+2],mx=Math.max(r,gg,b),mn=Math.min(r,gg,b);seen++;if(mx-mn>60&&mx>70)colored++;}
   S.colorFill=colored>0.15*seen;
+  // (also each pixel's brightest colour and how coloured it is, for a photo of a finished panel)
+  const mxa=new Uint8Array(ww*wh),cha=new Uint8Array(ww*wh);for(let i=0;i<ww*wh;i++){const r=d[4*i],g2=d[4*i+1],b=d[4*i+2],mx=Math.max(r,g2,b);mxa[i]=mx;cha[i]=mx-Math.min(r,g2,b);}
   for(let i=0;i<ww*wh;i++)gr[i]=S.colorFill?Math.max(d[4*i],d[4*i+1],d[4*i+2]):Math.round(.299*d[4*i]+.587*d[4*i+1]+.114*d[4*i+2]);
   S.work={w:ww,h:wh};S.lastGray=gr.slice();S.loadId++;S.running=true;setStatus('Enlarging…',true);
-  worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer},[gr.buffer]);
+  worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer,mx:mxa.buffer,ch:cha.buffer},[gr.buffer,mxa.buffer,cha.buffer]);
   updateLabels();}
-function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,ovalToRect:$('ovalToRect').checked,keepGaps:$('keepGaps').checked,joinPieces:$('joinPieces').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
+function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,ovalToRect:$('ovalToRect').checked,photo:$('photoIn').checked,keepGaps:$('keepGaps').checked,joinPieces:$('joinPieces').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
   lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
 // A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
@@ -970,7 +972,7 @@ $('threshAuto').addEventListener('change',()=>{if($('threshAuto').checked)$('thr
 $('smooth').addEventListener('input',()=>{updateLabels();schedule(run,350);});
 $('invert').addEventListener('change',()=>{if(S.src){findCrop();prepare();}});
 $('dropText').addEventListener('change',()=>schedule(run,0));
-$('ovalToRect').addEventListener('change',()=>schedule(run,0));
+$('ovalToRect').addEventListener('change',()=>schedule(run,0));$('photoIn').addEventListener('change',()=>schedule(run,0));
 $('keepGaps').addEventListener('change',()=>schedule(run,0));
 $('joinPieces').addEventListener('change',()=>schedule(run,0));
 $('dropIslands').addEventListener('change',()=>schedule(run,0));
