@@ -216,3 +216,41 @@ function dropOutside(m){const N=W*H,lab=new Int32Array(N).fill(-1),st=new Int32A
   for(let i=0;i<n;i++){if(i===bi)continue;const c=C[i];if(c.x1<B.x0-g||c.x0>B.x1+g||c.y1<B.y0-g||c.y0>B.y1+g)gone[i]=1;}
   for(let i=0;i<N;i++)if(lab[i]>=0&&gone[lab[i]]){m[i]=0;k++;}
   return k;}
+
+// Slivers: where a label was run together with a line, the tracing can leave a tiny piece no glass could be cut to
+// (a little hook hanging off the line, a short stub across a small piece). A piece far narrower than a label is tall
+// and smaller than a few labels is such a sliver: its shortest short side line is taken out, and so on until none
+// is left. Only where the ink there was a solid lump (letters run together), never a real small piece drawn as an
+// outline round open paper, like an eye; and only on a pattern whose labels were found.
+function dropSlivers(strokes,lh,m){if(!lh||!m)return strokes;
+  const len=S=>{let L=0;for(let i=1;i<S.length;i++)L+=Math.hypot(S[i][0]-S[i-1][0],S[i][1]-S[i-1][1]);return L;};
+  let live=strokes.map(()=>true);
+  for(let pass=0;pass<6;pass++){
+    const own=new Int32Array(W*H).fill(-1);
+    strokes.forEach((S,si)=>{if(!live[si])return;for(let i=1;i<S.length;i++){const a=S[i-1],b=S[i],n=Math.max(1,Math.ceil(2*Math.hypot(b[0]-a[0],b[1]-a[1])));
+      for(let k=0;k<=n;k++){const y=Math.round(a[0]+(b[0]-a[0])*k/n),x=Math.round(a[1]+(b[1]-a[1])*k/n);if(x>=0&&y>=0&&x<W&&y<H)own[y*W+x]=si;}}});
+    // (a short line running all its length close beside another, a hook hanging under a line, is a sliver too)
+    {let hug=false;const R=Math.ceil(lh);strokes.forEach((S,si)=>{if(!live[si]||hug)return;const L=len(S);if(L>=5*lh||L<1)return;
+      // (both its ends on one and the same line, and all of it close beside that line)
+      const near=(p,r,o)=>{const y0=Math.round(p[0]),x0=Math.round(p[1]);const got=new Set();for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){if(dx*dx+dy*dy>r*r)continue;const X=x0+dx,Y=y0+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const q=own[Y*W+X];if(q>=0&&q!==si&&(o<0||q===o))got.add(q);}return got;};
+      const ra=Math.max(3,Math.ceil(0.25*lh)),ea=near(S[0],ra,-1),eb=near(S[S.length-1],ra,-1);let all=false;
+      const endOk=(e,o)=>e.has(o)||[...e].every(q=>q===o);
+      const nearest=(p,r,o)=>{const y0=Math.round(p[0]),x0=Math.round(p[1]);let b=null,bd=Infinity;for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const dd=dx*dx+dy*dy;if(dd>r*r||dd>=bd)continue;const X=x0+dx,Y=y0+dy;if(X<0||Y<0||X>=W||Y>=H)continue;if(own[Y*W+X]===o){bd=dd;b=[Y,X];}}return b;};
+      for(const o of new Set([...ea,...eb])){if(!(endOk(ea,o)&&endOk(eb,o))||!(ea.has(o)||eb.has(o)))continue;all=true;let ink=0,tot=0;
+        let dmx=0;const dEnd=[];for(let i=0;i<S.length&&all;i+=2){const q=nearest(S[i],R,o);if(!q){all=false;break;}const dd=Math.hypot(q[0]-S[i][0],q[1]-S[i][1]);dmx=Math.max(dmx,dd);if(i===0)dEnd.push(dd);if(dd<3)continue;tot++;const my=Math.round((q[0]+S[i][0])/2),mx=Math.round((q[1]+S[i][1])/2);if(m[my*W+mx])ink++;}
+        if(all){const qe=nearest(S[S.length-1],R,o);dEnd.push(qe?Math.hypot(qe[0]-S[S.length-1][0],qe[1]-S[S.length-1][1]):R);}
+        // (it bows out from the line and comes back, as a hook does; a line running alongside at one distance is a
+        // double line, and stays)
+        if(all&&(dmx<0.35*lh||Math.max(...dEnd)>0.55*dmx))all=false;
+        if(all&&tot&&ink<0.5*tot)all=false;if(all)break;}
+      if(all){live[si]=false;hug=true;}});if(hug)continue;}
+    const bg=new Uint8Array(W*H);for(let i=0;i<W*H;i++)bg[i]=own[i]<0?1:0;const d=edt(bg);
+    const lab=new Int32Array(W*H).fill(-1),st=new Int32Array(W*H);let changed=false;
+    for(let s=0;s<W*H;s++){if(own[s]>=0||lab[s]>=0)continue;let sp=0;st[sp++]=s;lab[s]=s;let area=0,dmax=0,edge=false;const nb=new Set();
+      let inked=0;while(sp){const i=st[--sp],y=(i/W)|0,x=i-y*W;area++;if(m[i])inked++;if(d[i]>dmax)dmax=d[i];if(x===0||y===0||x===W-1||y===H-1)edge=true;
+        for(const[X,Y]of[[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(own[k]>=0){nb.add(own[k]);continue;}if(lab[k]<0){lab[k]=s;st[sp++]=k;}}}
+      if(edge||Math.sqrt(dmax)>=0.45*lh||area>=2*lh*lh||inked<0.4*area)continue;
+      let best=-1,bl=Infinity;for(const si of nb){const L=len(strokes[si]);if(L<3*lh&&L<bl){bl=L;best=si;}}
+      if(best>=0){live[best]=false;changed=true;}}
+    if(!changed)break;}
+  return strokes.filter((_,si)=>live[si]);}

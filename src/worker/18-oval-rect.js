@@ -49,9 +49,14 @@ function ovalToRect(m){
   for(let i=0;i<W*H;i++)if(scene[i]){const y=(i/W)|0,x=i-y*W;drawSeg(out,x,y,x,y,r);}
   const sn=i=>{const y=(i/W)|0,x=i-y*W,o=[];for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&scene[Y*W+X])o.push(Y*W+X);}return o;};
   let carried=0;const walk=Math.round(8*lw);const meets=[[],[],[],[]];   // (where lines meet the inner rectangle: top, bottom, left, right)
-  for(let i=0;i<W*H;i++){if(!scene[i])continue;if(sn(i).length!==1)continue;const y=(i/W)|0,x=i-y*W;if(sideI([x,y])<-0.12*Math.min(EI.a,EI.b))continue;
-    const path=[i],seen=new Set([i]);let cur=i;for(let k=0;k<walk;k++){const nx=sn(cur).filter(j=>!seen.has(j));if(!nx.length)break;cur=nx[0];seen.add(cur);path.push(cur);}
-    if(path.length<Math.max(6,2*lw))continue;const pe=[x,y],pq=[path[path.length-1]%W,(path[path.length-1]/W)|0];let v=[pe[0]-pq[0],pe[1]-pq[1]];const vl=Math.hypot(v[0],v[1])||1;v=[v[0]/vl,v[1]/vl];
+  // (a line's end: one neighbour, or two that touch each other, as at the stair-stepped tip of a thinned line)
+  const isEnd=i=>{const o=sn(i);if(!o.length||o.length>2)return false;if(o.length===1)return true;const a=o[0],b=o[1];return Math.abs((a%W)-(b%W))<=1&&Math.abs(((a/W)|0)-((b/W)|0))<=1;};
+  const used=new Uint8Array(W*H);
+  for(let i=0;i<W*H;i++){if(!scene[i]||used[i])continue;if(!isEnd(i))continue;const y=(i/W)|0,x=i-y*W;if(sideI([x,y])<-0.12*Math.min(EI.a,EI.b))continue;
+    // (back along the line from its end: the pixel furthest along it, a few line widths in, gives its direction;
+    // found by spreading out from the end, as a thinned line can be two pixels wide in places)
+    const dep=new Map([[i,0]]);let fr=[i],far=i,d=0;while(fr.length&&d<walk){d++;const nf=[];for(const c of fr)for(const j of sn(c))if(!dep.has(j)){dep.set(j,d);nf.push(j);}if(nf.length)far=nf[0];fr=nf;}
+    for(const[j,dj]of dep)if(dj<=2*lw)used[j]=1;if(dep.get(far)<Math.max(6,2*lw))continue;const pe=[x,y],pq=[far%W,(far/W)|0];let v=[pe[0]-pq[0],pe[1]-pq[1]];const vl=Math.hypot(v[0],v[1])||1;v=[v[0]/vl,v[1]/vl];
     // (which side of the inner rectangle it heads for, and how far)
     let best=null;for(const[k,lo,hi]of[[0,R1[0],R1[2]],[1,R1[1],R1[3]]]){if(Math.abs(v[k])<1e-6)continue;for(const[bnd,sg]of[[lo,-1],[hi,1]]){const t=(bnd-pe[k])/v[k];if(t>0&&(!best||t<best.t))best={t,k,bnd,sg};}}
     if(!best)continue;const{k,bnd,sg}=best,dist=Math.abs(bnd-pe[k]),o=1-k;
@@ -60,7 +65,7 @@ function ovalToRect(m){
     let pr=pe;for(let s=1;s<=40;s++){const t=s/40,a=(1-t)**3,b=3*(1-t)**2*t,c=3*(1-t)*t*t,d=t**3;const q=[a*pe[0]+b*C1[0]+c*C2[0]+d*T[0],a*pe[1]+b*C1[1]+c*C2[1]+d*T[1]];drawSeg(out,pr[0],pr[1],q[0],q[1],r);pr=q;}
     meets[k===1?(sg<0?0:1):(sg<0?2:3)].push(T[o]);carried++;}
   // (the band: two rectangles, mitred corners, the pieces between)
-  const seg=(a,b)=>drawSeg(out,a[0],a[1],b[0],b[1],r);
+  const segs=[],seg=(a,b)=>{drawSeg(out,a[0],a[1],b[0],b[1],r);segs.push([a.slice(),b.slice()]);};
   for(const R of[R0,R1]){seg([R[0],R[1]],[R[2],R[1]]);seg([R[2],R[1]],[R[2],R[3]]);seg([R[2],R[3]],[R[0],R[3]]);seg([R[0],R[3]],[R[0],R[1]]);}
   seg([R1[0],R1[1]],[R0[0],R0[1]]);seg([R1[2],R1[1]],[R0[2],R0[1]]);seg([R1[2],R1[3]],[R0[2],R0[3]]);seg([R1[0],R1[3]],[R0[0],R0[3]]);
   // (a divider close to where a line meets the inner rectangle from inside is moved onto it, so the line runs
@@ -69,4 +74,38 @@ function ovalToRect(m){
   for(let j=1;j<across;j++){const xt=at(R1[0],R1[2],j,across,meets[0]),xb=at(R1[0],R1[2],j,across,meets[1]);seg([xt,R0[1]],[xt,R1[1]]);seg([xb,R1[3]],[xb,R0[3]]);}
   for(let j=1;j<down;j++){const yl=at(R1[1],R1[3],j,down,meets[2]),yr=at(R1[1],R1[3],j,down,meets[3]);seg([R0[0],yl],[R1[0],yl]);seg([R1[2],yr],[R0[2],yr]);}
   m.set(out);
-  return{ok:true,carried,across,down,pieces:2*across+2*down};}
+  return{ok:true,carried,across,down,pieces:2*across+2*down,geo:{R0,R1,lw,segs}};}
+
+// The new rectangular band is drawn exactly as made, not as traced: in Level lines the tracing can bend the long
+// straight sides where many lines meet them. Every traced line wholly in the band or on its edges is replaced by
+// the exact rectangles, mitres and dividers, and each picture line reaching the inner rectangle is run straight on
+// to meet it exactly. (Points here are [y,x], as the tracing has them; the band was made in x,y.)
+function rectFrame(strokes,geo,rotDeg){const{R0,R1,lw,segs}=geo;
+  let tf=p=>p;if(Math.abs(rotDeg||0)>0.01){const a=-rotDeg*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),cy=H/2,cx=W/2;tf=p=>{const y=p[0]-cy,x=p[1]-cx;return[cy+x*sa+y*ca,cx+x*ca-y*sa];};}
+  // (inside test and edges in the tracing's own frame: the four inner corners, turned as the tracing was)
+  const C=[[R1[1],R1[0]],[R1[1],R1[2]],[R1[3],R1[2]],[R1[3],R1[0]]].map(tf);
+  const edges=[[C[0],C[1]],[C[1],C[2]],[C[2],C[3]],[C[3],C[0]]];
+  const sideOf=(a,b,p)=>(b[1]-a[1])*(p[0]-a[0])-(b[0]-a[0])*(p[1]-a[1]);
+  const sg=Math.sign(sideOf(C[0],C[1],C[2]))||1;
+  const depth=p=>{let d=Infinity;for(const[a,b]of edges){const L=Math.hypot(b[0]-a[0],b[1]-a[1])||1;d=Math.min(d,sg*sideOf(a,b,p)/L);}return d;};   // (how far inside the inner rectangle)
+  const inset=1.5*lw;
+  // (straight on from p along v to the inner rectangle's edge)
+  const toEdge=(p,v)=>{let best=null;for(const[a,b]of edges){const e=[b[0]-a[0],b[1]-a[1]],det=v[0]*(-e[1])+e[0]*v[1];if(Math.abs(det)<1e-9)continue;
+      const rx=a[0]-p[0],ry=a[1]-p[1],t=(rx*(-e[1])+e[0]*ry)/det,s=(v[0]*ry-v[1]*rx)/det;if(t>=-1&&s>=-0.01&&s<=1.01&&(best===null||t<best))best=t;}
+    return best===null?null:[p[0]+best*v[0],p[1]+best*v[1]];};
+  const dirBack=(S,i,step)=>{let j=i,L=0;while(j+step>=0&&j+step<S.length&&L<2.5*lw){L+=Math.hypot(S[j+step][0]-S[j][0],S[j+step][1]-S[j][1]);j+=step;}
+    const v=[S[i][0]-S[j][0],S[i][1]-S[j][1]],n=Math.hypot(v[0],v[1]);return n>1e-6?[v[0]/n,v[1]/n]:null;};
+  const out=[];
+  for(const S of strokes){let i=0;const n=S.length;
+    while(i<n){while(i<n&&depth(S[i])<=inset)i++;if(i>=n)break;let j=i;while(j+1<n&&depth(S[j+1])>inset)j++;
+      let R=S.slice(i,j+1);
+      // (an end that ran out into the band, or stops just short of the inner rectangle, is run on to meet it)
+      for(const atStart of[true,false]){const endI=atStart?0:R.length-1,p=R[endI],cut=atStart?i>0:j<n-1;
+        if(!cut&&depth(p)>3*lw)continue;if(R.length<2)break;const v=dirBack(R,endI,atStart?1:-1);if(!v)continue;const q=toEdge(p,v);
+        if(q&&Math.hypot(q[0]-p[0],q[1]-p[1])<=6*lw){if(atStart)R=[q,...R];else R=[...R,q];}}
+      let L=0;for(let k=1;k<R.length;k++)L+=Math.hypot(R[k][0]-R[k-1][0],R[k][1]-R[k-1][1]);
+      if(R.length>=2&&L>lw)out.push(R);i=j+1;}}
+  // (the band, exact: points every couple of pixels)
+  for(const[a,b]of segs){const A=tf([a[1],a[0]]),B=tf([b[1],b[0]]),L=Math.hypot(B[0]-A[0],B[1]-A[1]),k=Math.max(1,Math.ceil(L/2)),P=[];
+    for(let t=0;t<=k;t++)P.push([A[0]+(B[0]-A[0])*t/k,A[1]+(B[1]-A[1])*t/k]);out.push(P);}
+  return out;}
