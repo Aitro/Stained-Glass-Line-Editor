@@ -1116,7 +1116,8 @@ async function cutLoops(full,url){const img=new Image();img.src=url||S.resultURL
 // (fewer points along the straight parts, within the given tolerance)
 function rdp(P,tol){if(P.length<4)return P;const keep=new Uint8Array(P.length);keep[0]=keep[P.length-1]=1;const st=[[0,P.length-1]];
   while(st.length){const[a,b]=st.pop();const ax=P[a][0],ay=P[a][1],dx=P[b][0]-ax,dy=P[b][1]-ay,l=Math.hypot(dx,dy)||1e-9;let bi=-1,bd=tol;
-    for(let i=a+1;i<b;i++){const dd=Math.abs((P[i][0]-ax)*dy-(P[i][1]-ay)*dx)/l;if(dd>bd){bd=dd;bi=i;}}if(bi>=0){keep[bi]=1;st.push([a,bi],[bi,b]);}}
+    // (when the two ends are the same point, as a closed loop's can be, the distance is from that point: a line through it has no direction)
+    for(let i=a+1;i<b;i++){const dd=l>1e-6?Math.abs((P[i][0]-ax)*dy-(P[i][1]-ay)*dx)/l:Math.hypot(P[i][0]-ax,P[i][1]-ay);if(dd>bd){bd=dd;bi=i;}}if(bi>=0){keep[bi]=1;st.push([a,bi],[bi,b]);}}
   return P.filter((_,i)=>keep[i]);}
 function dxfFile(cut){const o=['0','SECTION','2','HEADER','9','$ACADVER','1','AC1009','9','$INSUNITS','70','1','9','$EXTMIN','10','0','20','0','9','$EXTMAX','10',cut.w.toFixed(4),'20',cut.h.toFixed(4),'0','ENDSEC',
     '0','SECTION','2','TABLES','0','TABLE','2','LAYER','70','1','0','LAYER','2','PIECES','70','0','62','7','6','CONTINUOUS','0','ENDTAB','0','ENDSEC','0','SECTION','2','ENTITIES'];

@@ -38,6 +38,12 @@ function traceAsDrawn(sk,u,dmap,p){
       const a=A.b===k?A.P:A.P.slice().reverse(),b=B.a===k?B.P:B.P.slice().reverse(),ea=A.b===k?A.a:A.b,eb=B.a===k?B.b:B.a;
       ch[i]={P:a.concat(b.slice(1)),a:ea,b:eb};ch.splice(j,1);done=false;break;}
     if(done)break;}
+  // (two lines crossing: thinning splits the crossing into two joints a few pixels apart, with a short bridge between.
+  // Left alone, the bridge shows as a little spike once each joint is straightened; the two joints are one crossing)
+  if(p&&p.asDrawn)for(let guard=0;guard<ch.length;guard++){const deg=new Map();for(const c of ch)for(const k of[c.a,c.b])if(k!=null)deg.set(k,(deg.get(k)||0)+1);
+    const i=ch.findIndex(c=>c.a!=null&&c.b!=null&&c.a!==c.b&&deg.get(c.a)>=3&&deg.get(c.b)>=3&&len(c.P)<3*u);if(i<0)break;
+    const ka=ch[i].a,kb=ch[i].b;cent[ka]=[(cent[ka][0]+cent[kb][0])/2,(cent[ka][1]+cent[kb][1])/2];if(free.has(kb))free.add(ka);ch.splice(i,1);
+    for(const c of ch){if(c.a===kb||c.a===ka){c.a=ka;c.P[0]=cent[ka].slice();}if(c.b===kb||c.b===ka){c.b=ka;c.P[c.P.length-1]=cent[ka].slice();}}}
   // (joints: where thick ink meets, the middle of the ink curves in toward the blob's center, which would show
   // as a hook on each line once the lead is thinner. Each line keeps its own direction from outside the blob
   // straight in, and the lines meet at the one point closest to all of them)
