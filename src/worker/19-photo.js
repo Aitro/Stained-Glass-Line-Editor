@@ -23,8 +23,8 @@ function runMaxMin(src,r,isMax,horiz){const N=W*H,out=new Uint8Array(N),L=horiz?
 function photoLines(T,C,guides){
   const N=W*H,sc=Math.max(W,H)/3000,lab=new Int32Array(N),st=new Int32Array(N);
   const notM=a=>{const o=new Uint8Array(N);for(let i=0;i<N;i++)o[i]=a[i]?0:1;return o;};
-  const dil=(a,r)=>{const d=edt(a),o=new Uint8Array(N),r2=r*r;for(let i=0;i<N;i++)o[i]=d[i]<=r2?1:0;return o;};
-  const ero=(a,r)=>{const d=edt(notM(a)),o=new Uint8Array(N),r2=r*r;for(let i=0;i<N;i++)o[i]=d[i]>r2?1:0;return o;};
+  const dil=(a,r)=>diskDil(a,r);
+  const ero=(a,r)=>{const d=diskDil(notM(a),r);for(let i=0;i<N;i++)d[i]=d[i]?0:1;return d;};
   const comps=(a,eight)=>{lab.fill(0);const sz=[0];let n=0;for(let s=0;s<N;s++){if(!a[s]||lab[s])continue;n++;let sp=0,c=0;st[sp++]=s;lab[s]=n;
       while(sp){const i=st[--sp];c++;const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;if(!eight&&dx&&dy)continue;const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(a[k]&&!lab[k]){lab[k]=n;st[sp++]=k;}}}
       sz.push(c);}return sz;};
@@ -78,7 +78,7 @@ function photoLines(T,C,guides){
           let near=false;for(let dy=-4;dy<=4&&!near;dy++)for(let dx=-4;dx<=4;dx++){const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&lab[Y*W+X]===l){near=true;break;}}
           if(near){n++;if(mxBuf[i]<30)dk++;}}
         if(n&&dk>=0.3*n)ok.add(l);}
-      const d=edt(m);lightKeep=new Uint8Array(N);for(let i=0;i<N;i++){const l=lab[i];if(l&&ok.has(l)&&d[i]>=4)lightKeep[i]=1;}}
+      const nearM=diskDil(m,Math.sqrt(3));lightKeep=new Uint8Array(N);for(let i=0;i<N;i++){const l=lab[i];if(l&&ok.has(l)&&!nearM[i])lightKeep[i]=1;}}
     sk=m.slice();thin(sk,W,H);
     // (an end: one neighbour, or two that touch each other, as at the stair-stepped tip of a thinned line)
     const nbs=i=>{const o=[];const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&sk[Y*W+X])o.push(Y*W+X);}return o;};

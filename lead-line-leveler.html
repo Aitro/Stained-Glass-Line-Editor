@@ -381,9 +381,26 @@ function edt1d(f,n,d,v,z){let k=0;v[0]=0;z[0]=-INF;z[1]=INF;
   k=0;for(let q=0;q<n;q++){while(z[k+1]<q)k++;const dq=q-v[k];d[q]=dq*dq+f[v[k]];}}
 function edt(src){const N=Math.max(W,H);const f=new Float64Array(N),d=new Float64Array(N),v=new Int32Array(N),z=new Float64Array(N+1);
   const out=new Float32Array(W*H);
-  for(let x=0;x<W;x++){for(let y=0;y<H;y++)f[y]=src[y*W+x]?0:INF;edt1d(f,H,d,v,z);for(let y=0;y<H;y++)out[y*W+x]=d[y];}
-  for(let y=0;y<H;y++){const o=y*W;for(let x=0;x<W;x++)f[x]=out[o+x];edt1d(f,W,d,v,z);for(let x=0;x<W;x++)out[o+x]=d[x];}
+  // (down each column, the distance to the nearest set pixel above or below it: two sweeps over whole rows, top to
+  // bottom then back, so memory is read in order; for a yes/no picture this is the same as the column pass of the
+  // general method, and much quicker)
+  const g=new Int32Array(W*H),BIG=1<<29;
+  for(let x=0;x<W;x++)g[x]=src[x]?0:BIG;
+  for(let y=1;y<H;y++){const o=y*W,p=o-W;for(let x=0;x<W;x++)g[o+x]=src[o+x]?0:(g[p+x]>=BIG?BIG:g[p+x]+1);}
+  for(let y=H-2;y>=0;y--){const o=y*W,n=o+W;for(let x=0;x<W;x++){const b=g[n+x]+1;if(b<g[o+x])g[o+x]=b;}}
+  for(let y=0;y<H;y++){const o=y*W;let any=false;for(let x=0;x<W;x++){const t=g[o+x];if(t>=BIG)f[x]=INF;else{f[x]=t*t;any=true;}}
+    if(!any){for(let x=0;x<W;x++)out[o+x]=INF;continue;}
+    edt1d(f,W,d,v,z);for(let x=0;x<W;x++)out[o+x]=d[x];}
   return out;}
+
+// (every pixel within r of a set pixel: the same as testing the distance map against r, but done by laying a disc's
+// rows along each run of set pixels, which is many times quicker for the small radii used in cleaning)
+function diskDil(a,r){const N=W*H,o=new Uint8Array(N),R=Math.floor(r),r2=r*r,hw=[];for(let dy=-R;dy<=R;dy++)hw.push(Math.floor(Math.sqrt(Math.max(0,r2-dy*dy))+1e-9));
+  for(let y=0;y<H;y++){const row=y*W;let x=0;
+    while(x<W){if(!a[row+x]){x++;continue;}let x1=x;while(x1+1<W&&a[row+x1+1])x1++;
+      for(let k=0;k<hw.length;k++){const yy=y+k-R;if(yy<0||yy>=H)continue;const w=hw[k],lo=Math.max(0,x-w),hi=Math.min(W-1,x1+w),b=yy*W;o.fill(1,b+lo,b+hi+1);}
+      x=x1+1;}}
+  return o;}
 
 function thin(img,PW,PH){
   const off=[-PW,-PW+1,1,PW+1,PW,PW-1,-1,-PW-1];
@@ -514,12 +531,11 @@ function process(p){
   // (and not for Change width only: lines are kept as drawn, gaps and all)
   const m0=p.keepGaps&&!p.asDrawn&&!colorIn?m.slice():null;
   // (nor for joined pieces: a clean drawing, and its narrow pieces are glass)
-  if(!colorIn&&!p.asDrawn&&!p.joinPieces){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
-    for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
+  if(!colorIn&&!p.asDrawn&&!p.joinPieces){const r=Math.max(1.5,0.33*med),r2=r*r;const dil=diskDil(m,r);
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
     // pixels outside the image count as paper so the outer border is not pulled inward
-    const d2=edt(notd);const fill=new Uint8Array(W*H);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
-      const edge=Math.min(x+1,y+1,W-x,H-y);if(!m[i]&&d2[i]>r2&&edge*edge>r2)fill[i]=1;}
+    const near2=diskDil(notd,r);const fill=new Uint8Array(W*H);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
+      const edge=Math.min(x+1,y+1,W-x,H-y);if(!m[i]&&!near2[i]&&edge*edge>r2)fill[i]=1;}
     if(p.keepGaps)closeGapsKept(m,fill,r);else for(let i=0;i<W*H;i++)if(fill[i])m[i]=1;}
   // (thin a mask down to its one-pixel centre lines)
   const skel=M=>{
@@ -574,7 +590,10 @@ function process(p){
   // median along the line so junction blobs don't count; used to line a border up with an edge
   for(const S of strokes){const raw=S.map(q=>{let mx=0;const yy=Math.round(q[0]),xx=Math.round(q[1]);
       for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const y=yy+dy,x=xx+dx;if(y>=0&&x>=0&&y<H&&x<W)mx=Math.max(mx,dmap[y*W+x]);}return Math.max(0.5,mx-0.5);});
-    const hw=raw.map((_,i)=>{const a=raw.slice(Math.max(0,i-75),Math.min(raw.length,i+76)).sort((p,q)=>p-q);return a[Math.floor(a.length*0.4)];});
+    // (the window kept sorted as it slides, rather than sorted afresh at every point: the same values, much quicker)
+    const hw=new Array(raw.length);{const win=[],n=raw.length;const pos=v=>{let lo=0,hi=win.length;while(lo<hi){const md=(lo+hi)>>1;if(win[md]<v)lo=md+1;else hi=md;}return lo;};
+      for(let j=0;j<Math.min(n,76);j++)win.splice(pos(raw[j]),0,raw[j]);
+      for(let i=0;i<n;i++){if(i>0){if(i+75<n)win.splice(pos(raw[i+75]),0,raw[i+75]);if(i-76>=0)win.splice(pos(raw[i-76]),1);}hw[i]=win[Math.floor(win.length*0.4)];}}
     S.forEach((q,i)=>{flat.push(q[1]+0.5,q[0]+0.5);hwf.push(hw[i]);});offs.push(flat.length/2);}
   const junctions=(built.junctions||[]).map(J=>({x:J.p[1]+0.5,y:J.p[0]+0.5,wx:J.q[1],wy:J.q[0],arms:J.arms,pairs:J.pairs,fixed:J.fixed}));
   colorIn=colorWas;
@@ -1235,7 +1254,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     if(A.length>=2){const m=[(A[0][0]+A[1][0])/2,(A[0][1]+A[1][1])/2];let pd=[-(A[1][1]-A[0][1]),A[1][0]-A[0][0]];const l=norm2(pd)||1;pd=[pd[0]/l,pd[1]/l];
       toC=t=>[m[0]+t[0]*pd[0],m[1]+t[0]*pd[1]];par=[(base.c[0]-m[0])*pd[0]+(base.c[1]-m[1])*pd[1]];}
     else{toC=t=>[t[0],t[1]];par=base.c.slice();}
-    const cost=t=>{const c=toC(t),r=Math.hypot(A[0][0]-c[0],A[0][1]-c[1]);let s=0;for(const p of P){const e=Math.hypot(p[0]-c[0],p[1]-c[1])-r;s+=e*e;}return s;};
+    const PX=Float64Array.from(P,p=>p[0]),PY=Float64Array.from(P,p=>p[1]),np=P.length;   // (flat copies: the same sums, read quicker)
+    const cost=t=>{const c=toC(t),c0=c[0],c1=c[1],r=Math.hypot(A[0][0]-c0,A[0][1]-c1);let s=0;for(let i=0;i<np;i++){const e=Math.hypot(PX[i]-c0,PY[i]-c1)-r;s+=e*e;}return s;};
     let step=Math.max(1,base.r*0.05),cp=cost(par);   // (the cost where we stand, kept rather than worked out again)
     for(let it=0;it<200&&step>1e-3;it++){let improved=false;
       for(let k=0;k<par.length;k++)for(const sg of[1,-1]){const t=par.slice();t[k]+=sg*step;const ct=cost(t);if(ct<cp){par=t;cp=ct;improved=true;}}
@@ -3377,8 +3397,8 @@ function runMaxMin(src,r,isMax,horiz){const N=W*H,out=new Uint8Array(N),L=horiz?
 function photoLines(T,C,guides){
   const N=W*H,sc=Math.max(W,H)/3000,lab=new Int32Array(N),st=new Int32Array(N);
   const notM=a=>{const o=new Uint8Array(N);for(let i=0;i<N;i++)o[i]=a[i]?0:1;return o;};
-  const dil=(a,r)=>{const d=edt(a),o=new Uint8Array(N),r2=r*r;for(let i=0;i<N;i++)o[i]=d[i]<=r2?1:0;return o;};
-  const ero=(a,r)=>{const d=edt(notM(a)),o=new Uint8Array(N),r2=r*r;for(let i=0;i<N;i++)o[i]=d[i]>r2?1:0;return o;};
+  const dil=(a,r)=>diskDil(a,r);
+  const ero=(a,r)=>{const d=diskDil(notM(a),r);for(let i=0;i<N;i++)d[i]=d[i]?0:1;return d;};
   const comps=(a,eight)=>{lab.fill(0);const sz=[0];let n=0;for(let s=0;s<N;s++){if(!a[s]||lab[s])continue;n++;let sp=0,c=0;st[sp++]=s;lab[s]=n;
       while(sp){const i=st[--sp];c++;const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;if(!eight&&dx&&dy)continue;const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(a[k]&&!lab[k]){lab[k]=n;st[sp++]=k;}}}
       sz.push(c);}return sz;};
@@ -3432,7 +3452,7 @@ function photoLines(T,C,guides){
           let near=false;for(let dy=-4;dy<=4&&!near;dy++)for(let dx=-4;dx<=4;dx++){const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&lab[Y*W+X]===l){near=true;break;}}
           if(near){n++;if(mxBuf[i]<30)dk++;}}
         if(n&&dk>=0.3*n)ok.add(l);}
-      const d=edt(m);lightKeep=new Uint8Array(N);for(let i=0;i<N;i++){const l=lab[i];if(l&&ok.has(l)&&d[i]>=4)lightKeep[i]=1;}}
+      const nearM=diskDil(m,Math.sqrt(3));lightKeep=new Uint8Array(N);for(let i=0;i<N;i++){const l=lab[i];if(l&&ok.has(l)&&!nearM[i])lightKeep[i]=1;}}
     sk=m.slice();thin(sk,W,H);
     // (an end: one neighbour, or two that touch each other, as at the stair-stepped tip of a thinned line)
     const nbs=i=>{const o=[];const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&sk[Y*W+X])o.push(Y*W+X);}return o;};
@@ -3676,7 +3696,8 @@ function strokePts(s,geo,wOutPx){const pts=S.strokes,a=S.offs[s],b=S.offs[s+1];c
     return[p[0]+nx*shift,p[1]+ny*shift];});}
 let ptsCache=null;
 function allStrokePts(geo,wIn,bIn){const useB=$('borderOn').checked&&S.hasBorder;const mode=$('borderPos').value;
-  const ck=[S.strokes,geo.pw,geo.ph,mode,wIn,bIn,useB].join('|');if(ptsCache&&ptsCache.k===ck&&ptsCache.s===S.strokes)return ptsCache.v;
+  // (the lines themselves are matched by identity below: putting them in the key turned every point into text, every call)
+  const ck=[geo.pw,geo.ph,mode,wIn,bIn,useB].join('|');if(ptsCache&&ptsCache.k===ck&&ptsCache.s===S.strokes)return ptsCache.v;
   const n=S.offs.length-1,orig=[],out=[];
   for(let s=0;s<n;s++){const a=S.offs[s],b=S.offs[s+1];const P=[];for(let j=a;j<b;j++)P.push(geo.map(S.strokes[2*j],S.strokes[2*j+1]));orig.push(P);
     out.push(S.offs[s+1]-S.offs[s]<1?P:strokePts(s,geo,(S.borderFlags[s]&&useB?bIn:wIn)*OUT_PPI));}
@@ -3700,9 +3721,12 @@ function allStrokePts(geo,wIn,bIn){const useB=$('borderOn').checked&&S.hasBorder
         const px=ax?out[sx][0]:out[sx][out[sx].length-1],py=ay?out[sy][0]:out[sy][out[sy].length-1];
         const q=lineHit(px,dx,py,dy);if(!q||Math.hypot(q[0]-px[0],q[1]-px[1])>2*near)continue;setEnd(out[sx],ax,q);setEnd(out[sy],ay,q.slice());}}
     // lines that end on the border end exactly on the moved border
+    // (each border line's box, so the ends far from it are passed over at once)
+    const bbB=new Map();for(const b of B){let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(const p of orig[b]){if(p[0]<x0)x0=p[0];if(p[0]>x1)x1=p[0];if(p[1]<y0)y0=p[1];if(p[1]>y1)y1=p[1];}bbB.set(b,[x0-near,y0-near,x1+near,y1+near]);}
     for(let s=0;s<n;s++){if(S.borderFlags[s]||out[s].length<2)continue;
       for(const at0 of[true,false]){const o=orig[s],e=at0?o[0]:o[o.length-1];
-        let hit=null;for(const b of B){const ob=orig[b];let dmin=Infinity;for(const p of ob)dmin=Math.min(dmin,Math.hypot(p[0]-e[0],p[1]-e[1]));if(dmin>near)continue;
+        let hit=null;for(const b of B){const bx=bbB.get(b);if(e[0]<bx[0]||e[0]>bx[2]||e[1]<bx[1]||e[1]>bx[3])continue;
+          const ob=orig[b];let close=false;for(const p of ob)if(Math.hypot(p[0]-e[0],p[1]-e[1])<=near){close=true;break;}if(!close)continue;
           const d=endDir(out[s],at0);if(!d)continue;const p0=at0?out[s][0]:out[s][out[s].length-1];const h=polyHit(p0,d,out[b]);if(h)hit=h;}
         if(hit)setEnd(out[s],at0,hit);}}}
   ptsCache={k:ck,s:S.strokes,v:out};return out;}
@@ -4072,14 +4096,17 @@ function stretchTools(P,offs,lw){const n=offs.length-1,orig=Float32Array.from(P)
   // (where along a line the others meet it does not depend on the spot picked, so it is found once per line)
   const bpCache=new Map();
   const breaks=s0=>{let B=bpCache.get(s0);if(B)return B;B=[];const a=offs[s0],b=offs[s0+1]-1;const g=1.5*lw,X0=bb[4*s0]-g,Y0=bb[4*s0+1]-g,X1=bb[4*s0+2]+g,Y1=bb[4*s0+3]+g;
+    // (the picked line's points in cells, so only those near a spot are measured, in the same order as before)
+    const gc=1.2*lw,cells=new Map();for(let j=a;j<=b;j++){const k=Math.floor(orig[2*j]/gc)+','+Math.floor(orig[2*j+1]/gc);let L=cells.get(k);if(!L)cells.set(k,L=[]);L.push(j);}
+    const near=(x,y)=>{const cx=Math.floor(x/gc),cy=Math.floor(y/gc),o=[];for(let u=cx-1;u<=cx+1;u++)for(let w=cy-1;w<=cy+1;w++){const L=cells.get(u+','+w);if(L)for(const j of L)o.push(j);}return o.length>1?o.sort((p,q)=>p-q):o;};
     for(let s=0;s<n;s++){if(s===s0)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;if(bb[4*s]>X1||bb[4*s+2]<X0||bb[4*s+1]>Y1||bb[4*s+3]<Y0)continue;
-      for(const e of[sa,sb-1]){let bj=-1,bd=1.2*lw;for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(d<bd){bd=d;bj=j;}}
+      for(const e of[sa,sb-1]){let bj=-1,bd=1.2*lw;for(const j of near(orig[2*e],orig[2*e+1])){const d=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(d<bd){bd=d;bj=j;}}
         if(bj<0)continue;const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
         if(fromA<1.5*lw||fromB<1.5*lw)continue;B.push(bj);}
       // (and where another line runs right through it, a crossing)
       if(sb-sa>4){let bj=-1,bd=0.8*lw;for(let e=sa+2;e<sb-2;e+=2){const ex=orig[2*e],ey=orig[2*e+1];if(ex<X0||ex>X1||ey<Y0||ey>Y1)continue;
           if(Math.hypot(ex-orig[2*sa],ey-orig[2*sa+1])<1.5*lw||Math.hypot(ex-orig[2*sb-2],ey-orig[2*sb-1])<1.5*lw)continue;
-          for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-ex,orig[2*j+1]-ey);if(d<bd){bd=d;bj=j;}}}
+          for(const j of near(ex,ey)){const d=Math.hypot(orig[2*j]-ex,orig[2*j+1]-ey);if(d<bd){bd=d;bj=j;}}}
         if(bj>=0){const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
           if(fromA>=1.5*lw&&fromB>=1.5*lw)B.push(bj);}}}
     bpCache.set(s0,B);return B;};

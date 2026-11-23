@@ -97,12 +97,11 @@ function process(p){
   // (and not for Change width only: lines are kept as drawn, gaps and all)
   const m0=p.keepGaps&&!p.asDrawn&&!colorIn?m.slice():null;
   // (nor for joined pieces: a clean drawing, and its narrow pieces are glass)
-  if(!colorIn&&!p.asDrawn&&!p.joinPieces){const r=Math.max(1.5,0.33*med),r2=r*r;const d1=edt(m);const dil=new Uint8Array(W*H);
-    for(let i=0;i<W*H;i++)dil[i]=d1[i]<=r2?1:0;
+  if(!colorIn&&!p.asDrawn&&!p.joinPieces){const r=Math.max(1.5,0.33*med),r2=r*r;const dil=diskDil(m,r);
     const notd=new Uint8Array(W*H);for(let i=0;i<W*H;i++)notd[i]=dil[i]?0:1;
     // pixels outside the image count as paper so the outer border is not pulled inward
-    const d2=edt(notd);const fill=new Uint8Array(W*H);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
-      const edge=Math.min(x+1,y+1,W-x,H-y);if(!m[i]&&d2[i]>r2&&edge*edge>r2)fill[i]=1;}
+    const near2=diskDil(notd,r);const fill=new Uint8Array(W*H);for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;
+      const edge=Math.min(x+1,y+1,W-x,H-y);if(!m[i]&&!near2[i]&&edge*edge>r2)fill[i]=1;}
     if(p.keepGaps)closeGapsKept(m,fill,r);else for(let i=0;i<W*H;i++)if(fill[i])m[i]=1;}
   // (thin a mask down to its one-pixel centre lines)
   const skel=M=>{
@@ -157,7 +156,10 @@ function process(p){
   // median along the line so junction blobs don't count; used to line a border up with an edge
   for(const S of strokes){const raw=S.map(q=>{let mx=0;const yy=Math.round(q[0]),xx=Math.round(q[1]);
       for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){const y=yy+dy,x=xx+dx;if(y>=0&&x>=0&&y<H&&x<W)mx=Math.max(mx,dmap[y*W+x]);}return Math.max(0.5,mx-0.5);});
-    const hw=raw.map((_,i)=>{const a=raw.slice(Math.max(0,i-75),Math.min(raw.length,i+76)).sort((p,q)=>p-q);return a[Math.floor(a.length*0.4)];});
+    // (the window kept sorted as it slides, rather than sorted afresh at every point: the same values, much quicker)
+    const hw=new Array(raw.length);{const win=[],n=raw.length;const pos=v=>{let lo=0,hi=win.length;while(lo<hi){const md=(lo+hi)>>1;if(win[md]<v)lo=md+1;else hi=md;}return lo;};
+      for(let j=0;j<Math.min(n,76);j++)win.splice(pos(raw[j]),0,raw[j]);
+      for(let i=0;i<n;i++){if(i>0){if(i+75<n)win.splice(pos(raw[i+75]),0,raw[i+75]);if(i-76>=0)win.splice(pos(raw[i-76]),1);}hw[i]=win[Math.floor(win.length*0.4)];}}
     S.forEach((q,i)=>{flat.push(q[1]+0.5,q[0]+0.5);hwf.push(hw[i]);});offs.push(flat.length/2);}
   const junctions=(built.junctions||[]).map(J=>({x:J.p[1]+0.5,y:J.p[0]+0.5,wx:J.q[1],wy:J.q[0],arms:J.arms,pairs:J.pairs,fixed:J.fixed}));
   colorIn=colorWas;

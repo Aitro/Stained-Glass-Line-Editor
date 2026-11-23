@@ -28,9 +28,26 @@ function edt1d(f,n,d,v,z){let k=0;v[0]=0;z[0]=-INF;z[1]=INF;
   k=0;for(let q=0;q<n;q++){while(z[k+1]<q)k++;const dq=q-v[k];d[q]=dq*dq+f[v[k]];}}
 function edt(src){const N=Math.max(W,H);const f=new Float64Array(N),d=new Float64Array(N),v=new Int32Array(N),z=new Float64Array(N+1);
   const out=new Float32Array(W*H);
-  for(let x=0;x<W;x++){for(let y=0;y<H;y++)f[y]=src[y*W+x]?0:INF;edt1d(f,H,d,v,z);for(let y=0;y<H;y++)out[y*W+x]=d[y];}
-  for(let y=0;y<H;y++){const o=y*W;for(let x=0;x<W;x++)f[x]=out[o+x];edt1d(f,W,d,v,z);for(let x=0;x<W;x++)out[o+x]=d[x];}
+  // (down each column, the distance to the nearest set pixel above or below it: two sweeps over whole rows, top to
+  // bottom then back, so memory is read in order; for a yes/no picture this is the same as the column pass of the
+  // general method, and much quicker)
+  const g=new Int32Array(W*H),BIG=1<<29;
+  for(let x=0;x<W;x++)g[x]=src[x]?0:BIG;
+  for(let y=1;y<H;y++){const o=y*W,p=o-W;for(let x=0;x<W;x++)g[o+x]=src[o+x]?0:(g[p+x]>=BIG?BIG:g[p+x]+1);}
+  for(let y=H-2;y>=0;y--){const o=y*W,n=o+W;for(let x=0;x<W;x++){const b=g[n+x]+1;if(b<g[o+x])g[o+x]=b;}}
+  for(let y=0;y<H;y++){const o=y*W;let any=false;for(let x=0;x<W;x++){const t=g[o+x];if(t>=BIG)f[x]=INF;else{f[x]=t*t;any=true;}}
+    if(!any){for(let x=0;x<W;x++)out[o+x]=INF;continue;}
+    edt1d(f,W,d,v,z);for(let x=0;x<W;x++)out[o+x]=d[x];}
   return out;}
+
+// (every pixel within r of a set pixel: the same as testing the distance map against r, but done by laying a disc's
+// rows along each run of set pixels, which is many times quicker for the small radii used in cleaning)
+function diskDil(a,r){const N=W*H,o=new Uint8Array(N),R=Math.floor(r),r2=r*r,hw=[];for(let dy=-R;dy<=R;dy++)hw.push(Math.floor(Math.sqrt(Math.max(0,r2-dy*dy))+1e-9));
+  for(let y=0;y<H;y++){const row=y*W;let x=0;
+    while(x<W){if(!a[row+x]){x++;continue;}let x1=x;while(x1+1<W&&a[row+x1+1])x1++;
+      for(let k=0;k<hw.length;k++){const yy=y+k-R;if(yy<0||yy>=H)continue;const w=hw[k],lo=Math.max(0,x-w),hi=Math.min(W-1,x1+w),b=yy*W;o.fill(1,b+lo,b+hi+1);}
+      x=x1+1;}}
+  return o;}
 
 function thin(img,PW,PH){
   const off=[-PW,-PW+1,1,PW+1,PW,PW-1,-1,-PW-1];

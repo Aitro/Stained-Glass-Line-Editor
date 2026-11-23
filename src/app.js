@@ -148,7 +148,8 @@ function strokePts(s,geo,wOutPx){const pts=S.strokes,a=S.offs[s],b=S.offs[s+1];c
     return[p[0]+nx*shift,p[1]+ny*shift];});}
 let ptsCache=null;
 function allStrokePts(geo,wIn,bIn){const useB=$('borderOn').checked&&S.hasBorder;const mode=$('borderPos').value;
-  const ck=[S.strokes,geo.pw,geo.ph,mode,wIn,bIn,useB].join('|');if(ptsCache&&ptsCache.k===ck&&ptsCache.s===S.strokes)return ptsCache.v;
+  // (the lines themselves are matched by identity below: putting them in the key turned every point into text, every call)
+  const ck=[geo.pw,geo.ph,mode,wIn,bIn,useB].join('|');if(ptsCache&&ptsCache.k===ck&&ptsCache.s===S.strokes)return ptsCache.v;
   const n=S.offs.length-1,orig=[],out=[];
   for(let s=0;s<n;s++){const a=S.offs[s],b=S.offs[s+1];const P=[];for(let j=a;j<b;j++)P.push(geo.map(S.strokes[2*j],S.strokes[2*j+1]));orig.push(P);
     out.push(S.offs[s+1]-S.offs[s]<1?P:strokePts(s,geo,(S.borderFlags[s]&&useB?bIn:wIn)*OUT_PPI));}
@@ -172,9 +173,12 @@ function allStrokePts(geo,wIn,bIn){const useB=$('borderOn').checked&&S.hasBorder
         const px=ax?out[sx][0]:out[sx][out[sx].length-1],py=ay?out[sy][0]:out[sy][out[sy].length-1];
         const q=lineHit(px,dx,py,dy);if(!q||Math.hypot(q[0]-px[0],q[1]-px[1])>2*near)continue;setEnd(out[sx],ax,q);setEnd(out[sy],ay,q.slice());}}
     // lines that end on the border end exactly on the moved border
+    // (each border line's box, so the ends far from it are passed over at once)
+    const bbB=new Map();for(const b of B){let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(const p of orig[b]){if(p[0]<x0)x0=p[0];if(p[0]>x1)x1=p[0];if(p[1]<y0)y0=p[1];if(p[1]>y1)y1=p[1];}bbB.set(b,[x0-near,y0-near,x1+near,y1+near]);}
     for(let s=0;s<n;s++){if(S.borderFlags[s]||out[s].length<2)continue;
       for(const at0 of[true,false]){const o=orig[s],e=at0?o[0]:o[o.length-1];
-        let hit=null;for(const b of B){const ob=orig[b];let dmin=Infinity;for(const p of ob)dmin=Math.min(dmin,Math.hypot(p[0]-e[0],p[1]-e[1]));if(dmin>near)continue;
+        let hit=null;for(const b of B){const bx=bbB.get(b);if(e[0]<bx[0]||e[0]>bx[2]||e[1]<bx[1]||e[1]>bx[3])continue;
+          const ob=orig[b];let close=false;for(const p of ob)if(Math.hypot(p[0]-e[0],p[1]-e[1])<=near){close=true;break;}if(!close)continue;
           const d=endDir(out[s],at0);if(!d)continue;const p0=at0?out[s][0]:out[s][out[s].length-1];const h=polyHit(p0,d,out[b]);if(h)hit=h;}
         if(hit)setEnd(out[s],at0,hit);}}}
   ptsCache={k:ck,s:S.strokes,v:out};return out;}
@@ -544,14 +548,17 @@ function stretchTools(P,offs,lw){const n=offs.length-1,orig=Float32Array.from(P)
   // (where along a line the others meet it does not depend on the spot picked, so it is found once per line)
   const bpCache=new Map();
   const breaks=s0=>{let B=bpCache.get(s0);if(B)return B;B=[];const a=offs[s0],b=offs[s0+1]-1;const g=1.5*lw,X0=bb[4*s0]-g,Y0=bb[4*s0+1]-g,X1=bb[4*s0+2]+g,Y1=bb[4*s0+3]+g;
+    // (the picked line's points in cells, so only those near a spot are measured, in the same order as before)
+    const gc=1.2*lw,cells=new Map();for(let j=a;j<=b;j++){const k=Math.floor(orig[2*j]/gc)+','+Math.floor(orig[2*j+1]/gc);let L=cells.get(k);if(!L)cells.set(k,L=[]);L.push(j);}
+    const near=(x,y)=>{const cx=Math.floor(x/gc),cy=Math.floor(y/gc),o=[];for(let u=cx-1;u<=cx+1;u++)for(let w=cy-1;w<=cy+1;w++){const L=cells.get(u+','+w);if(L)for(const j of L)o.push(j);}return o.length>1?o.sort((p,q)=>p-q):o;};
     for(let s=0;s<n;s++){if(s===s0)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;if(bb[4*s]>X1||bb[4*s+2]<X0||bb[4*s+1]>Y1||bb[4*s+3]<Y0)continue;
-      for(const e of[sa,sb-1]){let bj=-1,bd=1.2*lw;for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(d<bd){bd=d;bj=j;}}
+      for(const e of[sa,sb-1]){let bj=-1,bd=1.2*lw;for(const j of near(orig[2*e],orig[2*e+1])){const d=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(d<bd){bd=d;bj=j;}}
         if(bj<0)continue;const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
         if(fromA<1.5*lw||fromB<1.5*lw)continue;B.push(bj);}
       // (and where another line runs right through it, a crossing)
       if(sb-sa>4){let bj=-1,bd=0.8*lw;for(let e=sa+2;e<sb-2;e+=2){const ex=orig[2*e],ey=orig[2*e+1];if(ex<X0||ex>X1||ey<Y0||ey>Y1)continue;
           if(Math.hypot(ex-orig[2*sa],ey-orig[2*sa+1])<1.5*lw||Math.hypot(ex-orig[2*sb-2],ey-orig[2*sb-1])<1.5*lw)continue;
-          for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-ex,orig[2*j+1]-ey);if(d<bd){bd=d;bj=j;}}}
+          for(const j of near(ex,ey)){const d=Math.hypot(orig[2*j]-ex,orig[2*j+1]-ey);if(d<bd){bd=d;bj=j;}}}
         if(bj>=0){const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
           if(fromA>=1.5*lw&&fromB>=1.5*lw)B.push(bj);}}}
     bpCache.set(s0,B);return B;};

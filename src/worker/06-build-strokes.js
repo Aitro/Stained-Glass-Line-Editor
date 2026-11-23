@@ -468,7 +468,8 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     if(A.length>=2){const m=[(A[0][0]+A[1][0])/2,(A[0][1]+A[1][1])/2];let pd=[-(A[1][1]-A[0][1]),A[1][0]-A[0][0]];const l=norm2(pd)||1;pd=[pd[0]/l,pd[1]/l];
       toC=t=>[m[0]+t[0]*pd[0],m[1]+t[0]*pd[1]];par=[(base.c[0]-m[0])*pd[0]+(base.c[1]-m[1])*pd[1]];}
     else{toC=t=>[t[0],t[1]];par=base.c.slice();}
-    const cost=t=>{const c=toC(t),r=Math.hypot(A[0][0]-c[0],A[0][1]-c[1]);let s=0;for(const p of P){const e=Math.hypot(p[0]-c[0],p[1]-c[1])-r;s+=e*e;}return s;};
+    const PX=Float64Array.from(P,p=>p[0]),PY=Float64Array.from(P,p=>p[1]),np=P.length;   // (flat copies: the same sums, read quicker)
+    const cost=t=>{const c=toC(t),c0=c[0],c1=c[1],r=Math.hypot(A[0][0]-c0,A[0][1]-c1);let s=0;for(let i=0;i<np;i++){const e=Math.hypot(PX[i]-c0,PY[i]-c1)-r;s+=e*e;}return s;};
     let step=Math.max(1,base.r*0.05),cp=cost(par);   // (the cost where we stand, kept rather than worked out again)
     for(let it=0;it<200&&step>1e-3;it++){let improved=false;
       for(let k=0;k<par.length;k++)for(const sg of[1,-1]){const t=par.slice();t[k]+=sg*step;const ct=cost(t);if(ct<cp){par=t;cp=ct;improved=true;}}
