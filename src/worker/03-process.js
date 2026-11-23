@@ -14,7 +14,11 @@ function process(p){
   // an exact copy further in. Right at the edge both pictures are kept, so crossing lines stay joined.
   const areas=Array.isArray(p.areas)?p.areas.filter(a=>a&&[a.x0,a.y0,a.x1,a.y1].every(isFinite)):[];
   // (the centre lines are always found, so the page can show where a new box will copy from)
-  let axes={lr:symAxis(m,'lr'),tb:symAxis(m,'tb'),areas:[]},axesOut=axes;
+  // (they hardly move when a fix changes a line or two, so a run with no mirrored areas or halves reuses the last ones
+  // found for this picture)
+  const wantFresh=areas.length||(Array.isArray(p.halves)&&p.halves.length)||p.inkAxes||!axisMemo||axisMemo.g!==gray||axisMemo.w!==W||axisMemo.h!==H;
+  let axes=wantFresh?{lr:symAxis(m,'lr'),tb:symAxis(m,'tb'),areas:[]}:{lr:axisMemo.lr,tb:axisMemo.tb,areas:[]},axesOut=axes;
+  if(wantFresh)axisMemo={g:gray,w:W,h:H,lr:axes.lr,tb:axes.tb};
   // (the centre line of the drawing itself, where the lines on both sides best fall on each other: for making
   // the whole pattern symmetric)
   // the whole pattern made symmetric (picked by hand): one half replaced by the other, flipped across the centre
@@ -216,6 +220,7 @@ function inkAxis(mask,flip,G){if(!G)return null;const f=Math.max(1,Math.round(Ma
   const out=mk(c,an);out.match=b;return out;}
 // (kept for the same picture: the centre lines are looked for afresh only when the lines picture changes)
 const symAxisCache=new Map();
+let axisMemo=null;
 function symAxis(mask,flip){let hsh=2166136261;for(let i=0;i<mask.length;i++){hsh^=mask[i];hsh=Math.imul(hsh,16777619);}
   const ck=flip+':'+W+'x'+H+':'+(hsh>>>0);if(symAxisCache.has(ck))return symAxisCache.get(ck);if(symAxisCache.size>8)symAxisCache.clear();
   const r=symAxis0(mask,flip);symAxisCache.set(ck,r);return r;}

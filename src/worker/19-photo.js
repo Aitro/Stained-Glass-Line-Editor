@@ -44,6 +44,19 @@ function photoLines(T,C,guides){
   {const sz=comps(m,true);let big=1;for(const v of sz)if(v>big)big=v;for(let i=0;i<N;i++)if(m[i]&&sz[lab[i]]<0.002*big)m[i]=0;}
   lw=Math.max(4,inkWidth(m));photoBase={mx:mxBuf,key:bkey,m:m.slice(),lw};}
 
+  // (a fix that only adds or takes back hand guides redoes the cleaning just round them: the rest is as last time)
+  const local=photoLocal(m,guides,lw,bkey);if(local){m=local;}else m=cleanPhoto(m,guides,lw,null);
+  photoLast={mx:mxBuf,bkey,gkey,m:m.slice(),lw,guides:Array.isArray(guides)?guides:[]};
+  return{m,lw};}
+// (the cleaning of the lead found: holes filled, lines thinned to their middles, loose ends taken back, scraps dropped,
+// redrawn; with the hand guides followed. 'edge', when given, marks pixels at the edge of a part of the picture being
+// cleaned on its own: lines running off it are not loose ends and pieces cut by it are not holes)
+function cleanPhoto(m,guides,lw,edge){const N=W*H,lab=new Int32Array(N),st=new Int32Array(N);
+  const notM=a=>{const o=new Uint8Array(N);for(let i=0;i<N;i++)o[i]=a[i]?0:1;return o;};
+  const dil=(a,r)=>diskDil(a,r);
+  const comps=(a,eight)=>{lab.fill(0);const sz=[0];let n=0;for(let s=0;s<N;s++){if(!a[s]||lab[s])continue;n++;let sp=0,c=0;st[sp++]=s;lab[s]=n;
+      while(sp){const i=st[--sp];c++;const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;if(!eight&&dx&&dy)continue;const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(a[k]&&!lab[k]){lab[k]=n;st[sp++]=k;}}}
+      sz.push(c);}return sz;};
   // (holes: a pinhole, or a little dark ring of glass texture, is filled; a real small piece, an eye or a nostril, is
   // light glass and stays however small)
   const fillHoles=(lim,darkLim)=>{const inv=notM(m),sz=comps(inv,false),sum=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i])sum[lab[i]]+=mxBuf[i];
@@ -67,6 +80,7 @@ function photoLines(T,C,guides){
   // patch has been cleaned down to lines: drawn into it before, it would be lost in it)
   const late=[];
   let gm=null;if(Array.isArray(guides)&&guides.length){gm=new Uint8Array(N);for(const G of guides){if(!followGuide(m,G,lw))late.push(G);for(let i=2;i+1<G.length;i+=2)drawSeg(gm,G[i-2],G[i-1],G[i],G[i+1],0.65*lw);}}
+  if(edge){if(!gm)gm=new Uint8Array(N);for(let i=0;i<N;i++)if(edge[i])gm[i]=1;}
   let sk=null;
   let lightKeep=null;
   for(let round=0;round<3;round++){fillHoles(round?2.5*lw*lw:1.3*lw*lw,8*lw*lw);
@@ -94,8 +108,29 @@ function photoLines(T,C,guides){
     m=dil(sk,lw/2);
     if(lightKeep)for(let i=0;i<N;i++)if(lightKeep[i])m[i]=0;}
   for(const G of late)for(let i=2;i+1<G.length;i+=2)drawSeg(m,G[i-2],G[i-1],G[i],G[i+1],Math.max(2,0.35*lw));
-  photoLast={mx:mxBuf,bkey,gkey,m:m.slice(),lw};
-  return{m,lw};}
+  return m;}
+// (only the guides changed since last time, and the part of the picture round them small: that part is cleaned again
+// on its own, from the lead as first found, with every guide that reaches into it, and set into last time's result.
+// A margin all round is cleaned too but not set back, so the edge of the part leaves no mark)
+function photoLocal(m,guides,lw,bkey){const P=photoLast;if(!P||P.mx!==mxBuf||P.bkey!==bkey||!P.guides)return null;
+  const now=Array.isArray(guides)?guides:[],kn=new Set(now.map(g=>JSON.stringify(g))),kp=new Set(P.guides.map(g=>JSON.stringify(g)));
+  const changed=now.filter(g=>!kp.has(JSON.stringify(g))).concat(P.guides.filter(g=>!kn.has(JSON.stringify(g))));if(!changed.length)return null;
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(const G of changed)for(let i=0;i+1<G.length;i+=2){x0=Math.min(x0,G[i]);x1=Math.max(x1,G[i]);y0=Math.min(y0,G[i+1]);y1=Math.max(y1,G[i+1]);}
+  if(!isFinite(x0))return null;const M=Math.ceil(14*lw),pad=Math.ceil(5*lw);
+  const cx0=Math.max(0,Math.floor(x0-M)),cy0=Math.max(0,Math.floor(y0-M)),cx1=Math.min(W-1,Math.ceil(x1+M)),cy1=Math.min(H-1,Math.ceil(y1+M));
+  const cw=cx1-cx0+1,ch=cy1-cy0+1;if(cw*ch>0.35*W*H||cw<4*pad||ch<4*pad)return null;
+  const FW=W,FH=H,fmx=mxBuf,fch=chBuf;
+  const sub=a=>{const o=new Uint8Array(cw*ch);for(let y=0;y<ch;y++)o.set(a.subarray((cy0+y)*FW+cx0,(cy0+y)*FW+cx0+cw),y*cw);return o;};
+  const mC=sub(m),mxC=sub(fmx),chC=sub(fch);
+  const gC=[];for(const G of now){let hit=false;for(let i=0;i+1<G.length;i+=2)if(G[i]>=cx0-lw&&G[i]<=cx1+lw&&G[i+1]>=cy0-lw&&G[i+1]<=cy1+lw){hit=true;break;}
+    if(hit){const g=new Array(G.length);for(let i=0;i+1<G.length;i+=2){g[i]=G[i]-cx0;g[i+1]=G[i+1]-cy0;}gC.push(g);}}
+  // (the part's own edges, where it is cut from the rest: not the picture's edges)
+  const edge=new Uint8Array(cw*ch);for(let y=0;y<ch;y++)for(let x=0;x<cw;x++){if((x<2&&cx0>0)||(x>=cw-2&&cx1<FW-1)||(y<2&&cy0>0)||(y>=ch-2&&cy1<FH-1))edge[y*cw+x]=1;}
+  let r;W=cw;H=ch;mxBuf=mxC;chBuf=chC;try{r=cleanPhoto(mC,gC,lw,edge);}finally{W=FW;H=FH;mxBuf=fmx;chBuf=fch;}
+  const out=P.m.slice(),ix0=cx0>0?pad:0,iy0=cy0>0?pad:0,ix1=cx1<FW-1?cw-pad:cw,iy1=cy1<FH-1?ch-pad:ch;
+  for(let y=iy0;y<iy1;y++)out.set(r.subarray(y*cw+ix0,y*cw+ix1),(cy0+y)*FW+cx0+ix0);
+  return out;}
+
 // (a sharp tip, like a tree's point meeting the sky: in the photo the lead of its two sides runs together just below
 // the tip, so the middle shows the two sides joining a little way down with one short line on up to the tip. The two
 // sides are carried on, each straight, to the tip itself)

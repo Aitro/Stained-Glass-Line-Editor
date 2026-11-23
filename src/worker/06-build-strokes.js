@@ -1,3 +1,11 @@
+// (kept circle fits, by their points and anchors; see fitCircleThrough)
+const fitMemo=new Map();
+function fitKey(P,A){let h=2166136261>>>0;const f=new Float64Array(1),u=new Uint32Array(f.buffer);
+  const add=v=>{f[0]=v;h=Math.imul(h^u[0],16777619);h=Math.imul(h^u[1],16777619);};
+  for(const p of P){add(p[0]);add(p[1]);}add(-1);for(const p of A){add(p[0]);add(p[1]);}return (h>>>0)+':'+P.length+':'+A.length;}
+function sameFitInput(P0,A0,P,A){if(P0.length!==P.length||A0.length!==A.length)return false;for(let i=0;i<P.length;i++)if(P0[i][0]!==P[i][0]||P0[i][1]!==P[i][1])return false;
+  for(let i=0;i<A.length;i++)if(A0[i][0]!==A[i][0]||A0[i][1]!==A[i][1])return false;return true;}
+function cloneFit(r){const o=Object.assign({},r);for(const k of['c','d','n'])if(Array.isArray(r[k]))o[k]=r[k].slice();return o;}
 // The heart of the program: turn the skeleton into lines and junctions, decide which lines carry on
 // through each junction and which land on another line, fit exact straight lines and circles, and
 // draw every line as a smooth stroke. Sections inside are marked with comments.
@@ -462,7 +470,12 @@ function buildStrokes(sk,u,med,dmap,strength,say,opt){opt=opt||{exact:true,squar
     const dn=norm2(d);if(dn<1e-9)return fitLine(P);d=[d[0]/dn,d[1]/dn];const nn=[-d[1],d[0]],c=A[0];
     let dev=0;for(const p of P)dev=Math.max(dev,Math.abs((p[0]-c[0])*nn[0]+(p[1]-c[1])*nn[1]));
     return{type:'line',c:c.slice(),d,n:nn,dev,anch:A.length};};
-  const fitCircleThrough=(P,A)=>{const base=fitCircle(P);if(!base||!A.length)return base;
+  // (a circle fit depends only on its points and anchors, and after a fix nearly every piece of the pattern is the
+  // same as last time: the answer is kept and given back, so only the changed pieces are worked out again)
+  const fitCircleThrough=(P,A)=>{const key=fitKey(P,A),hit=fitMemo.get(key);
+    if(hit&&sameFitInput(hit.P,hit.A,P,A))return hit.r?cloneFit(hit.r):hit.r;
+    const r=fitCircleThrough0(P,A);if(fitMemo.size>40000)fitMemo.clear();fitMemo.set(key,{P:P.map(p=>[p[0],p[1]]),A:A.map(p=>[p[0],p[1]]),r:r?cloneFit(r):r});return r;};
+  const fitCircleThrough0=(P,A)=>{const base=fitCircle(P);if(!base||!A.length)return base;
     // centre parameterised so the circle passes through the anchors exactly
     let par,toC;
     if(A.length>=2){const m=[(A[0][0]+A[1][0])/2,(A[0][1]+A[1][1])/2];let pd=[-(A[1][1]-A[0][1]),A[1][0]-A[0][0]];const l=norm2(pd)||1;pd=[pd[0]/l,pd[1]/l];
