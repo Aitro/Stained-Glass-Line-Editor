@@ -3399,6 +3399,8 @@ function photoLines(T,C,guides){
   // closes rings that the first pass left)
   // (guides marked by hand: along each, the lead in the photo is found and kept, even where it is lighter or broken;
   // where none shows, the guide itself is drawn)
+  // (guides marked by hand: along each, the lead in the photo is found and kept, even where it is lighter or broken;
+  // where none shows, the guide itself is drawn)
   if(Array.isArray(guides))for(const G of guides)followGuide(m,G,lw);
   let sk=null;
   for(let round=0;round<3;round++){fillHoles(round?2.5*lw*lw:1.3*lw*lw,8*lw*lw);sk=m.slice();thin(sk,W,H);
@@ -3476,14 +3478,18 @@ function followGuide(m,G,lw){if(!G||G.length<4)return;const N=W*H,R=1.3*lw;
   if(!band.length)return;const vals=band.map(b=>mxBuf[b[0]]).sort((a,b)=>a-b);const lo=vals[Math.floor(0.05*vals.length)],hi=vals[Math.floor(0.6*vals.length)];
   const T=Math.min(90,lo+0.4*(hi-lo));const found=new Uint8Array(N);for(const[i]of band)if(mxBuf[i]<=T&&chBuf[i]<50)found[i]=1;
   // (how much of the guide's length has lead beside it)
+  // (lead is a thin line in the band; when most of the band reads as dark, it is dark glass round a small piece, and
+  // the mark itself is the better line)
+  let nf=0;for(const[i]of band)if(found[i])nf++;const clear=nf<0.5*band.length;
   const nb=Math.max(1,Math.ceil(total/lw)),hit=new Uint8Array(nb);for(const[i,t]of band)if(found[i])hit[Math.min(nb-1,Math.floor(t/lw))]=1;let c=0;for(const v of hit)c+=v;
-  if(c>=0.7*nb&&hi-lo>25){for(let i=0;i<N;i++)if(found[i])m[i]=1;
+  const use=clear&&c>=0.7*nb&&hi-lo>25;
+  if(use){for(let i=0;i<N;i++)if(found[i])m[i]=1;
     // (and its breaks closed along the guide)
     for(let k=0;k<nb;k++)if(!hit[k]){}
   }
   // (where the photo shows no lead along a stretch, the guide is drawn there)
   let acc=0;for(let i=2;i+1<G.length;i+=2){const ax=G[i-2],ay=G[i-1],bx=G[i],by=G[i+1],l=Math.hypot(bx-ax,by-ay);const n=Math.max(1,Math.ceil(l/(lw/2)));
-    for(let j=0;j<n;j++){const t=acc+l*(j+0.5)/n,k=Math.min(nb-1,Math.floor(t/lw));if(c>=0.7*nb&&hi-lo>25&&hit[k])continue;const px=ax+(bx-ax)*j/n,py=ay+(by-ay)*j/n,qx=ax+(bx-ax)*(j+1)/n,qy=ay+(by-ay)*(j+1)/n;drawSeg(m,px,py,qx,qy,lw/2);}acc+=l;}}
+    for(let j=0;j<n;j++){const t=acc+l*(j+0.5)/n,k=Math.min(nb-1,Math.floor(t/lw));if(use&&hit[k])continue;const px=ax+(bx-ax)*j/n,py=ay+(by-ay)*j/n,qx=ax+(bx-ax)*(j+1)/n,qy=ay+(by-ay)*(j+1)/n;drawSeg(m,px,py,qx,qy,lw/2);}acc+=l;}}
 </script>
 
 <script>
@@ -4668,6 +4674,8 @@ function readMarks(img){const c=document.createElement('canvas');c.width=img.nat
     if(r>150&&gg<90&&b<100&&r-gg>80){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;R.push(x,y);}
     else if(b>150&&r<90&&gg<140&&b-r>90)BLU[y*w+x]=1;
     else if(gg<60&&r>50&&r<200&&b>40&&b<235&&r-gg>40&&b-gg>40&&Math.abs(r-b)<90)PUR[y*w+x]=1;}
+  // (where a blue mark crosses a red line the two blend to a purple; that is no purple mark)
+  {const r=3;for(let y=0;y<h;y++)for(let x=0;x<w;x++){if(!PUR[y*w+x])continue;let nearB=false;for(let dy=-r;dy<=r&&!nearB;dy++)for(let dx=-r;dx<=r&&!nearB;dx++){const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<w&&Y<h&&BLU[Y*w+X])nearB=true;}if(nearB)PUR[y*w+x]=0;}}
   if(x1<0||x1-x0<20||y1-y0<20)return null;
   // (the marked picture lined up on the lines here: a screenshot may be cut off at a side, so the scale comes from
   // the side that is whole, then the picture is slid and scaled a little until its red lines lie best on ours)

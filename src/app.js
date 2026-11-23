@@ -1180,6 +1180,8 @@ function readMarks(img){const c=document.createElement('canvas');c.width=img.nat
     if(r>150&&gg<90&&b<100&&r-gg>80){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;R.push(x,y);}
     else if(b>150&&r<90&&gg<140&&b-r>90)BLU[y*w+x]=1;
     else if(gg<60&&r>50&&r<200&&b>40&&b<235&&r-gg>40&&b-gg>40&&Math.abs(r-b)<90)PUR[y*w+x]=1;}
+  // (where a blue mark crosses a red line the two blend to a purple; that is no purple mark)
+  {const r=3;for(let y=0;y<h;y++)for(let x=0;x<w;x++){if(!PUR[y*w+x])continue;let nearB=false;for(let dy=-r;dy<=r&&!nearB;dy++)for(let dx=-r;dx<=r&&!nearB;dx++){const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<w&&Y<h&&BLU[Y*w+X])nearB=true;}if(nearB)PUR[y*w+x]=0;}}
   if(x1<0||x1-x0<20||y1-y0<20)return null;
   // (the marked picture lined up on the lines here: a screenshot may be cut off at a side, so the scale comes from
   // the side that is whole, then the picture is slid and scaled a little until its red lines lie best on ours)
