@@ -7,7 +7,7 @@ function process(p){
   for(let i=0;i<W*H;i++)m[i]=p.invert?(gray[i]>=t?1:0):(gray[i]<t?1:0);
   // (a photo of a finished panel: the lead picked out from the glass; from here on it is a plain line drawing)
   const colorWas=colorIn;let photoInfo=null;
-  if(p.photo&&mxBuf&&chBuf){say('Finding the lead in the photo…');const r=photoLines(p.auto?24:Math.min(p.threshold,90),25);m.set(r.m);colorIn=false;photoInfo={lw:r.lw};}
+  if(p.photo&&mxBuf&&chBuf){say('Finding the lead in the photo…');const r=photoLines(p.auto?24:Math.min(p.threshold,90),25,p.guides);m.set(r.m);colorIn=false;photoInfo={lw:r.lw};}
   // mirrored areas (picked by hand): inside each box the picture is replaced by the matching spot on the other side
   // of the pattern's centre line (upright, or level for top-to-bottom; see symAxis), flipped. Where a line crosses the box's edge, the two sides may draw it a
   // little apart: near the edge the copy is shifted so each line meets its own line outside exactly, easing back to
@@ -65,6 +65,8 @@ function process(p){
   // lines drawn by hand, as wide as the picture's own lines
   const lines=Array.isArray(p.lines)?p.lines.filter(L=>L&&[L.ax,L.ay,L.bx,L.by].every(isFinite)):[];
   if(lines.length){const lw=inkWidth(m);for(const L of lines)drawSeg(m,L.ax,L.ay,L.bx,L.by,lw/2);}
+  // (guides marked by hand, on a plain drawing: drawn as they are)
+  if(!photoInfo&&Array.isArray(p.guides)&&p.guides.length){const lw=inkWidth(m);for(const G of p.guides)for(let i=2;i+1<G.length;i+=2)drawSeg(m,G[i-2],G[i-1],G[i],G[i+1],lw/2);}
   // numbers and labels written in the pieces: small separate bits of ink drawn much thinner than the lines
   if(p.dropText!==false){dropOutside(m);dropWords(m);dropText(m);}
   // (an oval border made rectangular, when asked)

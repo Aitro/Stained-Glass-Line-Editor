@@ -79,7 +79,7 @@ function prepare(){if(!S.src)return;
   worker.postMessage({type:'load',id:S.loadId,w:ww,h:wh,colored:S.colorFill,buf:gr.buffer,mx:mxa.buffer,ch:cha.buffer},[gr.buffer,mxa.buffer,cha.buffer]);
   updateLabels();}
 function params(){return{auto:$('threshAuto').checked,threshold:+$('thresh').value,invert:$('invert').checked,smooth:+$('smooth').value,exact:$('exactShapes').checked,dropText:$('dropText').checked,ovalToRect:$('ovalToRect').checked,photo:$('photoIn').checked,keepGaps:$('keepGaps').checked,joinPieces:$('joinPieces').checked,dropIslands:$('dropIslands').checked,square:$('squareUp').checked,fixes:fixesForWorker(),areas:areasForWorker(),halves:halvesForWorker(),inkAxes:!!S.wantInk||S.fixes.some(f=>f.mode==='half'),
-  lines:linesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
+  lines:linesForWorker(),guides:guidesForWorker(),asDrawn:S.mode==='drawn',newHalf:widthIn()*S.workPPI/2};}
 let timer=null;
 // A new picture is only shown at first. Level lines redraws it tidied (smooth curves, rebuilt joints, exact lines
 // and circles); Change width only keeps every line exactly as drawn and just changes its width. Fix lines works
@@ -301,7 +301,8 @@ function workToSrc(wx,wy){const cr=S.crop;return[(wx+0.5)/S.sx+cr.x-PAD,(wy+0.5)
 function areasForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='area').map(f=>{const c=[[f.x0,f.y0],[f.x1,f.y1]].map(([x,y])=>srcToWork(x,y));
   return{x0:Math.min(c[0][0],c[1][0]),y0:Math.min(c[0][1],c[1][1]),x1:Math.max(c[0][0],c[1][0]),y1:Math.max(c[0][1],c[1][1]),flip:f.flip||'lr',ox:(f.ox||0)*S.sx,oy:(f.oy||0)*S.sy};});}
 function halvesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='half').map(f=>({flip:f.flip,keep:f.keep,off:(f.off||0)*(f.flip==='tb'?S.sy:S.sx)}));}
-function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)&&f.mode!=='area'&&f.mode!=='half'&&f.mode!=='line').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
+function fixesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>!PAGE_FIX.has(f.mode)&&f.mode!=='area'&&f.mode!=='half'&&f.mode!=='line'&&f.mode!=='guide').map(f=>{const[x,y]=srcToWork(f.sx,f.sy);return{x,y,mode:f.mode,arms:f.arms,sharp:f.sharp};});}
+function guidesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='guide').map(f=>{const o=[];for(let i=0;i<f.pts.length;i+=2)o.push(...srcToWork(f.pts[i],f.pts[i+1]));return o;});}
 function linesForWorker(){if(!S.crop||!S.sx)return[];return S.fixes.filter(f=>f.mode==='line').map(f=>{const a=srcToWork(f.ax,f.ay),b=srcToWork(f.bx,f.by);return{ax:a[0],ay:a[1],bx:b[0],by:b[1]};});}
 function saveFixes(){try{if(S.fixKey)localStorage.setItem(S.fixKey,JSON.stringify(S.fixes));}catch(e){}updateFixBar();}
 function loadFixes(name,w,h){S.fixKey='lll-fixes:'+name+':'+w+'x'+h;S.fixes=[];S.fixSel=null;S.undo=[];
@@ -1151,4 +1152,90 @@ function sample(){const c=document.createElement('canvas');c.width=900;c.height=
 window.__leadLineLeveler=()=>({w:S.work&&S.work.w,h:S.work&&S.work.h,gray:S.lastGray,strokes:S.strokes,offs:S.offs,fill:S.fill,fcurve:S.fcurve,rot:S.rot||0,status:$('statusText').textContent});
 updateLabels();
 loadImage(sample(),'sample-pattern',true);
+// ---- marking up a check picture ----
+// The check picture is the Overlay view saved as a picture: the lines in red over the original. Marked up in any
+// paint program (purple over a line to take it out, blue where a line should be) and loaded back, each mark becomes
+// one of the ordinary fixes: purple takes out the stretches of line it covers (Remove), blue is drawn as a line
+// (Draw a line, in short straight pieces along the mark, its ends carried to the lines they reach) and the stretch it
+// replaces is taken out. All of it is one change, which Undo takes back.
+$('saveCheckPic').addEventListener('click',()=>{if(!S.strokes)return;makeOverlay(async()=>{const b=await (await fetch(S.overlayURL)).blob();const n=S.name;S.name=n+'-check';try{await save(b,'png');}finally{S.name=n;}});});
+$('loadMarks').addEventListener('click',()=>{if(!S.strokes){setStatus('Make the lines first, then load the marked picture',false);return;}$('marksFile').value='';$('marksFile').click();});
+$('marksFile').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const img=new Image();
+  img.onload=()=>{let r=null;try{r=readMarks(img);}catch(err){console.error(err);}URL.revokeObjectURL(img.src);
+    if(!r){setStatus('No red lines found in that picture: load a check picture saved from here',false);return;}
+    if(!r.fixes.length){setStatus('No purple or blue marks found in that picture',false);return;}
+    changeFixes(()=>{for(const x of r.fixes)S.fixes.push(x);});
+    setStatus('Applying your marks: '+r.np+' taken out, '+r.nb+' drawn',true);};
+  img.onerror=()=>setStatus('That file could not be opened as a picture',false);img.src=URL.createObjectURL(f);});
+function readMarks(img){const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;const g=c.getContext('2d');g.drawImage(img,0,0);
+  const w=c.width,h=c.height,d=g.getImageData(0,0,w,h).data;
+  let x0=w,y0=h,x1=-1,y1=-1;const R=[],PUR=new Uint8Array(w*h),BLU=new Uint8Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=4*(y*w+x),r=d[i],gg=d[i+1],b=d[i+2];
+    if(r>150&&gg<90&&b<100&&r-gg>80){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;R.push(x,y);}
+    else if(b>150&&r<90&&gg<140&&b-r>90)BLU[y*w+x]=1;
+    else if(r>60&&r<170&&b>80&&b<200&&gg<50&&Math.abs(r-b)<70)PUR[y*w+x]=1;}
+  if(x1<0||x1-x0<20||y1-y0<20)return null;
+  // (the marked picture lined up on the lines here: a screenshot may be cut off at a side, so the scale comes from
+  // the side that is whole, then the picture is slid and scaled a little until its red lines lie best on ours)
+  const pts=S.strokes,offs=S.offs,lwW=Math.max(2,widthIn()*S.workPPI);
+  let ax0=Infinity,ay0=Infinity,ax1=-Infinity,ay1=-Infinity;for(let j=0;j<pts.length;j+=2){ax0=Math.min(ax0,pts[j]);ax1=Math.max(ax1,pts[j]);ay0=Math.min(ay0,pts[j+1]);ay1=Math.max(ay1,pts[j+1]);}
+  ax0-=lwW/2;ay0-=lwW/2;ax1+=lwW/2;ay1+=lwW/2;
+  const q=400/(ax1-ax0),OW=Math.ceil((ax1-ax0)*q)+2,OH=Math.ceil((ay1-ay0)*q)+2;
+  const oc=document.createElement('canvas');oc.width=OW;oc.height=OH;const og=oc.getContext('2d');og.strokeStyle='#000';og.lineWidth=Math.max(2,lwW*q)+2;og.lineCap='round';og.lineJoin='round';
+  for(let s=0;s+1<offs.length;s++){og.beginPath();for(let i=offs[s];i<offs[s+1];i++){const X=(pts[2*i]-ax0)*q,Y=(pts[2*i+1]-ay0)*q;if(i===offs[s])og.moveTo(X,Y);else og.lineTo(X,Y);}og.stroke();}
+  const od=og.getImageData(0,0,OW,OH).data,O=new Uint8Array(OW*OH);for(let i=0;i<OW*OH;i++)O[i]=od[4*i+3]>60?1:0;
+  const s0=Math.max((x1-x0)/(ax1-ax0),(y1-y0)/(ay1-ay0)),stp=Math.max(1,Math.round(s0/q/1.5)),Rs=[];for(let i=0;i<R.length;i+=2*stp)Rs.push(R[i],R[i+1]);
+  const score=(k,ox,oy)=>{let n=0;for(let i=0;i<Rs.length;i+=2){const X=Math.round((Rs[i]-ox)*k),Y=Math.round((Rs[i+1]-oy)*k);if(X>=0&&Y>=0&&X<OW&&Y<OH&&O[Y*OW+X])n++;}return n;};
+  let best={n:-1};const k0=q/s0;
+  for(const[ax,ay]of[[0,0],[1,0],[0,1],[1,1]]){const ox0=ax?x1-(ax1-ax0)*s0:x0,oy0=ay?y1-(ay1-ay0)*s0:y0;
+    for(let ks=0.97;ks<=1.031;ks+=0.01){const k=k0*ks;for(let dy=-12;dy<=12;dy+=3)for(let dx=-12;dx<=12;dx+=3){const ox=ox0+dx/k,oy=oy0+dy/k,n=score(k,ox,oy);if(n>best.n)best={n,k,ox,oy};}}}
+  for(let ks=0.994;ks<=1.0061;ks+=0.002){const k=best.k*ks;for(let dy=-3;dy<=3;dy++)for(let dx=-3;dx<=3;dx++){const ox=best.ox+dx/k,oy=best.oy+dy/k,n=score(k,ox,oy);if(n>best.n)best={n,k,ox,oy};}}
+  const toW=(X,Y)=>[ax0+(X-best.ox)*best.k/q,ay0+(Y-best.oy)*best.k/q];   // marked picture -> our lines' own coordinates
+  const toSrc=(x,y)=>{const geo=pageGeom(),p=geo.map(x,y);return workToSrc(...pageToWorkInternal(p[0],p[1]));};
+  // (each mark: its pixels gathered into cells about half a lead wide, cells next to each other joined)
+  const cell=Math.max(2.5,0.5*lwW*q/best.k);
+  const groups=M=>{const cells=new Map();for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(M[y*w+x]){const key=Math.floor(x/cell)+','+Math.floor(y/cell);const v=cells.get(key);if(v){v[0]+=x;v[1]+=y;v[2]++;}else cells.set(key,[x,y,1]);}
+    const keys=[...cells.keys()],seen=new Set(),out=[];for(const k0 of keys){if(seen.has(k0))continue;const comp=[],st=[k0];seen.add(k0);
+      while(st.length){const k=st.pop();const[a,b]=k.split(',').map(Number);const v=cells.get(k);comp.push({k,a,b,p:toW(v[0]/v[2],v[1]/v[2])});
+        for(let da=-1;da<=1;da++)for(let db=-1;db<=1;db++){const kk=(a+da)+','+(b+db);if(cells.has(kk)&&!seen.has(kk)){seen.add(kk);st.push(kk);}}}
+      if(comp.length)out.push(comp);}return out;};
+  const K=stretchTools(Float32Array.from(pts),offs,lwW),n=offs.length-1;
+  const gone=new Uint8Array(pts.length/2);const nearPt=(x,y,lim,live)=>{let bs=-1,bi=-1,bd=lim;for(let s=0;s<n;s++)for(let i=offs[s];i<offs[s+1];i++){if(live&&gone[i])continue;const dd=Math.hypot(pts[2*i]-x,pts[2*i+1]-y);if(dd<bd){bd=dd;bs=s;bi=i;}}return bs<0?null:{s:bs,i:bi,d:bd};};
+  const fixes=[],removed=new Set();let np=0,nb=0;
+  const removeStretch=(s,i,at)=>{const[lo,hi]=K.piece(s,i);const key=s+':'+lo+':'+hi;if(removed.has(key))return false;removed.add(key);for(let t=lo+1;t<hi;t++)gone[t]=1;const m=at?i:Math.round((lo+hi)/2);const[sx,sy]=toSrc(pts[2*m],pts[2*m+1]);fixes.push({sx,sy,mode:'remove'});return true;};
+  // (purple: a stretch of line goes when most of it lies under the mark)
+  for(const comp of groups(PUR)){const cand=new Map();
+    for(const c of comp){const r=nearPt(c.p[0],c.p[1],1.2*lwW);if(!r)continue;const[lo,hi]=K.piece(r.s,r.i);cand.set(r.s+':'+lo+':'+hi,{s:r.s,i:r.i,lo,hi});}
+    const cov=[];for(const v of cand.values()){let L=0,under=0;for(let i=v.lo+1;i<=v.hi;i++){const l=Math.hypot(pts[2*i]-pts[2*i-2],pts[2*i+1]-pts[2*i-1]);L+=l;
+        let dmin=Infinity;for(const c of comp)dmin=Math.min(dmin,Math.hypot(c.p[0]-pts[2*i],c.p[1]-pts[2*i+1]));if(dmin<0.7*lwW)under+=l;}
+      if(L>0)cov.push({v,f:under/L});}
+    // (the stretch the mark is on goes; another only when the mark covers nearly all of it too, so a mark that
+    // brushes the line beside it leaves that line alone)
+    cov.sort((a,b)=>b.f-a.f);cov.forEach((c,j)=>{if((j===0&&c.f>=0.45)||c.f>=0.85){if(removeStretch(c.v.s,c.v.i))np++;}});}
+  // (blue: the mark's middle as a path, end to end along it)
+  for(const comp of groups(BLU)){if(comp.length<3)continue;const idx=new Map(comp.map((c,j)=>[c.k,j]));
+    const adj=comp.map(c=>{const o=[];for(let da=-1;da<=1;da++)for(let db=-1;db<=1;db++){if(!da&&!db)continue;const j=idx.get((c.a+da)+','+(c.b+db));if(j!==undefined)o.push(j);}return o;});
+    const bfs=s=>{const dist=new Array(comp.length).fill(-1),prev=new Array(comp.length).fill(-1),Q=[s];dist[s]=0;for(let h2=0;h2<Q.length;h2++){const u=Q[h2];for(const v of adj[u])if(dist[v]<0){dist[v]=dist[u]+1;prev[v]=u;Q.push(v);}}let far=s;for(let j=0;j<comp.length;j++)if(dist[j]>dist[far])far=j;return{far,prev};};
+    const A=bfs(0).far,{far:B,prev}=bfs(A);const path=[];for(let v=B;v>=0;v=prev[v])path.push(comp[v].p);
+    // (smoothed a little, then cut to short straight pieces)
+    const sm=path.map((p,j)=>{let sx=0,sy=0,c=0;for(let t=Math.max(0,j-2);t<=Math.min(path.length-1,j+2);t++){sx+=path[t][0];sy+=path[t][1];c++;}return[sx/c,sy/c];});sm[0]=path[0];sm[sm.length-1]=path[path.length-1];
+    const rdp=(P,e)=>{if(P.length<3)return P;const a=P[0],b=P[P.length-1],L=Math.hypot(b[0]-a[0],b[1]-a[1])||1;let mi=0,md=0;for(let j=1;j<P.length-1;j++){const dd=Math.abs((b[0]-a[0])*(a[1]-P[j][1])-(a[0]-P[j][0])*(b[1]-a[1]))/L;if(dd>md){md=dd;mi=j;}}return md>e?rdp(P.slice(0,mi+1),e).slice(0,-1).concat(rdp(P.slice(mi),e)):[a,b];};
+    // (where the mark only traces over a line already there it changes nothing: just the parts of it off the
+    // lines are drawn, each carried a little past its ends so it meets the line it leaves)
+    const off=sm.map(p=>!nearPt(p[0],p[1],0.9*lwW));const runs=[];for(let j=0;j<sm.length;j++){if(!off[j])continue;let k=j;while(k+1<sm.length&&off[k+1])k++;runs.push([Math.max(0,j-1),Math.min(sm.length-1,k+1)]);j=k;}
+    for(const[ra,rb]of runs){if(rb-ra<2)continue;
+    let poly=rdp(sm.slice(ra,rb+1),0.25*lwW);const path2=path.slice(ra,rb+1);
+    // (the stretch it replaces: a line close beside the mark all along, that is not just crossing it)
+    const segD=(x,y)=>{let bd=Infinity;for(let j=1;j<poly.length;j++){const a=poly[j-1],b=poly[j],dx=b[0]-a[0],dy=b[1]-a[1],l2=dx*dx+dy*dy||1;let t=((x-a[0])*dx+(y-a[1])*dy)/l2;t=Math.max(0,Math.min(1,t));bd=Math.min(bd,Math.hypot(a[0]+t*dx-x,a[1]+t*dy-y));}return bd;};
+    let markL=0;for(let j=1;j<poly.length;j++)markL+=Math.hypot(poly[j][0]-poly[j-1][0],poly[j][1]-poly[j-1][1]);
+    const cand=new Map();for(const p of path2){const r=nearPt(p[0],p[1],2*lwW);if(!r)continue;const[lo,hi]=K.piece(r.s,r.i);cand.set(r.s+':'+lo+':'+hi,{s:r.s,i:r.i,lo,hi});}
+    for(const v of cand.values()){let L=0,close=0,far=0;for(let i=v.lo;i<=v.hi;i++){const dd=segD(pts[2*i],pts[2*i+1]);if(i>v.lo){const l=Math.hypot(pts[2*i]-pts[2*i-2],pts[2*i+1]-pts[2*i-1]);L+=l;if(dd<2.5*lwW)close+=l;}far=Math.max(far,dd);}
+      if(L>0&&close>=0.75*L&&L<=1.6*markL+2*lwW&&far>0.6*lwW){let fi=v.i,fd=-1;for(let i=v.lo;i<=v.hi;i++){const dd=segD(pts[2*i],pts[2*i+1]);if(dd>fd){fd=dd;fi=i;}}removeStretch(v.s,fi,true);}}
+    // (each end carried to the line it reaches, when one is close)
+    for(const end of[0,poly.length-1]){const p=poly[end],r=nearPt(p[0],p[1],3*lwW,true);if(r)poly[end]=[pts[2*r.i],pts[2*r.i+1]];}
+    // (a mark is drawn by hand and seldom lies right on the lead: it is kept as a guide, and the tool looks for the
+    // lead in the photo along it, drawing the mark itself only where none shows)
+    {const g=[];for(const p of poly)g.push(...toSrc(p[0],p[1]));fixes.push({mode:'guide',pts:g});}nb++;}}
+  return{fixes,np,nb};}
+
 })();

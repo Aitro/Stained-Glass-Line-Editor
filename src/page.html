@@ -143,6 +143,9 @@
       <button id="fixTidy" title="Straighten every nearly straight line and smooth every nearly smooth curve, after you check them">Tidy all lines…</button>
       <button id="fixDraw" aria-pressed="false" title="Drag from one line to another to add a straight lead line">Draw a line</button>
       <button id="fixSym" title="Copy one half of the pattern onto the other, flipped, so both sides match">Make symmetric…</button>
+      <button id="saveCheckPic" title="Save the lines in red over your original, to mark up: purple over a line to take it out, blue where a line should be">Save check picture</button>
+      <button id="loadMarks" title="Load a check picture you marked up: purple marks take lines out, blue marks put lines in. Each becomes an ordinary fix you can undo">Apply marked picture…</button>
+      <input id="marksFile" type="file" accept="image/*" hidden>
       <button id="fixCheck" aria-pressed="false" title="Mark pieces that are hard to cut in glass: sharp points, deep inside curves, slivers, tiny pieces">Check pieces</button>
       <span class="fix-count" id="fixCount"></span>
       <button id="fixUndo" disabled>Undo</button>
