@@ -561,6 +561,16 @@ function stretchTools(P,offs,lw){const n=offs.length-1,orig=Float32Array.from(P)
           for(const j of near(ex,ey)){const d=Math.hypot(orig[2*j]-ex,orig[2*j+1]-ey);if(d<bd){bd=d;bj=j;}}}
         if(bj>=0){const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
           if(fromA>=1.5*lw&&fromB>=1.5*lw)B.push(bj);}}}
+    // (and every joint dot that sits on it: a line picked runs from dot to dot, as the person sees it, even where
+    // the line meeting it there stops a little short)
+    const dots=new Set();if(S.junctions)for(const J of S.junctions){if(J.x<X0||J.x>X1||J.y<Y0||J.y>Y1)continue;let bj=-1,bd=0.7*lw;
+      for(const j of near(J.x,J.y)){const d=Math.hypot(orig[2*j]-J.x,orig[2*j+1]-J.y);if(d<bd){bd=d;bj=j;}}
+      if(bj<0)continue;const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
+      if(fromA>=1.5*lw&&fromB>=1.5*lw)dots.add(bj);}
+    // (two marks for the one joint, a line's end and its dot a few points apart, count once, at the dot: else a
+    // click there would pick the scrap between them)
+    for(const j of dots)B.push(j);B.sort((p,q)=>p-q);const B2=[];
+    for(const j of B){const l=B2[B2.length-1];if(l!==undefined&&Math.hypot(orig[2*j]-orig[2*l],orig[2*j+1]-orig[2*l+1])<1.5*lw){if(dots.has(j)&&!dots.has(l))B2[B2.length-1]=j;continue;}B2.push(j);}B=B2;
     bpCache.set(s0,B);return B;};
   const piece=(s0,i,skip)=>{const a=offs[s0],b=offs[s0+1]-1;let lo=a,hi=b;for(const bj of breaks(s0)){if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}
 
