@@ -417,7 +417,7 @@ function process(p){
   for(let i=0;i<W*H;i++)m[i]=p.invert?(gray[i]>=t?1:0):(gray[i]<t?1:0);
   // (a photo of a finished panel: the lead picked out from the glass; from here on it is a plain line drawing)
   const colorWas=colorIn;let photoInfo=null;
-  if(p.photo&&mxBuf&&chBuf){say('Finding the lead in the photo…');const r=photoLines(p.auto?30:Math.min(p.threshold,90),25);m.set(r.m);colorIn=false;photoInfo={lw:r.lw};}
+  if(p.photo&&mxBuf&&chBuf){say('Finding the lead in the photo…');const r=photoLines(p.auto?24:Math.min(p.threshold,90),25);m.set(r.m);colorIn=false;photoInfo={lw:r.lw};}
   // mirrored areas (picked by hand): inside each box the picture is replaced by the matching spot on the other side
   // of the pattern's centre line (upright, or level for top-to-bottom; see symAxis), flipped. Where a line crosses the box's edge, the two sides may draw it a
   // little apart: near the edge the copy is shifted so each line meets its own line outside exactly, easing back to
