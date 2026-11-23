@@ -34,6 +34,8 @@ function syncSize(changed){if(!S.crop||!$('lockRatio').checked)return;const r=S.
 
 // ---- load & prepare ----
 function loadImage(img,name,isSample){
+  // (marks painted with the pens and not applied belong to the picture they were painted on)
+  if(S.penMarks&&S.penMarks.length){S.penMarks=[];if(typeof penBar==='function')penBar();}
   const c=document.createElement('canvas');c.width=img.width||img.naturalWidth;c.height=img.height||img.naturalHeight;
   const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0);
   S.src=c;S.name=name;S.sample=isSample;S.go=false;S.strokes=null;if(S.resultURL)URL.revokeObjectURL(S.resultURL);S.resultURL=null;S.resultBlob=null;S.svg=null;
@@ -1184,7 +1186,7 @@ function penMarkup(){if(!S.penMarks||!S.penMarks.length)return'';const k=1/layer
       :`<path d="${d}" fill="none" stroke="#0a5cff" stroke-width="${3*k}" stroke-linecap="round" stroke-linejoin="round"/>`;}
   return h;}
 function drawPen(){const g=$('fixLayer').querySelector('#penG');if(g)g.innerHTML=penMarkup();else drawFixLayer();}
-function penBar(){const n=S.penMarks.length;$('penApply').hidden=!n;$('penClear').hidden=!n;$('penApply').textContent=n?'Apply marks ('+n+')':'Apply marks';
+function penBar(){const n=S.penMarks.length;$('penApply').disabled=!n;$('penClear').disabled=!n;
   if(n)$('fixUndo').disabled=false;else updateFixBar();}
 function setPen(mode){if(mode){if(S.drawMode)setDrawMode(false);setAreaMode(false);S.symPending=null;closeFixPop();}
   S.penMode=mode;$('penPurple').setAttribute('aria-pressed',String(mode==='p'));$('penBlue').setAttribute('aria-pressed',String(mode==='b'));
@@ -1207,7 +1209,12 @@ function applyPen(){if(!S.penMarks.length||!S.strokes)return;const geo=pageGeom(
   let r=null;try{r=markFixes(PUR,BLU,W_,H_,toW,3);}catch(err){console.error(err);}
   S.penMarks=[];penBar();drawPen();
   if(!r||!r.fixes.length){setStatus('Those marks did not land on or between lines: nothing changed',false);return;}
-  changeFixes(()=>{for(const x of r.fixes)S.fixes.push(x);});setStatus('Applying your marks: '+r.np+' taken out, '+r.nb+' drawn',true);}
+  addMarkFixes(r);}
+// (the fixes from marks added as one change, which Undo takes back; marks that only take lines out change the
+// finished lines on the page, with no new tracing)
+function addMarkFixes(r){S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=S.fixes.slice();
+  for(const x of r.fixes)S.fixes.push(x);saveFixes();closeFixPop();const msg=r.np+' taken out, '+r.nb+' drawn';
+  if(r.nb){setStatus('Applying your marks: '+msg,true);afterFixChange(before);}else{afterFixChange(before);setStatus('Marks applied: '+msg,false);}}
 $('penPurple').addEventListener('click',()=>setPen(S.penMode==='p'?null:'p'));
 $('penBlue').addEventListener('click',()=>setPen(S.penMode==='b'?null:'b'));
 $('penApply').addEventListener('click',applyPen);
@@ -1229,8 +1236,7 @@ $('marksFile').addEventListener('change',e=>{const f=e.target.files&&e.target.fi
     if(!r){setStatus('No red lines found in that picture: load a check picture saved from here',false);return;}
     if(r.misfit){setStatus('That picture could not be lined up with the lines here (zoomed in and cut off on every side?). Mark a whole check picture, or paint the marks right here with the pens',false);return;}
     if(!r.fixes.length){setStatus('No purple or blue marks found in that picture',false);return;}
-    changeFixes(()=>{for(const x of r.fixes)S.fixes.push(x);});
-    setStatus('Applying your marks: '+r.np+' taken out, '+r.nb+' drawn',true);};
+    addMarkFixes(r);};
   img.onerror=()=>setStatus('That file could not be opened as a picture',false);img.src=URL.createObjectURL(f);});
 function readMarks(img){const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;const g=c.getContext('2d');g.drawImage(img,0,0);
   const w=c.width,h=c.height,d=g.getImageData(0,0,w,h).data;

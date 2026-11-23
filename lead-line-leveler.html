@@ -339,8 +339,8 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
       <button id="fixSym" title="Copy one half of the pattern onto the other, flipped, so both sides match">Make symmetric…</button>
       <button id="penPurple" aria-pressed="false" title="Highlighter: paint over lines that should not be there, then Apply marks">Highlight to remove</button>
       <button id="penBlue" aria-pressed="false" title="Blue pen: draw where a line should be (it need not be exact: the tool looks for the lead in your picture along it), then Apply marks">Draw where a line goes</button>
-      <button id="penApply" hidden title="Turn the marks you painted into fixes (Enter)">Apply marks</button>
-      <button id="penClear" hidden title="Throw away the marks not applied yet">Clear marks</button>
+      <button id="penApply" disabled title="Turn the marks you painted into fixes (Enter)">Apply marks</button>
+      <button id="penClear" disabled title="Throw away the marks not applied yet">Clear marks</button>
       <button id="saveCheckPic" title="Save the lines in red over your original, to mark up: purple over a line to take it out, blue where a line should be">Save check picture</button>
       <button id="loadMarks" title="Load a check picture you marked up: purple marks take lines out, blue marks put lines in. Each becomes an ordinary fix you can undo">Apply marked picture…</button>
       <input id="marksFile" type="file" accept="image/*" hidden>
@@ -3426,7 +3426,13 @@ function photoLines(T,C,guides){
   for(let round=0;round<3;round++){fillHoles(round?2.5*lw*lw:1.3*lw*lw,8*lw*lw);
     if(round===0){// (the light pieces left after the first filling: their middles, kept open from here on)
       const inv=notM(m),sz=comps(inv,false),sum=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i])sum[lab[i]]+=mxBuf[i];
-      const d=edt(m);lightKeep=new Uint8Array(N);for(let i=0;i<N;i++){const l=lab[i];if(l&&sz[l]>=lw*lw&&sz[l]<6*lw*lw&&sum[l]/sz[l]>=120&&d[i]>=4)lightKeep[i]=1;}}
+      // (only one ringed by real lead, near black all round: a light fleck in streaky glass texture is no piece)
+      const bx=new Map();for(let i=0;i<N;i++){const l=lab[i];if(!l||sz[l]<2*lw*lw||sz[l]>=6*lw*lw||sum[l]/sz[l]<120)continue;const x=i%W,y=(i/W)|0;let b=bx.get(l);if(!b)bx.set(l,b=[x,y,x,y]);else{if(x<b[0])b[0]=x;if(x>b[2])b[2]=x;if(y<b[1])b[1]=y;if(y>b[3])b[3]=y;}}
+      const ok=new Set();for(const[l,b]of bx){let n=0,dk=0;for(let y=Math.max(0,b[1]-4);y<=Math.min(H-1,b[3]+4);y++)for(let x=Math.max(0,b[0]-4);x<=Math.min(W-1,b[2]+4);x++){const i=y*W+x;if(!m[i])continue;
+          let near=false;for(let dy=-4;dy<=4&&!near;dy++)for(let dx=-4;dx<=4;dx++){const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&lab[Y*W+X]===l){near=true;break;}}
+          if(near){n++;if(mxBuf[i]<30)dk++;}}
+        if(n&&dk>=0.3*n)ok.add(l);}
+      const d=edt(m);lightKeep=new Uint8Array(N);for(let i=0;i<N;i++){const l=lab[i];if(l&&ok.has(l)&&d[i]>=4)lightKeep[i]=1;}}
     sk=m.slice();thin(sk,W,H);
     // (an end: one neighbour, or two that touch each other, as at the stair-stepped tip of a thinned line)
     const nbs=i=>{const o=[];const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&sk[Y*W+X])o.push(Y*W+X);}return o;};
@@ -3439,9 +3445,8 @@ function photoLines(T,C,guides){
       for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(sk[k]&&nb(k)<=1)q.push(k);}}
     {const sz=comps(sk,true),keepG=new Uint8Array(sz.length);if(gm)for(let i=0;i<N;i++)if(sk[i]&&gm[i])keepG[lab[i]]=1;for(let i=0;i<N;i++)if(sk[i]&&sz[lab[i]]<20*lw&&!keepG[lab[i]])sk[i]=0;}
     if(round===2)splitTips(sk,lw);
-    // (the last redrawing a little thinner than the lead in the photo: small pieces, an eye or a nostril, then keep
-    // room enough to be traced; the lines are redrawn at the lead width wanted later anyway)
-    m=dil(sk,round===2?Math.max(2,0.35*lw):lw/2);if(lightKeep)for(let i=0;i<N;i++)if(lightKeep[i])m[i]=0;}
+    m=dil(sk,lw/2);
+    if(lightKeep)for(let i=0;i<N;i++)if(lightKeep[i])m[i]=0;}
   for(const G of late)for(let i=2;i+1<G.length;i+=2)drawSeg(m,G[i-2],G[i-1],G[i],G[i+1],Math.max(2,0.35*lw));
   photoLast={mx:mxBuf,bkey,gkey,m:m.slice(),lw};
   return{m,lw};}
@@ -3557,6 +3562,8 @@ function syncSize(changed){if(!S.crop||!$('lockRatio').checked)return;const r=S.
 
 // ---- load & prepare ----
 function loadImage(img,name,isSample){
+  // (marks painted with the pens and not applied belong to the picture they were painted on)
+  if(S.penMarks&&S.penMarks.length){S.penMarks=[];if(typeof penBar==='function')penBar();}
   const c=document.createElement('canvas');c.width=img.width||img.naturalWidth;c.height=img.height||img.naturalHeight;
   const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0);
   S.src=c;S.name=name;S.sample=isSample;S.go=false;S.strokes=null;if(S.resultURL)URL.revokeObjectURL(S.resultURL);S.resultURL=null;S.resultBlob=null;S.svg=null;
@@ -4707,7 +4714,7 @@ function penMarkup(){if(!S.penMarks||!S.penMarks.length)return'';const k=1/layer
       :`<path d="${d}" fill="none" stroke="#0a5cff" stroke-width="${3*k}" stroke-linecap="round" stroke-linejoin="round"/>`;}
   return h;}
 function drawPen(){const g=$('fixLayer').querySelector('#penG');if(g)g.innerHTML=penMarkup();else drawFixLayer();}
-function penBar(){const n=S.penMarks.length;$('penApply').hidden=!n;$('penClear').hidden=!n;$('penApply').textContent=n?'Apply marks ('+n+')':'Apply marks';
+function penBar(){const n=S.penMarks.length;$('penApply').disabled=!n;$('penClear').disabled=!n;
   if(n)$('fixUndo').disabled=false;else updateFixBar();}
 function setPen(mode){if(mode){if(S.drawMode)setDrawMode(false);setAreaMode(false);S.symPending=null;closeFixPop();}
   S.penMode=mode;$('penPurple').setAttribute('aria-pressed',String(mode==='p'));$('penBlue').setAttribute('aria-pressed',String(mode==='b'));
@@ -4730,7 +4737,12 @@ function applyPen(){if(!S.penMarks.length||!S.strokes)return;const geo=pageGeom(
   let r=null;try{r=markFixes(PUR,BLU,W_,H_,toW,3);}catch(err){console.error(err);}
   S.penMarks=[];penBar();drawPen();
   if(!r||!r.fixes.length){setStatus('Those marks did not land on or between lines: nothing changed',false);return;}
-  changeFixes(()=>{for(const x of r.fixes)S.fixes.push(x);});setStatus('Applying your marks: '+r.np+' taken out, '+r.nb+' drawn',true);}
+  addMarkFixes(r);}
+// (the fixes from marks added as one change, which Undo takes back; marks that only take lines out change the
+// finished lines on the page, with no new tracing)
+function addMarkFixes(r){S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));if(S.undo.length>50)S.undo.shift();const before=S.fixes.slice();
+  for(const x of r.fixes)S.fixes.push(x);saveFixes();closeFixPop();const msg=r.np+' taken out, '+r.nb+' drawn';
+  if(r.nb){setStatus('Applying your marks: '+msg,true);afterFixChange(before);}else{afterFixChange(before);setStatus('Marks applied: '+msg,false);}}
 $('penPurple').addEventListener('click',()=>setPen(S.penMode==='p'?null:'p'));
 $('penBlue').addEventListener('click',()=>setPen(S.penMode==='b'?null:'b'));
 $('penApply').addEventListener('click',applyPen);
@@ -4752,8 +4764,7 @@ $('marksFile').addEventListener('change',e=>{const f=e.target.files&&e.target.fi
     if(!r){setStatus('No red lines found in that picture: load a check picture saved from here',false);return;}
     if(r.misfit){setStatus('That picture could not be lined up with the lines here (zoomed in and cut off on every side?). Mark a whole check picture, or paint the marks right here with the pens',false);return;}
     if(!r.fixes.length){setStatus('No purple or blue marks found in that picture',false);return;}
-    changeFixes(()=>{for(const x of r.fixes)S.fixes.push(x);});
-    setStatus('Applying your marks: '+r.np+' taken out, '+r.nb+' drawn',true);};
+    addMarkFixes(r);};
   img.onerror=()=>setStatus('That file could not be opened as a picture',false);img.src=URL.createObjectURL(f);});
 function readMarks(img){const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;const g=c.getContext('2d');g.drawImage(img,0,0);
   const w=c.width,h=c.height,d=g.getImageData(0,0,w,h).data;

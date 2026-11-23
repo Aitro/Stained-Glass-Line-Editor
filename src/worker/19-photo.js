@@ -72,7 +72,13 @@ function photoLines(T,C,guides){
   for(let round=0;round<3;round++){fillHoles(round?2.5*lw*lw:1.3*lw*lw,8*lw*lw);
     if(round===0){// (the light pieces left after the first filling: their middles, kept open from here on)
       const inv=notM(m),sz=comps(inv,false),sum=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i])sum[lab[i]]+=mxBuf[i];
-      const d=edt(m);lightKeep=new Uint8Array(N);for(let i=0;i<N;i++){const l=lab[i];if(l&&sz[l]>=lw*lw&&sz[l]<6*lw*lw&&sum[l]/sz[l]>=120&&d[i]>=4)lightKeep[i]=1;}}
+      // (only one ringed by real lead, near black all round: a light fleck in streaky glass texture is no piece)
+      const bx=new Map();for(let i=0;i<N;i++){const l=lab[i];if(!l||sz[l]<2*lw*lw||sz[l]>=6*lw*lw||sum[l]/sz[l]<120)continue;const x=i%W,y=(i/W)|0;let b=bx.get(l);if(!b)bx.set(l,b=[x,y,x,y]);else{if(x<b[0])b[0]=x;if(x>b[2])b[2]=x;if(y<b[1])b[1]=y;if(y>b[3])b[3]=y;}}
+      const ok=new Set();for(const[l,b]of bx){let n=0,dk=0;for(let y=Math.max(0,b[1]-4);y<=Math.min(H-1,b[3]+4);y++)for(let x=Math.max(0,b[0]-4);x<=Math.min(W-1,b[2]+4);x++){const i=y*W+x;if(!m[i])continue;
+          let near=false;for(let dy=-4;dy<=4&&!near;dy++)for(let dx=-4;dx<=4;dx++){const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&lab[Y*W+X]===l){near=true;break;}}
+          if(near){n++;if(mxBuf[i]<30)dk++;}}
+        if(n&&dk>=0.3*n)ok.add(l);}
+      const d=edt(m);lightKeep=new Uint8Array(N);for(let i=0;i<N;i++){const l=lab[i];if(l&&ok.has(l)&&d[i]>=4)lightKeep[i]=1;}}
     sk=m.slice();thin(sk,W,H);
     // (an end: one neighbour, or two that touch each other, as at the stair-stepped tip of a thinned line)
     const nbs=i=>{const o=[];const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&sk[Y*W+X])o.push(Y*W+X);}return o;};
@@ -85,9 +91,8 @@ function photoLines(T,C,guides){
       for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(sk[k]&&nb(k)<=1)q.push(k);}}
     {const sz=comps(sk,true),keepG=new Uint8Array(sz.length);if(gm)for(let i=0;i<N;i++)if(sk[i]&&gm[i])keepG[lab[i]]=1;for(let i=0;i<N;i++)if(sk[i]&&sz[lab[i]]<20*lw&&!keepG[lab[i]])sk[i]=0;}
     if(round===2)splitTips(sk,lw);
-    // (the last redrawing a little thinner than the lead in the photo: small pieces, an eye or a nostril, then keep
-    // room enough to be traced; the lines are redrawn at the lead width wanted later anyway)
-    m=dil(sk,round===2?Math.max(2,0.35*lw):lw/2);if(lightKeep)for(let i=0;i<N;i++)if(lightKeep[i])m[i]=0;}
+    m=dil(sk,lw/2);
+    if(lightKeep)for(let i=0;i<N;i++)if(lightKeep[i])m[i]=0;}
   for(const G of late)for(let i=2;i+1<G.length;i+=2)drawSeg(m,G[i-2],G[i-1],G[i],G[i+1],Math.max(2,0.35*lw));
   photoLast={mx:mxBuf,bkey,gkey,m:m.slice(),lw};
   return{m,lw};}
