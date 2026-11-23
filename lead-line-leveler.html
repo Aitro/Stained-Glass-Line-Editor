@@ -337,6 +337,10 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
       <button id="fixTidy" title="Straighten every nearly straight line and smooth every nearly smooth curve, after you check them">Tidy all lines…</button>
       <button id="fixDraw" aria-pressed="false" title="Drag from one line to another to add a straight lead line">Draw a line</button>
       <button id="fixSym" title="Copy one half of the pattern onto the other, flipped, so both sides match">Make symmetric…</button>
+      <button id="penPurple" aria-pressed="false" title="Highlighter: paint over lines that should not be there, then Apply marks">Highlight to remove</button>
+      <button id="penBlue" aria-pressed="false" title="Blue pen: draw where a line should be (it need not be exact: the tool looks for the lead in your picture along it), then Apply marks">Draw where a line goes</button>
+      <button id="penApply" hidden title="Turn the marks you painted into fixes (Enter)">Apply marks</button>
+      <button id="penClear" hidden title="Throw away the marks not applied yet">Clear marks</button>
       <button id="saveCheckPic" title="Save the lines in red over your original, to mark up: purple over a line to take it out, blue where a line should be">Save check picture</button>
       <button id="loadMarks" title="Load a check picture you marked up: purple marks take lines out, blue marks put lines in. Each becomes an ordinary fix you can undo">Apply marked picture…</button>
       <input id="marksFile" type="file" accept="image/*" hidden>
@@ -3358,6 +3362,9 @@ function rectFrame(strokes,geo,rotDeg){const{R0,R1,lw,segs}=geo;
 // along its middle. The rest of the tool then works on it as a plain line drawing.
 // ================================================================================================
 let mxBuf=null,chBuf=null;
+// (the lead found before any hand guides, and the last finished result, kept for the next run: a fix only redoes
+// what it changes)
+let photoBase=null,photoLast=null;
 // (the largest or smallest value within r either side, along rows or columns: van Herk / Gil-Werman)
 function runMaxMin(src,r,isMax,horiz){const N=W*H,out=new Uint8Array(N),L=horiz?W:H,n=horiz?H:W,k=2*r+1;
   const g=new Uint8Array(L+k),h=new Uint8Array(L+k),line=new Uint8Array(L+2*r),pad=isMax?0:255;
@@ -3375,6 +3382,9 @@ function photoLines(T,C,guides){
   const comps=(a,eight)=>{lab.fill(0);const sz=[0];let n=0;for(let s=0;s<N;s++){if(!a[s]||lab[s])continue;n++;let sp=0,c=0;st[sp++]=s;lab[s]=n;
       while(sp){const i=st[--sp];c++;const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;if(!eight&&dx&&dy)continue;const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(a[k]&&!lab[k]){lab[k]=n;st[sp++]=k;}}}
       sz.push(c);}return sz;};
+  const gkey=JSON.stringify(guides||[]),bkey=T+':'+C+':'+W+'x'+H;
+  if(photoLast&&photoLast.mx===mxBuf&&photoLast.bkey===bkey&&photoLast.gkey===gkey)return{m:photoLast.m.slice(),lw:photoLast.lw};
+  let m,lw;if(photoBase&&photoBase.mx===mxBuf&&photoBase.key===bkey){m=photoBase.m.slice();lw=photoBase.lw;}else{
   const r1=Math.max(1,Math.round(sc)),r2=Math.max(1,Math.round(2*sc));
   // (very dark and grey)
   let core=new Uint8Array(N);for(let i=0;i<N;i++)core[i]=mxBuf[i]<T&&chBuf[i]<C?1:0;core=dil(ero(core,r2),r2);
@@ -3382,28 +3392,42 @@ function photoLines(T,C,guides){
   const R=Math.max(6,Math.round(20*sc));const cl=runMaxMin(runMaxMin(runMaxMin(runMaxMin(mxBuf,R,true,true),R,true,false),R,false,true),R,false,false);
   let ridge=new Uint8Array(N);for(let i=0;i<N;i++)ridge[i]=cl[i]-mxBuf[i]>40&&mxBuf[i]<80&&chBuf[i]<45&&cl[i]>130?1:0;ridge=dil(ero(ridge,r1),r1);
   // (streaks only where they join the dark lead, and not specks)
-  let m=core.slice();{const sz=comps(ridge,true),touch=new Uint8Array(sz.length);for(let i=0;i<N;i++)if(lab[i]&&core[i])touch[lab[i]]=1;
+  m=core.slice();{const sz=comps(ridge,true),touch=new Uint8Array(sz.length);for(let i=0;i<N;i++)if(lab[i]&&core[i])touch[lab[i]]=1;
     const lim=200*sc*sc;for(let i=0;i<N;i++)if(lab[i]&&touch[lab[i]]&&sz[lab[i]]>lim)m[i]=1;}
   m=ero(dil(m,r2),r2);
   {const sz=comps(m,true);let big=1;for(const v of sz)if(v>big)big=v;for(let i=0;i<N;i++)if(m[i]&&sz[lab[i]]<0.002*big)m[i]=0;}
-  const lw=Math.max(4,inkWidth(m));
+  lw=Math.max(4,inkWidth(m));photoBase={mx:mxBuf,key:bkey,m:m.slice(),lw};}
+
   // (holes: a pinhole, or a little dark ring of glass texture, is filled; a real small piece, an eye or a nostril, is
   // light glass and stays however small)
   const fillHoles=(lim,darkLim)=>{const inv=notM(m),sz=comps(inv,false),sum=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i])sum[lab[i]]+=mxBuf[i];
+    // (a piece that a hand guide closes is a real piece, however dark or small: the person drew it)
+    const gHole=gm?new Uint8Array(sz.length):null;if(gm)for(let i=0;i<N;i++)if(lab[i]&&gm[i])gHole[lab[i]]=1;
+    // (a light piece found in the first pass, an eye or a nostril, stays a piece when the lines round it are redrawn
+    // at full lead width and it shrinks)
+    const keepLab=lightKeep?new Uint8Array(sz.length):null;if(lightKeep)for(let i=0;i<N;i++)if(lab[i]&&lightKeep[i])keepLab[lab[i]]=1;
     // (and a sliver: a piece much narrower than the lead is wide, and long, is where two lines run side by side)
     const dd=edt(m),far=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i]&&dd[i]>far[lab[i]])far[lab[i]]=dd[i];
     for(let i=0;i<N;i++){const l=lab[i];if(!l)continue;const r=Math.sqrt(far[l]),sliver=r<0.6*lw&&sz[l]/(2*Math.max(1,r))>3*lw&&sz[l]<30*lw*lw;
-      const mean=sum[l]/sz[l];if((sz[l]<lim&&(mean<120||sz[l]<0.25*lw*lw))||(sz[l]<darkLim&&mean<40)||(sliver&&mean<120))m[i]=1;}};
+      const mean=sum[l]/sz[l];if(gHole&&gHole[l]&&sz[l]>=0.3*lw*lw)continue;if(keepLab&&keepLab[l])continue;if((sz[l]<lim&&(mean<120||sz[l]<0.25*lw*lw))||(sz[l]<darkLim&&mean<40)||(sliver&&mean<120))m[i]=1;}};
 
   // (along the middle; loose ends taken back, short lines on their own dropped; then once more, as the redrawing
   // closes rings that the first pass left)
   // (guides marked by hand: along each, the lead in the photo is found and kept, even where it is lighter or broken;
   // where none shows, the guide itself is drawn)
-  // (guides marked by hand: along each, the lead in the photo is found and kept, even where it is lighter or broken;
-  // where none shows, the guide itself is drawn)
-  if(Array.isArray(guides))for(const G of guides)followGuide(m,G,lw);
+  // (and kept through the cleaning below: a guide's line is not a loose end or a scrap to be dropped, and the pieces
+  // it closes are not holes to fill)
+  // (a guide through a wide patch of dark, lead or dark glass with no line of its own to find, is drawn again once the
+  // patch has been cleaned down to lines: drawn into it before, it would be lost in it)
+  const late=[];
+  let gm=null;if(Array.isArray(guides)&&guides.length){gm=new Uint8Array(N);for(const G of guides){if(!followGuide(m,G,lw))late.push(G);for(let i=2;i+1<G.length;i+=2)drawSeg(gm,G[i-2],G[i-1],G[i],G[i+1],0.65*lw);}}
   let sk=null;
-  for(let round=0;round<3;round++){fillHoles(round?2.5*lw*lw:1.3*lw*lw,8*lw*lw);sk=m.slice();thin(sk,W,H);
+  let lightKeep=null;
+  for(let round=0;round<3;round++){fillHoles(round?2.5*lw*lw:1.3*lw*lw,8*lw*lw);
+    if(round===0){// (the light pieces left after the first filling: their middles, kept open from here on)
+      const inv=notM(m),sz=comps(inv,false),sum=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i])sum[lab[i]]+=mxBuf[i];
+      const d=edt(m);lightKeep=new Uint8Array(N);for(let i=0;i<N;i++){const l=lab[i];if(l&&sz[l]>=lw*lw&&sz[l]<6*lw*lw&&sum[l]/sz[l]>=120&&d[i]>=4)lightKeep[i]=1;}}
+    sk=m.slice();thin(sk,W,H);
     // (an end: one neighbour, or two that touch each other, as at the stair-stepped tip of a thinned line)
     const nbs=i=>{const o=[];const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&sk[Y*W+X])o.push(Y*W+X);}return o;};
     const nb=i=>{const o=nbs(i);if(o.length===2){const a=o[0],b=o[1];if(Math.abs(a%W-b%W)<=1&&Math.abs(((a/W)|0)-((b/W)|0))<=1)return 1;}return o.length;};
@@ -3411,11 +3435,15 @@ function photoLines(T,C,guides){
     // carried straight on to a line close ahead of it)
     if(round===0)bridgeEnds(sk,lw,nb,nbs);
     const q=[];for(let i=0;i<N;i++)if(sk[i]&&nb(i)<=1)q.push(i);
-    while(q.length){const i=q.pop();if(!sk[i]||nb(i)>1)continue;sk[i]=0;const y=(i/W)|0,x=i-y*W;
+    while(q.length){const i=q.pop();if(!sk[i]||nb(i)>1||(gm&&gm[i]))continue;sk[i]=0;const y=(i/W)|0,x=i-y*W;
       for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(sk[k]&&nb(k)<=1)q.push(k);}}
-    {const sz=comps(sk,true);for(let i=0;i<N;i++)if(sk[i]&&sz[lab[i]]<20*lw)sk[i]=0;}
+    {const sz=comps(sk,true),keepG=new Uint8Array(sz.length);if(gm)for(let i=0;i<N;i++)if(sk[i]&&gm[i])keepG[lab[i]]=1;for(let i=0;i<N;i++)if(sk[i]&&sz[lab[i]]<20*lw&&!keepG[lab[i]])sk[i]=0;}
     if(round===2)splitTips(sk,lw);
-    m=dil(sk,lw/2);}
+    // (the last redrawing a little thinner than the lead in the photo: small pieces, an eye or a nostril, then keep
+    // room enough to be traced; the lines are redrawn at the lead width wanted later anyway)
+    m=dil(sk,round===2?Math.max(2,0.35*lw):lw/2);if(lightKeep)for(let i=0;i<N;i++)if(lightKeep[i])m[i]=0;}
+  for(const G of late)for(let i=2;i+1<G.length;i+=2)drawSeg(m,G[i-2],G[i-1],G[i],G[i+1],Math.max(2,0.35*lw));
+  photoLast={mx:mxBuf,bkey,gkey,m:m.slice(),lw};
   return{m,lw};}
 // (a sharp tip, like a tree's point meeting the sky: in the photo the lead of its two sides runs together just below
 // the tip, so the middle shows the two sides joining a little way down with one short line on up to the tip. The two
@@ -3469,13 +3497,13 @@ function bridgeEnds(sk,lw,nb,nbs){const N=W*H,ends=[];for(let i=0;i<N;i++)if(sk[
     for(let t=0;t<=steps;t++)sk[Math.round(ey+(Y-ey)*t/steps)*W+Math.round(ex+(X-ex)*t/steps)]=1;n++;}
   return n;}
 
-function followGuide(m,G,lw){if(!G||G.length<4)return;const N=W*H,R=1.3*lw;
+function followGuide(m,G,lw){if(!G||G.length<4)return true;const N=W*H,R=1.3*lw;
   let x0=W,y0=H,x1=0,y1=0;for(let i=0;i<G.length;i+=2){x0=Math.min(x0,G[i]);x1=Math.max(x1,G[i]);y0=Math.min(y0,G[i+1]);y1=Math.max(y1,G[i+1]);}
   x0=Math.max(0,Math.floor(x0-R-2));y0=Math.max(0,Math.floor(y0-R-2));x1=Math.min(W-1,Math.ceil(x1+R+2));y1=Math.min(H-1,Math.ceil(y1+R+2));
   const dseg=(x,y)=>{let bd=Infinity,bt=0,acc=0,tot=0;for(let i=2;i+1<G.length;i+=2){const ax=G[i-2],ay=G[i-1],dx=G[i]-ax,dy=G[i+1]-ay,l=Math.hypot(dx,dy)||1;let t=((x-ax)*dx+(y-ay)*dy)/(l*l);t=Math.max(0,Math.min(1,t));const d=Math.hypot(ax+t*dx-x,ay+t*dy-y);if(d<bd){bd=d;bt=acc+t*l;}acc+=l;}return[bd,bt,acc];};
   // (the darkest grey pixels in the band round the guide: the lead under it)
   const band=[];let total=1;for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const[d,t,L]=dseg(x,y);total=L;if(d<=R)band.push([y*W+x,t,d]);}
-  if(!band.length)return;const vals=band.map(b=>mxBuf[b[0]]).sort((a,b)=>a-b);const lo=vals[Math.floor(0.05*vals.length)],hi=vals[Math.floor(0.6*vals.length)];
+  if(!band.length)return true;const vals=band.map(b=>mxBuf[b[0]]).sort((a,b)=>a-b);const lo=vals[Math.floor(0.05*vals.length)],hi=vals[Math.floor(0.6*vals.length)];
   const T=Math.min(90,lo+0.4*(hi-lo));const found=new Uint8Array(N);for(const[i]of band)if(mxBuf[i]<=T&&chBuf[i]<50)found[i]=1;
   // (how much of the guide's length has lead beside it)
   // (lead is a thin line in the band; when most of the band reads as dark, it is dark glass round a small piece, and
@@ -3489,7 +3517,8 @@ function followGuide(m,G,lw){if(!G||G.length<4)return;const N=W*H,R=1.3*lw;
   }
   // (where the photo shows no lead along a stretch, the guide is drawn there)
   let acc=0;for(let i=2;i+1<G.length;i+=2){const ax=G[i-2],ay=G[i-1],bx=G[i],by=G[i+1],l=Math.hypot(bx-ax,by-ay);const n=Math.max(1,Math.ceil(l/(lw/2)));
-    for(let j=0;j<n;j++){const t=acc+l*(j+0.5)/n,k=Math.min(nb-1,Math.floor(t/lw));if(use&&hit[k])continue;const px=ax+(bx-ax)*j/n,py=ay+(by-ay)*j/n,qx=ax+(bx-ax)*(j+1)/n,qy=ay+(by-ay)*(j+1)/n;drawSeg(m,px,py,qx,qy,lw/2);}acc+=l;}}
+    for(let j=0;j<n;j++){const t=acc+l*(j+0.5)/n,k=Math.min(nb-1,Math.floor(t/lw));if(use&&hit[k])continue;const px=ax+(bx-ax)*j/n,py=ay+(by-ay)*j/n,qx=ax+(bx-ax)*(j+1)/n,qy=ay+(by-ay)*(j+1)/n;drawSeg(m,px,py,qx,qy,lw/2);}acc+=l;}
+  return use;}
 </script>
 
 <script>
@@ -3844,7 +3873,8 @@ function drawFixLayer(){const L=$('fixLayer');if(!S.fixMode||!S.strokes||S.view=
   // (pieces that are hard to cut in glass)
   if(S.checkOn&&S.checkMarks)h+=checkMarkup(k);
   h+=addedLinesMarkup(k);h+=tidyMarkup(k);
-  for(let i=0;i<S.junctions.length;i++){const J=S.junctions[i],p=jPage(J),fx=fixAtJunction(J).length>0;
+  // (while painting with a pen the joint dots are left off, so they do not hide what is being marked)
+  if(!S.penMode)for(let i=0;i<S.junctions.length;i++){const J=S.junctions[i],p=jPage(J),fx=fixAtJunction(J).length>0;
     h+=`<circle class="jn${fx?' fixed':''}${S.fixSel&&S.fixSel.j===i?' sel':''}" cx="${p[0]}" cy="${p[1]}" r="${r}" style="stroke-width:${(fx?2:2.5)*k}"/>`;}
   // fixes that sit on a line rather than at a junction
   const geo=pageGeom();
@@ -3855,6 +3885,7 @@ let[x,y]=srcToWork(f.sx+(f.mode==='drag'?f.dx:0),f.sy+(f.mode==='drag'?f.dy:0));
   if(S.fixSel&&S.fixSel.j!=null){const J=S.junctions[S.fixSel.j];if(J){const p=jPage(J),len=46*k;
     J.arms.forEach((a,i)=>{const t=a*Math.PI/180;h+=`<line class="spoke" x1="${p[0]}" y1="${p[1]}" x2="${p[0]+Math.cos(t)*len}" y2="${p[1]+Math.sin(t)*len}" stroke="${FIXCOL[i%FIXCOL.length]}" style="stroke-width:${7*k}"/>`;});}}
   if(S.fixSel&&S.fixSel.pt){const q=S.fixSel.pt;h+=`<circle cx="${q[0]}" cy="${q[1]}" r="${r}" fill="none" stroke="var(--fix)" style="stroke-width:${3*k}"/>`;}
+  h+=`<g id="penG" pointer-events="none">${penMarkup()}</g>`;
   L.innerHTML=h;}
 // worker x,y (before squaring up) -> output x,y
 function outPos(x,y){if(!S.rot)return[x+0.5,y+0.5];const a=-S.rot*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a),cy=S.work.h/2,cx=S.work.w/2;
@@ -4028,18 +4059,25 @@ function patternMidY(){const P=S.rawStrokes;let lo=Infinity,hi=-Infinity;for(let
 function patternMidX(){const P=S.rawStrokes;let lo=Infinity,hi=-Infinity;for(let j=0;j<P.length;j+=2){if(P[j]<lo)lo=P[j];if(P[j]>hi)hi=P[j];}return(lo+hi)/2;}
 // (shared by the fixes that reshape one stretch of a line between its joints: mirror, smooth, straighten)
 function stretchTools(P,offs,lw){const n=offs.length-1,orig=Float32Array.from(P);
+  // (each line's box, so lines nowhere near the one picked are passed over at once)
+  const bb=new Float32Array(4*Math.max(0,n));for(let s=0;s<n;s++){let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(let j=offs[s];j<offs[s+1];j++){const x=orig[2*j],y=orig[2*j+1];if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}bb[4*s]=x0;bb[4*s+1]=y0;bb[4*s+2]=x1;bb[4*s+3]=y1;}
   // each picked line is taken between its joints: its own ends, and the spots where other lines end on it
-  const piece=(s0,i,skip)=>{const a=offs[s0],b=offs[s0+1]-1;let lo=a,hi=b;
-    for(let s=0;s<n;s++){if(s===s0)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;
+  // (where along a line the others meet it does not depend on the spot picked, so it is found once per line)
+  const bpCache=new Map();
+  const breaks=s0=>{let B=bpCache.get(s0);if(B)return B;B=[];const a=offs[s0],b=offs[s0+1]-1;const g=1.5*lw,X0=bb[4*s0]-g,Y0=bb[4*s0+1]-g,X1=bb[4*s0+2]+g,Y1=bb[4*s0+3]+g;
+    for(let s=0;s<n;s++){if(s===s0)continue;const sa=offs[s],sb=offs[s+1];if(sb-sa<2)continue;if(bb[4*s]>X1||bb[4*s+2]<X0||bb[4*s+1]>Y1||bb[4*s+3]<Y0)continue;
       for(const e of[sa,sb-1]){let bj=-1,bd=1.2*lw;for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-orig[2*e],orig[2*j+1]-orig[2*e+1]);if(d<bd){bd=d;bj=j;}}
         if(bj<0)continue;const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
-        if(fromA<1.5*lw||fromB<1.5*lw)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}
+        if(fromA<1.5*lw||fromB<1.5*lw)continue;B.push(bj);}
       // (and where another line runs right through it, a crossing)
-      if(sb-sa>4){let bj=-1,bd=0.8*lw;for(let e=sa+2;e<sb-2;e+=2){const ex=orig[2*e],ey=orig[2*e+1];
+      if(sb-sa>4){let bj=-1,bd=0.8*lw;for(let e=sa+2;e<sb-2;e+=2){const ex=orig[2*e],ey=orig[2*e+1];if(ex<X0||ex>X1||ey<Y0||ey>Y1)continue;
           if(Math.hypot(ex-orig[2*sa],ey-orig[2*sa+1])<1.5*lw||Math.hypot(ex-orig[2*sb-2],ey-orig[2*sb-1])<1.5*lw)continue;
           for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-ex,orig[2*j+1]-ey);if(d<bd){bd=d;bj=j;}}}
         if(bj>=0){const fromA=Math.hypot(orig[2*bj]-orig[2*a],orig[2*bj+1]-orig[2*a+1]),fromB=Math.hypot(orig[2*bj]-orig[2*b],orig[2*bj+1]-orig[2*b+1]);
-          if(fromA>=1.5*lw&&fromB>=1.5*lw){if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}}}}
+          if(fromA>=1.5*lw&&fromB>=1.5*lw)B.push(bj);}}}
+    bpCache.set(s0,B);return B;};
+  const piece=(s0,i,skip)=>{const a=offs[s0],b=offs[s0+1]-1;let lo=a,hi=b;for(const bj of breaks(s0)){if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}
+
     // (joints the person added on this line count too)
     for(const f of S.fixes){if(f.mode!=='joint'||(skip&&f.id===skip))continue;const[jx,jy]=outPos(...srcToWork(f.sx,f.sy));let bj=-1,bd=1.5*lw;
       for(let j=a;j<=b;j++){const d=Math.hypot(orig[2*j]-jx,orig[2*j+1]-jy);if(d<bd){bd=d;bj=j;}}if(bj<0||bj===i)continue;if(bj<i&&bj>lo)lo=bj;if(bj>i&&bj<hi)hi=bj;}
@@ -4193,6 +4231,7 @@ $('fixLayer').addEventListener('pointerdown',e=>{if(e.button!==0)return;const[px
     return;}
   if(S.areaPending){const f=S.areaPending,poly=areaSrcPoly(f,-1),g=gripAt(poly);if(inPoly(poly,px,py)||Math.hypot(g[0]-px,g[1]-py)<14/sc){closeFixPop();
       press={grip:f,pending:true,px,py,x0:e.clientX,y0:e.clientY,d:[0,0],dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}}
+  if(S.penMode){closeFixPop();S.penMarks.push({c:S.penMode,pts:[[px,py]]});press={pen:true};$('fixLayer').setPointerCapture(e.pointerId);drawPen();return;}
   if(S.drawMode){closeFixPop();S.drawLine={a:snapEnd(px,py),b:null};press={draw:true,x0:e.clientX,y0:e.clientY};$('fixLayer').setPointerCapture(e.pointerId);return;}
   if(S.areaMode){if(S.areaPending)cancelPending();closeFixPop();press={area:true,px,py,x0:e.clientX,y0:e.clientY,dragging:false};$('fixLayer').setPointerCapture(e.pointerId);return;}
   {const af=S.fixes.filter(f=>f.mode==='area');for(let i=0;i<af.length;i++){const g=gripAt(areaSrcPoly(af[i],i));if(Math.hypot(g[0]-px,g[1]-py)<14/sc){closeFixPop();
@@ -4244,7 +4283,7 @@ function seamDots(b,k,f,d){if(!S.strokes||!S.offs)return'';const geo=pageGeom(),
   return h;}
 // (hovering shows what a click or drag will take: the dot of a joint, or the one stretch of line between its joints)
 let hoverRaf=0;
-function showHover(px,py){const L=$('fixLayer'),old=L.querySelector('#hoverMark');if(old)old.remove();if(!S.fixMode||S.areaMode||S.drawMode||!S.strokes||press)return;
+function showHover(px,py){const L=$('fixLayer'),old=L.querySelector('#hoverMark');if(old)old.remove();if(!S.fixMode||S.areaMode||S.drawMode||S.penMode||!S.strokes||press)return;
   const sc=layerScale(),k=1/sc,geo=pageGeom();let h='';
   let bj=-1,bd=7/sc;S.junctions.forEach((J,i)=>{const p=jPage(J);const d=Math.hypot(p[0]-px,p[1]-py);if(d<bd){bd=d;bj=i;}});
   const dot=dotAt(px,py,8/sc);
@@ -4260,17 +4299,20 @@ $('fixLayer').addEventListener('pointerleave',()=>{const m=$('fixLayer').querySe
 $('fixLayer').addEventListener('pointermove',e=>{if(!press){if(e.pointerType==='mouse'){const[px,py]=layerPoint(e);cancelAnimationFrame(hoverRaf);hoverRaf=requestAnimationFrame(()=>showHover(px,py));}return;}
   if(press.sym){const[px,py]=layerPoint(e),geo=pageGeom(),A=symAxisOf(S.symPending);if(!A)return;const[wx,wy]=unrotVec((px-press.px)/geo.k,(py-press.py)/geo.k);
     press.off=wx*A.u[1]-wy*A.u[0];press.dragging=true;drawFixLayer();return;}
+  if(press.pen){const[px,py]=layerPoint(e),m=S.penMarks[S.penMarks.length-1],l=m.pts[m.pts.length-1];if(Math.hypot(px-l[0],py-l[1])>=1.5/layerScale()){m.pts.push([px,py]);drawPen();}return;}
   if(press.draw){const[px,py]=layerPoint(e);S.drawLine.b=snapEnd(px,py);drawFixLayer();return;}
   if(press.grip){const[px,py]=layerPoint(e);press.d=[px-press.px,py-press.py];if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)>=3)press.dragging=true;drawFixLayer();return;}
   if(press.area){if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)>=5)press.dragging=true;if(!press.dragging)return;const[px,py]=layerPoint(e);drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',areaPreview(px,py));return;}
   if(!press.dragging){if(Math.hypot(e.clientX-press.x0,e.clientY-press.y0)<5||(press.j<0&&!press.q))return;press.dragging=true;closeFixPop();}
-  const d=pressDrag(e),P=applyDrags(d),geo=pageGeom(),k=1/layerScale();
-  // preview: the lines that this drag moves, drawn over the picture
-  const Q=Float32Array.from(applyDrags()),moved=applyOneDrag(Q,S.offs,d);let h='';
+  const d=pressDrag(e),geo=pageGeom(),k=1/layerScale();
+  // preview: the lines that this drag moves, drawn over the picture (the drag put on the lines as they are now:
+  // working every fix out again at each move of the mouse made dragging slow)
+  const Q=Float32Array.from(S.strokes),moved=applyOneDrag(Q,S.offs,d),P=Q;let h='';
   for(const s of moved){let pth='';for(let j=S.offs[s];j<S.offs[s+1];j++){const p=geo.map(P[2*j],P[2*j+1]);pth+=(j===S.offs[s]?'M':'L')+p[0].toFixed(1)+','+p[1].toFixed(1);}
     h+=`<path d="${pth}" fill="none" stroke="var(--fix)" stroke-width="${3*k}" stroke-linecap="round" opacity=".9"/>`;}
   drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',h);});
 $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
+  if(p.pen){press=null;penBar();return;}
   if(p.draw){press=null;const d=S.drawLine;S.drawLine=null;if(!d||!d.b||Math.hypot(d.b[0]-d.a[0],d.b[1]-d.a[1])<10/layerScale()){drawFixLayer();return;}
     const[ax,ay]=workToSrc(...pageToWorkInternal(d.a[0],d.a[1])),[bx,by]=workToSrc(...pageToWorkInternal(d.b[0],d.b[1]));changeFixes(()=>S.fixes.push({mode:'line',ax,ay,bx,by}));return;}
   if(p.sym){press=null;const hv=S.symPending;if(hv&&p.dragging)hv.off=(hv.off||0)+p.off/(hv.flip==='tb'?S.sy:S.sx);drawFixLayer();symMenu();return;}
@@ -4318,7 +4360,7 @@ function symMenu(){const hv=S.symPending;if(!hv)return;const ln=symLine(hv);cons
   pop.querySelector('[data-act="cancel"]').onclick=cancelSym;pop.querySelector('.close').onclick=cancelSym;
   const rm=pop.querySelector('[data-act="remove"]');if(rm)rm.onclick=()=>{S.symPending=null;$('fixPop').hidden=true;S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));const before=S.fixes.slice();S.fixes=S.fixes.filter(x=>x.mode!=='half');saveFixes();afterFixChange(before);};}
 function cancelSym(){S.symPending=null;S.wantInk=false;$('fixPop').hidden=true;drawFixLayer();}
-function openSym(){if(!S.strokes)return;setAreaMode(false);if(S.drawMode)setDrawMode(false);closeFixPop();const cur=S.fixes.find(f=>f.mode==='half');S.symPending=cur?{flip:cur.flip,keep:cur.keep,off:cur.off||0}:{flip:'lr',keep:-1,off:0};
+function openSym(){if(!S.strokes)return;if(S.penMode)setPen(null);setAreaMode(false);if(S.drawMode)setDrawMode(false);closeFixPop();const cur=S.fixes.find(f=>f.mode==='half');S.symPending=cur?{flip:cur.flip,keep:cur.keep,off:cur.off||0}:{flip:'lr',keep:-1,off:0};
   if(!symAxisOf(S.symPending)){S.wantInk=true;S.symWaiting=true;setStatus('Finding the centre line…',true);schedule(run,0);return;}
   drawFixLayer();symMenu();}
 $('fixSym').addEventListener('click',openSym);
@@ -4353,7 +4395,7 @@ function tidyMenu(){const T=S.tidy,ns=T.filter(c=>c.on&&c.mode==='straight').len
   pop.querySelector('.close').onclick=cancelTidy;}
 function applyTidy(){const on=(S.tidy||[]).filter(c=>c.on);if(!on.length){cancelTidy();return;}changeFixes(()=>{for(const c of on)S.fixes.push({sx:c.sx,sy:c.sy,mode:c.mode});});setStatus('Tidied '+on.length+' line'+(on.length===1?'':'s'),true);}
 function cancelTidy(){S.tidy=null;closeFixPop();drawFixLayer();setStatus('Tidy cancelled: nothing changed',false);}
-$('fixTidy').addEventListener('click',()=>{if(!S.strokes)return;closeFixPop();setAreaMode(false);if(S.drawMode)setDrawMode(false);S.symPending=null;
+$('fixTidy').addEventListener('click',()=>{if(!S.strokes)return;closeFixPop();if(S.penMode)setPen(null);setAreaMode(false);if(S.drawMode)setDrawMode(false);S.symPending=null;
   setStatus('Looking over every line…',true);setTimeout(()=>{const c=tidyCandidates();
     if(!c.length){setStatus('Nothing to tidy: every line is already straight, smooth, or shaped on purpose.',false);return;}
     S.tidy=c;drawFixLayer();tidyMenu();setStatus(c.length+' line'+(c.length===1?'':'s')+' to tidy: check them, then Apply',false);},30);});
@@ -4376,7 +4418,7 @@ function addedLineMenu(L,px,py){S.fixSel={pt:[px,py]};drawFixLayer();
   const pop=$('fixPop');pop.querySelector('[data-act="rm"]').onclick=()=>changeFixes(()=>{S.fixes=S.fixes.filter(f=>f!==L.fix);});
   pop.querySelector('[data-act="other"]').onclick=()=>{const q=nearestStroke(px,py,30/layerScale());if(q)pointMenu(q[0],q[1]);else closeFixPop();};}
 // (drawing: drag from one point to another; an end near a line snaps onto it)
-function setDrawMode(on){S.drawMode=on;S.drawLine=null;$('fixDraw').setAttribute('aria-pressed',String(on));$('fixLayer').classList.toggle('picking-area',on);
+function setDrawMode(on){if(on&&S.penMode)setPen(null);S.drawMode=on;S.drawLine=null;$('fixDraw').setAttribute('aria-pressed',String(on));$('fixLayer').classList.toggle('picking-area',on);
   $('fixHelp').textContent=on?'Drag from one line to another to add a straight lead line. Ends near a line snap onto it (Esc to stop).':'Click a dot or a line to choose how it should look, or drag it to reshape it. To bend a line at a spot of your own, click the line and choose Add a dot here, then drag the dot.';}
 function snapEnd(px,py){const q=nearestStroke(px,py,14/layerScale());if(q){const r=[q[0],q[1]];r.snap=true;return r;}return[px,py];}
 $('fixDraw').addEventListener('click',()=>{closeFixPop();setAreaMode(false);S.symPending=null;setDrawMode(!S.drawMode);drawFixLayer();});
@@ -4431,13 +4473,13 @@ $('fixCheck').addEventListener('click',()=>{S.checkOn=!S.checkOn;$('fixCheck').s
 function setAreaMode(on){if(!on&&S.areaPending)S.areaPending=null;S.areaMode=on;$('fixArea').setAttribute('aria-pressed',String(on));$('fixAreaFlip').hidden=!on;$('fixLayer').classList.toggle('picking-area',on);$('mat').classList.toggle('picking-area',on);
   $('fixHelp').textContent=on?'Drag a box around the spot to replace; the dashed box shows the spot it copies. Dots mark lines crossing the edge: aim for green; red ones won\'t line up, so move that edge (Esc to cancel).':'Click a dot or a line to choose how it should look, or drag it to reshape it. To bend a line at a spot of your own, click the line and choose Add a dot here, then drag the dot.';}
 S.areaFlip='lr';$('fixAreaFlip').addEventListener('change',e=>{S.areaFlip=e.target.value;});
-$('fixArea').addEventListener('click',()=>{closeFixPop();S.mirrorPick=null;S.symPending=null;if(S.drawMode)setDrawMode(false);setAreaMode(!S.areaMode);});
-$('fixBtn').addEventListener('click',()=>{if(!S.go&&!S.fixMode)setMode('drawn');S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);setDrawMode(false);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
+$('fixArea').addEventListener('click',()=>{closeFixPop();if(S.penMode)setPen(null);S.mirrorPick=null;S.symPending=null;if(S.drawMode)setDrawMode(false);setAreaMode(!S.areaMode);});
+$('fixBtn').addEventListener('click',()=>{if(!S.go&&!S.fixMode)setMode('drawn');S.fixMode=!S.fixMode;S.mirrorPick=null;setAreaMode(false);setDrawMode(false);if(S.penMode)setPen(null);S.symPending=null;$('fixBtn').setAttribute('aria-pressed',String(S.fixMode));$('fixBar').hidden=!S.fixMode;
   if(S.fixMode&&S.view==='original'){S.view='result';document.querySelectorAll('[data-view]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.view==='result')));showView();}
   closeFixPop();drawFixLayer();updateFixBar();});
 // (only drags changed: redraw straight away; anything else: the program runs again)
 function afterFixChange(before){const key=a=>JSON.stringify(a.filter(f=>!PAGE_FIX.has(f.mode)));if(key(before)!==key(S.fixes))schedule(run,0);else redrawDrags();}
-$('fixUndo').addEventListener('click',()=>{if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
+$('fixUndo').addEventListener('click',()=>{if(S.penMarks&&S.penMarks.length){S.penMarks.pop();penBar();drawPen();return;}if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
 // (clearing asks first, naming how many fixes go; Cancel is the default, and Undo can still bring them back)
 $('fixClear').addEventListener('click',()=>{const n=S.fixes.length;if(!n)return;
   openFixPop(`<h3>Clear all fixes?</h3><p>All ${n} fix${n===1?'':'es'} on ${S.name.replace(/[<>&"]/g,'')} will be taken out. Undo can bring them back.</p><div class="row"><button data-act="clear" class="danger">Clear ${n} fix${n===1?'':'es'}</button><button data-act="cancel">Cancel</button></div>`,24,24);
@@ -4652,6 +4694,51 @@ function sample(){const c=document.createElement('canvas');c.width=900;c.height=
 window.__leadLineLeveler=()=>({w:S.work&&S.work.w,h:S.work&&S.work.h,gray:S.lastGray,strokes:S.strokes,offs:S.offs,fill:S.fill,fcurve:S.fcurve,rot:S.rot||0,status:$('statusText').textContent});
 updateLabels();
 loadImage(sample(),'sample-pattern',true);
+
+// ---- the pens: marks painted right on the page ----
+// The highlighter (purple) goes over lines that should not be there; the blue pen draws where a line should be.
+// Nothing changes while painting: Apply marks turns them all into fixes at once, read just as a marked picture is
+// (purple takes out the stretch it covers; blue is a guide the tool follows to the lead in the picture).
+S.penMode=null;S.penMarks=[];
+function penLwPage(){return Math.max(2,widthIn()*S.workPPI)*pageGeom().k;}
+function penMarkup(){if(!S.penMarks||!S.penMarks.length)return'';const k=1/layerScale(),lw=penLwPage();let h='';
+  for(const m of S.penMarks){const d=m.pts.map((q,i)=>(i?'L':'M')+q[0].toFixed(1)+','+q[1].toFixed(1)).join('')+(m.pts.length===1?'l0.01,0':'');
+    h+=m.c==='p'?`<path d="${d}" fill="none" stroke="#8a10d0" stroke-opacity=".55" stroke-width="${Math.max(1.6*lw,8*k)}" stroke-linecap="round" stroke-linejoin="round"/>`
+      :`<path d="${d}" fill="none" stroke="#0a5cff" stroke-width="${3*k}" stroke-linecap="round" stroke-linejoin="round"/>`;}
+  return h;}
+function drawPen(){const g=$('fixLayer').querySelector('#penG');if(g)g.innerHTML=penMarkup();else drawFixLayer();}
+function penBar(){const n=S.penMarks.length;$('penApply').hidden=!n;$('penClear').hidden=!n;$('penApply').textContent=n?'Apply marks ('+n+')':'Apply marks';
+  if(n)$('fixUndo').disabled=false;else updateFixBar();}
+function setPen(mode){if(mode){if(S.drawMode)setDrawMode(false);setAreaMode(false);S.symPending=null;closeFixPop();}
+  S.penMode=mode;$('penPurple').setAttribute('aria-pressed',String(mode==='p'));$('penBlue').setAttribute('aria-pressed',String(mode==='b'));
+  $('fixLayer').classList.toggle('picking-area',!!mode);
+  $('fixHelp').textContent=mode==='p'?'Paint over the lines that should go. Switch pens any time; nothing changes until you press Apply marks (Enter). Esc stops.'
+    :mode==='b'?'Draw where a line should be, from line to line. It need not be exact: the tool looks for the lead in your picture along it. Press Apply marks (Enter) when done. Esc stops.'
+    :'Click a dot or a line to choose how it should look, or drag it to reshape it. To bend a line at a spot of your own, click the line and choose Add a dot here, then drag the dot.';
+  drawFixLayer();penBar();}
+function applyPen(){if(!S.penMarks.length||!S.strokes)return;const geo=pageGeom(),lw=penLwPage(),f=12/lw;
+  // (painted on a canvas just big enough for the marks, at a quarter of a lead's width to the cell, so a small loop
+  // round an eye or a nostril keeps its shape)
+  let bx0=Infinity,by0=Infinity,bx1=-Infinity,by1=-Infinity;for(const m of S.penMarks)for(const q of m.pts){bx0=Math.min(bx0,q[0]);by0=Math.min(by0,q[1]);bx1=Math.max(bx1,q[0]);by1=Math.max(by1,q[1]);}
+  const mg=3*lw;bx0-=mg;by0-=mg;bx1+=mg;by1+=mg;const W_=Math.max(1,Math.ceil((bx1-bx0)*f)),H_=Math.max(1,Math.ceil((by1-by0)*f));
+  const paint=(c,wid)=>{const cv=document.createElement('canvas');cv.width=W_;cv.height=H_;const g=cv.getContext('2d');g.strokeStyle='#000';g.lineCap='round';g.lineJoin='round';g.lineWidth=wid;
+    const X=q=>(q[0]-bx0)*f,Y=q=>(q[1]-by0)*f;
+    for(const m of S.penMarks){if(m.c!==c)continue;g.beginPath();m.pts.forEach((q,i)=>{if(i)g.lineTo(X(q),Y(q));else g.moveTo(X(q),Y(q));});if(m.pts.length===1)g.lineTo(X(m.pts[0])+0.01,Y(m.pts[0]));g.stroke();}
+    const d=g.getImageData(0,0,W_,H_).data,M=new Uint8Array(W_*H_);for(let i=0;i<M.length;i++)M[i]=d[4*i+3]>100?1:0;return M;};
+  const PUR=paint('p',19),BLU=paint('b',2.5),ox=PAD*S.sx,oy=PAD*S.sy;
+  const toW=(X,Y)=>[(X/f+bx0-geo.m)/geo.k+ox,(Y/f+by0-geo.m)/geo.k+oy];
+  let r=null;try{r=markFixes(PUR,BLU,W_,H_,toW,3);}catch(err){console.error(err);}
+  S.penMarks=[];penBar();drawPen();
+  if(!r||!r.fixes.length){setStatus('Those marks did not land on or between lines: nothing changed',false);return;}
+  changeFixes(()=>{for(const x of r.fixes)S.fixes.push(x);});setStatus('Applying your marks: '+r.np+' taken out, '+r.nb+' drawn',true);}
+$('penPurple').addEventListener('click',()=>setPen(S.penMode==='p'?null:'p'));
+$('penBlue').addEventListener('click',()=>setPen(S.penMode==='b'?null:'b'));
+$('penApply').addEventListener('click',applyPen);
+$('penClear').addEventListener('click',()=>{S.penMarks=[];penBar();drawPen();});
+document.addEventListener('keydown',e=>{if(!S.penMode&&!S.penMarks.length)return;if(/^(INPUT|SELECT|TEXTAREA)$/.test((e.target||{}).tagName||''))return;
+  if(e.key==='Enter'&&S.penMarks.length){e.preventDefault();applyPen();}
+  else if(e.key==='Escape'&&S.penMode){e.stopImmediatePropagation();setPen(null);}
+  else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&S.penMarks.length){e.preventDefault();e.stopImmediatePropagation();S.penMarks.pop();penBar();drawPen();}},true);
 // ---- marking up a check picture ----
 // The check picture is the Overlay view saved as a picture: the lines in red over the original. Marked up in any
 // paint program (purple over a line to take it out, blue where a line should be) and loaded back, each mark becomes
@@ -4663,6 +4750,7 @@ $('loadMarks').addEventListener('click',()=>{if(!S.strokes){setStatus('Make the 
 $('marksFile').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const img=new Image();
   img.onload=()=>{let r=null;try{r=readMarks(img);}catch(err){console.error(err);}URL.revokeObjectURL(img.src);
     if(!r){setStatus('No red lines found in that picture: load a check picture saved from here',false);return;}
+    if(r.misfit){setStatus('That picture could not be lined up with the lines here (zoomed in and cut off on every side?). Mark a whole check picture, or paint the marks right here with the pens',false);return;}
     if(!r.fixes.length){setStatus('No purple or blue marks found in that picture',false);return;}
     changeFixes(()=>{for(const x of r.fixes)S.fixes.push(x);});
     setStatus('Applying your marks: '+r.np+' taken out, '+r.nb+' drawn',true);};
@@ -4674,8 +4762,15 @@ function readMarks(img){const c=document.createElement('canvas');c.width=img.nat
     if(r>150&&gg<90&&b<100&&r-gg>80){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;R.push(x,y);}
     else if(b>150&&r<90&&gg<140&&b-r>90)BLU[y*w+x]=1;
     else if(gg<60&&r>50&&r<200&&b>40&&b<235&&r-gg>40&&b-gg>40&&Math.abs(r-b)<90)PUR[y*w+x]=1;}
-  // (where a blue mark crosses a red line the two blend to a purple; that is no purple mark)
-  {const r=3;for(let y=0;y<h;y++)for(let x=0;x<w;x++){if(!PUR[y*w+x])continue;let nearB=false;for(let dy=-r;dy<=r&&!nearB;dy++)for(let dx=-r;dx<=r&&!nearB;dx++){const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<w&&Y<h&&BLU[Y*w+X])nearB=true;}if(nearB)PUR[y*w+x]=0;}}
+  // (where a blue mark crosses a red line the two blend to a purple; that is no purple mark. Such a blend lies all
+  // within a pixel or two of the blue, while a real purple mark, even one drawn right beside a blue one, is mostly
+  // away from it)
+  {const nearB=(x,y)=>{for(let dy=-3;dy<=3;dy++)for(let dx=-3;dx<=3;dx++){const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<w&&Y<h&&BLU[Y*w+X])return true;}return false;};
+    const seen=new Uint8Array(w*h);
+    for(let st=0;st<w*h;st++){if(!PUR[st]||seen[st])continue;const Q=[st];seen[st]=1;let nb=0;
+      for(let qi=0;qi<Q.length;qi++){const u=Q[qi],x=u%w,y=(u/w)|0;if(nearB(x,y))nb++;
+        for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=w||Y>=h)continue;const v=Y*w+X;if(PUR[v]&&!seen[v]){seen[v]=1;Q.push(v);}}}
+      if(nb>=0.8*Q.length)for(const u of Q)PUR[u]=0;}}
   if(x1<0||x1-x0<20||y1-y0<20)return null;
   // (the marked picture lined up on the lines here: a screenshot may be cut off at a side, so the scale comes from
   // the side that is whole, then the picture is slid and scaled a little until its red lines lie best on ours)
@@ -4694,15 +4789,26 @@ function readMarks(img){const c=document.createElement('canvas');c.width=img.nat
   for(let ks=0.994;ks<=1.0061;ks+=0.002){const k=best.k*ks;for(let dy=-3;dy<=3;dy++)for(let dx=-3;dx<=3;dx++){const ox=best.ox+dx/k,oy=best.oy+dy/k,n=score(k,ox,oy);if(n>best.n)best={n,k,ox,oy};}}
     const toW=(X,Y)=>[ax0+(X-best.ox)*best.k/q,ay0+(Y-best.oy)*best.k/q];   // marked picture -> our lines' own coordinates
   const toSrc=(x,y)=>{const geo=pageGeom(),p=geo.map(x,y);return workToSrc(...pageToWorkInternal(p[0],p[1]));};
+  // (a picture that would not line up: most of its red lines fall on none of ours. A screenshot zoomed in and cut off on
+  // every side has no whole side to take the scale from)
+  if(best.n<0.5*Rs.length/2)return{fixes:[],np:0,nb:0,misfit:true};
+  return markFixes(PUR,BLU,w,h,toW,Math.max(2.5,0.3*lwW*q/best.k));}
+// (marks, as purple and blue pixel masks with a map from their pixels to our lines' coordinates, made into fixes:
+// shared by a marked picture and by the pens on the page)
+function markFixes(PUR,BLU,w,h,toW,cell){const pts=S.strokes,offs=S.offs,lwW=Math.max(2,widthIn()*S.workPPI);
+  const toSrc=(x,y)=>{const geo=pageGeom(),p=geo.map(x,y);return workToSrc(...pageToWorkInternal(p[0],p[1]));};
   // (each mark: its pixels gathered into cells about half a lead wide, cells next to each other joined)
-  const cell=Math.max(2.5,0.5*lwW*q/best.k);
   const groups=M=>{const cells=new Map();for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(M[y*w+x]){const key=Math.floor(x/cell)+','+Math.floor(y/cell);const v=cells.get(key);if(v){v[0]+=x;v[1]+=y;v[2]++;}else cells.set(key,[x,y,1]);}
     const keys=[...cells.keys()],seen=new Set(),out=[];for(const k0 of keys){if(seen.has(k0))continue;const comp=[],st=[k0];seen.add(k0);
       while(st.length){const k=st.pop();const[a,b]=k.split(',').map(Number);const v=cells.get(k);comp.push({k,a,b,p:toW(v[0]/v[2],v[1]/v[2])});
         for(let da=-1;da<=1;da++)for(let db=-1;db<=1;db++){const kk=(a+da)+','+(b+db);if(cells.has(kk)&&!seen.has(kk)){seen.add(kk);st.push(kk);}}}
       if(comp.length)out.push(comp);}return out;};
   const K=stretchTools(Float32Array.from(pts),offs,lwW),n=offs.length-1;
-  const gone=new Uint8Array(pts.length/2);const nearPt=(x,y,lim,live)=>{let bs=-1,bi=-1,bd=lim;for(let s=0;s<n;s++)for(let i=offs[s];i<offs[s+1];i++){if(live&&gone[i])continue;const dd=Math.hypot(pts[2*i]-x,pts[2*i+1]-y);if(dd<bd){bd=dd;bs=s;bi=i;}}return bs<0?null:{s:bs,i:bi,d:bd};};
+  // (the points of our lines in a grid of cells, so finding the nearest is quick)
+  const gc=3*lwW,grid=new Map(),sOf=new Int32Array(pts.length/2);for(let s=0;s<n;s++)for(let i=offs[s];i<offs[s+1];i++){sOf[i]=s;const key=Math.floor(pts[2*i]/gc)+','+Math.floor(pts[2*i+1]/gc);let a=grid.get(key);if(!a)grid.set(key,a=[]);a.push(i);}
+  const gone=new Uint8Array(pts.length/2);const nearPt=(x,y,lim,live)=>{let bs=-1,bi=-1,bd=lim;const r=Math.ceil(lim/gc),cx=Math.floor(x/gc),cy=Math.floor(y/gc);
+    for(let a=cx-r;a<=cx+r;a++)for(let b=cy-r;b<=cy+r;b++){const L=grid.get(a+','+b);if(!L)continue;for(const i of L){if(live&&gone[i])continue;const dd=Math.hypot(pts[2*i]-x,pts[2*i+1]-y);if(dd<bd){bd=dd;bs=sOf[i];bi=i;}}}
+    return bs<0?null:{s:bs,i:bi,d:bd};};
   const fixes=[],removed=new Set();let np=0,nb=0;
   const removeStretch=(s,i,at)=>{const[lo,hi]=K.piece(s,i);const key=s+':'+lo+':'+hi;if(removed.has(key))return false;removed.add(key);for(let t=lo+1;t<hi;t++)gone[t]=1;const m=at?i:Math.round((lo+hi)/2);const[sx,sy]=toSrc(pts[2*m],pts[2*m+1]);fixes.push({sx,sy,mode:'remove'});return true;};
   // (purple: a stretch of line goes when most of it lies under the mark)
@@ -4715,16 +4821,34 @@ function readMarks(img){const c=document.createElement('canvas');c.width=img.nat
     // brushes the line beside it leaves that line alone)
     cov.sort((a,b)=>b.f-a.f);cov.forEach((c,j)=>{if((j===0&&c.f>=0.3)||c.f>=0.85){if(removeStretch(c.v.s,c.v.i))np++;}});}
   // (blue: the mark's middle as a path, end to end along it)
-  for(const comp of groups(BLU)){if(comp.length<3)continue;const idx=new Map(comp.map((c,j)=>[c.k,j]));
-    const adj=comp.map(c=>{const o=[];for(let da=-1;da<=1;da++)for(let db=-1;db<=1;db++){if(!da&&!db)continue;const j=idx.get((c.a+da)+','+(c.b+db));if(j!==undefined)o.push(j);}return o;});
-    const bfs=s=>{const dist=new Array(comp.length).fill(-1),prev=new Array(comp.length).fill(-1),Q=[s];dist[s]=0;for(let h2=0;h2<Q.length;h2++){const u=Q[h2];for(const v of adj[u])if(dist[v]<0){dist[v]=dist[u]+1;prev[v]=u;Q.push(v);}}let far=s;for(let j=0;j<comp.length;j++)if(dist[j]>dist[far])far=j;return{far,prev};};
-    const A=bfs(0).far,{far:B,prev}=bfs(A);const path=[];for(let v=B;v>=0;v=prev[v])path.push(comp[v].p);
+  // (a mark may branch or close on itself (a nostril drawn round, a line run off the outline): it is taken apart
+  // into its branches, the longest first, each later one carried to the branch it leaves)
+  const branches=comp0=>{const out=[],done=[];
+    const take=cells=>{if(cells.length<3)return;const idx=new Map(cells.map((c,j)=>[c.k,j]));
+      const adj=cells.map(c=>{const o=[];for(let da=-1;da<=1;da++)for(let db=-1;db<=1;db++){if(!da&&!db)continue;const j=idx.get((c.a+da)+','+(c.b+db));if(j!==undefined)o.push(j);}return o;});
+      const seenC=new Uint8Array(cells.length);
+      for(let s0=0;s0<cells.length;s0++){if(seenC[s0])continue;const mem=[s0];seenC[s0]=1;for(let h2=0;h2<mem.length;h2++)for(const v of adj[mem[h2]])if(!seenC[v]){seenC[v]=1;mem.push(v);}
+        if(mem.length<3)continue;
+        const bfs=s=>{const dist=new Map([[s,0]]),prev=new Map([[s,-1]]),Q=[s];for(let h2=0;h2<Q.length;h2++){const u=Q[h2];for(const v of adj[u])if(!dist.has(v)){dist.set(v,dist.get(u)+1);prev.set(v,u);Q.push(v);}}let far=s;for(const[j,d]of dist)if(d>dist.get(far))far=j;return{far,prev};};
+        const A=bfs(mem[0]).far,{far:B,prev}=bfs(A);const pc=[];for(let v=B;v>=0;v=prev.get(v))pc.push(cells[v]);
+        if(done.length&&pc.length<4)continue;
+        const path=pc.map(c=>c.p);
+        // (a later branch's ends reach to the branch it comes off)
+        if(done.length)for(const e of[0,1]){const c=e?pc[pc.length-1]:pc[0];let bd=2.6,bp=null;for(const d of done){const dd=Math.max(Math.abs(d.a-c.a),Math.abs(d.b-c.b));if(dd<bd){bd=dd;bp=d.p;}}if(bp){if(e)path.push(bp);else path.unshift(bp);}}
+        out.push(path);
+        const pk=new Set();for(const c of pc)for(let da=-1;da<=1;da++)for(let db=-1;db<=1;db++)pk.add((c.a+da)+','+(c.b+db));
+        for(const c of pc)done.push(c);
+        take(mem.map(j=>cells[j]).filter(c=>!pk.has(c.k)));}};
+    take(comp0);return out;};
+  for(const comp0 of groups(BLU)){if(comp0.length<3)continue;for(const path of branches(comp0)){
     // (smoothed a little, then cut to short straight pieces)
     const sm=path.map((p,j)=>{let sx=0,sy=0,c=0;for(let t=Math.max(0,j-2);t<=Math.min(path.length-1,j+2);t++){sx+=path[t][0];sy+=path[t][1];c++;}return[sx/c,sy/c];});sm[0]=path[0];sm[sm.length-1]=path[path.length-1];
     const rdp=(P,e)=>{if(P.length<3)return P;const a=P[0],b=P[P.length-1],L=Math.hypot(b[0]-a[0],b[1]-a[1])||1;let mi=0,md=0;for(let j=1;j<P.length-1;j++){const dd=Math.abs((b[0]-a[0])*(a[1]-P[j][1])-(a[0]-P[j][0])*(b[1]-a[1]))/L;if(dd>md){md=dd;mi=j;}}return md>e?rdp(P.slice(0,mi+1),e).slice(0,-1).concat(rdp(P.slice(mi),e)):[a,b];};
-    // (where the mark only traces over a line already there it changes nothing: just the parts of it off the
-    // lines are drawn, each carried a little past its ends so it meets the line it leaves)
-    const off=sm.map(p=>!nearPt(p[0],p[1],0.9*lwW));const runs=[];for(let j=0;j<sm.length;j++){if(!off[j])continue;let k=j;while(k+1<sm.length&&off[k+1])k++;runs.push([Math.max(0,j-1),Math.min(sm.length-1,k+1)]);j=k;}
+    // (a mark that only traces over a line already there changes nothing; one that leaves the lines anywhere is taken
+    // whole: a hand mark is seldom right on the lead, so where it runs beside a line it is showing where that line
+    // should be, and the guide finds the lead along all of it)
+    const off=sm.map(p=>!nearPt(p[0],p[1],0.9*lwW));let offL=0;for(let j=1;j<sm.length;j++)if(off[j]||off[j-1])offL+=Math.hypot(sm[j][0]-sm[j-1][0],sm[j][1]-sm[j-1][1]);
+    const runs=offL>=1.2*lwW?[[0,sm.length-1]]:[];
     for(const[ra,rb]of runs){if(rb-ra<2)continue;
     let poly=rdp(sm.slice(ra,rb+1),0.25*lwW);const path2=path.slice(ra,rb+1);
     // (the stretch it replaces: a line close beside the mark all along, that is not just crossing it)
@@ -4737,7 +4861,7 @@ function readMarks(img){const c=document.createElement('canvas');c.width=img.nat
     for(const end of[0,poly.length-1]){const p=poly[end],r=nearPt(p[0],p[1],3*lwW,true);if(r)poly[end]=[pts[2*r.i],pts[2*r.i+1]];}
     // (a mark is drawn by hand and seldom lies right on the lead: it is kept as a guide, and the tool looks for the
     // lead in the photo along it, drawing the mark itself only where none shows)
-    {const g=[];for(const p of poly)g.push(...toSrc(p[0],p[1]));fixes.push({mode:'guide',pts:g});}nb++;}}
+    {const g=[];for(const p of poly)g.push(...toSrc(p[0],p[1]));fixes.push({mode:'guide',pts:g});}nb++;}}}
   return{fixes,np,nb};}
 
 })();

@@ -8,6 +8,9 @@
 // along its middle. The rest of the tool then works on it as a plain line drawing.
 // ================================================================================================
 let mxBuf=null,chBuf=null;
+// (the lead found before any hand guides, and the last finished result, kept for the next run: a fix only redoes
+// what it changes)
+let photoBase=null,photoLast=null;
 // (the largest or smallest value within r either side, along rows or columns: van Herk / Gil-Werman)
 function runMaxMin(src,r,isMax,horiz){const N=W*H,out=new Uint8Array(N),L=horiz?W:H,n=horiz?H:W,k=2*r+1;
   const g=new Uint8Array(L+k),h=new Uint8Array(L+k),line=new Uint8Array(L+2*r),pad=isMax?0:255;
@@ -25,6 +28,9 @@ function photoLines(T,C,guides){
   const comps=(a,eight)=>{lab.fill(0);const sz=[0];let n=0;for(let s=0;s<N;s++){if(!a[s]||lab[s])continue;n++;let sp=0,c=0;st[sp++]=s;lab[s]=n;
       while(sp){const i=st[--sp];c++;const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;if(!eight&&dx&&dy)continue;const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(a[k]&&!lab[k]){lab[k]=n;st[sp++]=k;}}}
       sz.push(c);}return sz;};
+  const gkey=JSON.stringify(guides||[]),bkey=T+':'+C+':'+W+'x'+H;
+  if(photoLast&&photoLast.mx===mxBuf&&photoLast.bkey===bkey&&photoLast.gkey===gkey)return{m:photoLast.m.slice(),lw:photoLast.lw};
+  let m,lw;if(photoBase&&photoBase.mx===mxBuf&&photoBase.key===bkey){m=photoBase.m.slice();lw=photoBase.lw;}else{
   const r1=Math.max(1,Math.round(sc)),r2=Math.max(1,Math.round(2*sc));
   // (very dark and grey)
   let core=new Uint8Array(N);for(let i=0;i<N;i++)core[i]=mxBuf[i]<T&&chBuf[i]<C?1:0;core=dil(ero(core,r2),r2);
@@ -32,28 +38,42 @@ function photoLines(T,C,guides){
   const R=Math.max(6,Math.round(20*sc));const cl=runMaxMin(runMaxMin(runMaxMin(runMaxMin(mxBuf,R,true,true),R,true,false),R,false,true),R,false,false);
   let ridge=new Uint8Array(N);for(let i=0;i<N;i++)ridge[i]=cl[i]-mxBuf[i]>40&&mxBuf[i]<80&&chBuf[i]<45&&cl[i]>130?1:0;ridge=dil(ero(ridge,r1),r1);
   // (streaks only where they join the dark lead, and not specks)
-  let m=core.slice();{const sz=comps(ridge,true),touch=new Uint8Array(sz.length);for(let i=0;i<N;i++)if(lab[i]&&core[i])touch[lab[i]]=1;
+  m=core.slice();{const sz=comps(ridge,true),touch=new Uint8Array(sz.length);for(let i=0;i<N;i++)if(lab[i]&&core[i])touch[lab[i]]=1;
     const lim=200*sc*sc;for(let i=0;i<N;i++)if(lab[i]&&touch[lab[i]]&&sz[lab[i]]>lim)m[i]=1;}
   m=ero(dil(m,r2),r2);
   {const sz=comps(m,true);let big=1;for(const v of sz)if(v>big)big=v;for(let i=0;i<N;i++)if(m[i]&&sz[lab[i]]<0.002*big)m[i]=0;}
-  const lw=Math.max(4,inkWidth(m));
+  lw=Math.max(4,inkWidth(m));photoBase={mx:mxBuf,key:bkey,m:m.slice(),lw};}
+
   // (holes: a pinhole, or a little dark ring of glass texture, is filled; a real small piece, an eye or a nostril, is
   // light glass and stays however small)
   const fillHoles=(lim,darkLim)=>{const inv=notM(m),sz=comps(inv,false),sum=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i])sum[lab[i]]+=mxBuf[i];
+    // (a piece that a hand guide closes is a real piece, however dark or small: the person drew it)
+    const gHole=gm?new Uint8Array(sz.length):null;if(gm)for(let i=0;i<N;i++)if(lab[i]&&gm[i])gHole[lab[i]]=1;
+    // (a light piece found in the first pass, an eye or a nostril, stays a piece when the lines round it are redrawn
+    // at full lead width and it shrinks)
+    const keepLab=lightKeep?new Uint8Array(sz.length):null;if(lightKeep)for(let i=0;i<N;i++)if(lab[i]&&lightKeep[i])keepLab[lab[i]]=1;
     // (and a sliver: a piece much narrower than the lead is wide, and long, is where two lines run side by side)
     const dd=edt(m),far=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i]&&dd[i]>far[lab[i]])far[lab[i]]=dd[i];
     for(let i=0;i<N;i++){const l=lab[i];if(!l)continue;const r=Math.sqrt(far[l]),sliver=r<0.6*lw&&sz[l]/(2*Math.max(1,r))>3*lw&&sz[l]<30*lw*lw;
-      const mean=sum[l]/sz[l];if((sz[l]<lim&&(mean<120||sz[l]<0.25*lw*lw))||(sz[l]<darkLim&&mean<40)||(sliver&&mean<120))m[i]=1;}};
+      const mean=sum[l]/sz[l];if(gHole&&gHole[l]&&sz[l]>=0.3*lw*lw)continue;if(keepLab&&keepLab[l])continue;if((sz[l]<lim&&(mean<120||sz[l]<0.25*lw*lw))||(sz[l]<darkLim&&mean<40)||(sliver&&mean<120))m[i]=1;}};
 
   // (along the middle; loose ends taken back, short lines on their own dropped; then once more, as the redrawing
   // closes rings that the first pass left)
   // (guides marked by hand: along each, the lead in the photo is found and kept, even where it is lighter or broken;
   // where none shows, the guide itself is drawn)
-  // (guides marked by hand: along each, the lead in the photo is found and kept, even where it is lighter or broken;
-  // where none shows, the guide itself is drawn)
-  if(Array.isArray(guides))for(const G of guides)followGuide(m,G,lw);
+  // (and kept through the cleaning below: a guide's line is not a loose end or a scrap to be dropped, and the pieces
+  // it closes are not holes to fill)
+  // (a guide through a wide patch of dark, lead or dark glass with no line of its own to find, is drawn again once the
+  // patch has been cleaned down to lines: drawn into it before, it would be lost in it)
+  const late=[];
+  let gm=null;if(Array.isArray(guides)&&guides.length){gm=new Uint8Array(N);for(const G of guides){if(!followGuide(m,G,lw))late.push(G);for(let i=2;i+1<G.length;i+=2)drawSeg(gm,G[i-2],G[i-1],G[i],G[i+1],0.65*lw);}}
   let sk=null;
-  for(let round=0;round<3;round++){fillHoles(round?2.5*lw*lw:1.3*lw*lw,8*lw*lw);sk=m.slice();thin(sk,W,H);
+  let lightKeep=null;
+  for(let round=0;round<3;round++){fillHoles(round?2.5*lw*lw:1.3*lw*lw,8*lw*lw);
+    if(round===0){// (the light pieces left after the first filling: their middles, kept open from here on)
+      const inv=notM(m),sz=comps(inv,false),sum=new Float64Array(sz.length);for(let i=0;i<N;i++)if(lab[i])sum[lab[i]]+=mxBuf[i];
+      const d=edt(m);lightKeep=new Uint8Array(N);for(let i=0;i<N;i++){const l=lab[i];if(l&&sz[l]>=lw*lw&&sz[l]<6*lw*lw&&sum[l]/sz[l]>=120&&d[i]>=4)lightKeep[i]=1;}}
+    sk=m.slice();thin(sk,W,H);
     // (an end: one neighbour, or two that touch each other, as at the stair-stepped tip of a thinned line)
     const nbs=i=>{const o=[];const y=(i/W)|0,x=i-y*W;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const X=x+dx,Y=y+dy;if(X>=0&&Y>=0&&X<W&&Y<H&&sk[Y*W+X])o.push(Y*W+X);}return o;};
     const nb=i=>{const o=nbs(i);if(o.length===2){const a=o[0],b=o[1];if(Math.abs(a%W-b%W)<=1&&Math.abs(((a/W)|0)-((b/W)|0))<=1)return 1;}return o.length;};
@@ -61,11 +81,15 @@ function photoLines(T,C,guides){
     // carried straight on to a line close ahead of it)
     if(round===0)bridgeEnds(sk,lw,nb,nbs);
     const q=[];for(let i=0;i<N;i++)if(sk[i]&&nb(i)<=1)q.push(i);
-    while(q.length){const i=q.pop();if(!sk[i]||nb(i)>1)continue;sk[i]=0;const y=(i/W)|0,x=i-y*W;
+    while(q.length){const i=q.pop();if(!sk[i]||nb(i)>1||(gm&&gm[i]))continue;sk[i]=0;const y=(i/W)|0,x=i-y*W;
       for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=W||Y>=H)continue;const k=Y*W+X;if(sk[k]&&nb(k)<=1)q.push(k);}}
-    {const sz=comps(sk,true);for(let i=0;i<N;i++)if(sk[i]&&sz[lab[i]]<20*lw)sk[i]=0;}
+    {const sz=comps(sk,true),keepG=new Uint8Array(sz.length);if(gm)for(let i=0;i<N;i++)if(sk[i]&&gm[i])keepG[lab[i]]=1;for(let i=0;i<N;i++)if(sk[i]&&sz[lab[i]]<20*lw&&!keepG[lab[i]])sk[i]=0;}
     if(round===2)splitTips(sk,lw);
-    m=dil(sk,lw/2);}
+    // (the last redrawing a little thinner than the lead in the photo: small pieces, an eye or a nostril, then keep
+    // room enough to be traced; the lines are redrawn at the lead width wanted later anyway)
+    m=dil(sk,round===2?Math.max(2,0.35*lw):lw/2);if(lightKeep)for(let i=0;i<N;i++)if(lightKeep[i])m[i]=0;}
+  for(const G of late)for(let i=2;i+1<G.length;i+=2)drawSeg(m,G[i-2],G[i-1],G[i],G[i+1],Math.max(2,0.35*lw));
+  photoLast={mx:mxBuf,bkey,gkey,m:m.slice(),lw};
   return{m,lw};}
 // (a sharp tip, like a tree's point meeting the sky: in the photo the lead of its two sides runs together just below
 // the tip, so the middle shows the two sides joining a little way down with one short line on up to the tip. The two
@@ -119,13 +143,13 @@ function bridgeEnds(sk,lw,nb,nbs){const N=W*H,ends=[];for(let i=0;i<N;i++)if(sk[
     for(let t=0;t<=steps;t++)sk[Math.round(ey+(Y-ey)*t/steps)*W+Math.round(ex+(X-ex)*t/steps)]=1;n++;}
   return n;}
 
-function followGuide(m,G,lw){if(!G||G.length<4)return;const N=W*H,R=1.3*lw;
+function followGuide(m,G,lw){if(!G||G.length<4)return true;const N=W*H,R=1.3*lw;
   let x0=W,y0=H,x1=0,y1=0;for(let i=0;i<G.length;i+=2){x0=Math.min(x0,G[i]);x1=Math.max(x1,G[i]);y0=Math.min(y0,G[i+1]);y1=Math.max(y1,G[i+1]);}
   x0=Math.max(0,Math.floor(x0-R-2));y0=Math.max(0,Math.floor(y0-R-2));x1=Math.min(W-1,Math.ceil(x1+R+2));y1=Math.min(H-1,Math.ceil(y1+R+2));
   const dseg=(x,y)=>{let bd=Infinity,bt=0,acc=0,tot=0;for(let i=2;i+1<G.length;i+=2){const ax=G[i-2],ay=G[i-1],dx=G[i]-ax,dy=G[i+1]-ay,l=Math.hypot(dx,dy)||1;let t=((x-ax)*dx+(y-ay)*dy)/(l*l);t=Math.max(0,Math.min(1,t));const d=Math.hypot(ax+t*dx-x,ay+t*dy-y);if(d<bd){bd=d;bt=acc+t*l;}acc+=l;}return[bd,bt,acc];};
   // (the darkest grey pixels in the band round the guide: the lead under it)
   const band=[];let total=1;for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const[d,t,L]=dseg(x,y);total=L;if(d<=R)band.push([y*W+x,t,d]);}
-  if(!band.length)return;const vals=band.map(b=>mxBuf[b[0]]).sort((a,b)=>a-b);const lo=vals[Math.floor(0.05*vals.length)],hi=vals[Math.floor(0.6*vals.length)];
+  if(!band.length)return true;const vals=band.map(b=>mxBuf[b[0]]).sort((a,b)=>a-b);const lo=vals[Math.floor(0.05*vals.length)],hi=vals[Math.floor(0.6*vals.length)];
   const T=Math.min(90,lo+0.4*(hi-lo));const found=new Uint8Array(N);for(const[i]of band)if(mxBuf[i]<=T&&chBuf[i]<50)found[i]=1;
   // (how much of the guide's length has lead beside it)
   // (lead is a thin line in the band; when most of the band reads as dark, it is dark glass round a small piece, and
@@ -139,4 +163,5 @@ function followGuide(m,G,lw){if(!G||G.length<4)return;const N=W*H,R=1.3*lw;
   }
   // (where the photo shows no lead along a stretch, the guide is drawn there)
   let acc=0;for(let i=2;i+1<G.length;i+=2){const ax=G[i-2],ay=G[i-1],bx=G[i],by=G[i+1],l=Math.hypot(bx-ax,by-ay);const n=Math.max(1,Math.ceil(l/(lw/2)));
-    for(let j=0;j<n;j++){const t=acc+l*(j+0.5)/n,k=Math.min(nb-1,Math.floor(t/lw));if(use&&hit[k])continue;const px=ax+(bx-ax)*j/n,py=ay+(by-ay)*j/n,qx=ax+(bx-ax)*(j+1)/n,qy=ay+(by-ay)*(j+1)/n;drawSeg(m,px,py,qx,qy,lw/2);}acc+=l;}}
+    for(let j=0;j<n;j++){const t=acc+l*(j+0.5)/n,k=Math.min(nb-1,Math.floor(t/lw));if(use&&hit[k])continue;const px=ax+(bx-ax)*j/n,py=ay+(by-ay)*j/n,qx=ax+(bx-ax)*(j+1)/n,qy=ay+(by-ay)*(j+1)/n;drawSeg(m,px,py,qx,qy,lw/2);}acc+=l;}
+  return use;}
