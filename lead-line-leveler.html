@@ -210,7 +210,8 @@ main{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
     <div class="file-name" id="fileName">sample-pattern</div>
     <div class="actions">
       <select id="pdfPage" hidden aria-label="PDF page to open" title="Page of the PDF to open"></select>
-      <label class="btn" for="fileInput">Open pattern<input id="fileInput" type="file" accept="image/*,application/pdf,.pdf"></label>
+      <label class="btn" for="fileInput" title="A pattern picture, a PDF, or a project saved here">Open pattern<input id="fileInput" type="file" accept="image/*,application/pdf,.pdf,.json,application/json"></label>
+      <button id="saveProject" disabled title="One file with the picture, every setting and all your fixes: open it later, on any computer, to carry on where you left off">Save project</button>
       <button id="saveFolder" hidden title="Choose the folder your saves go into">Save folder: ask each time</button>
       <button id="saveSvg" disabled>Save SVG</button>
       <button id="saveDxf" disabled title="Each glass piece as a closed cut line, with the lead gap between pieces: for Silhouette and other cutters">Save DXF for cutter</button>
@@ -3646,7 +3647,7 @@ function loadImage(img,name,isSample){
   S.src=c;S.name=name;S.sample=isSample;S.go=false;S.strokes=null;if(S.resultURL)URL.revokeObjectURL(S.resultURL);S.resultURL=null;S.resultBlob=null;S.svg=null;
   if(S.fixMode)$('fixBtn').click();closeFixPop();waitForGo();
   loadFixes(name,c.width,c.height);
-  $('fileName').textContent=name;$('sampleTag').hidden=!isSample;$('sSize').textContent=c.width+' × '+c.height+' px';
+  $('fileName').textContent=name;$('sampleTag').hidden=!isSample;$('saveProject').disabled=false;$('sSize').textContent=c.width+' × '+c.height+' px';
   if(S.origURL)URL.revokeObjectURL(S.origURL);c.toBlob(b=>{S.origURL=URL.createObjectURL(b);if(S.view==='original')showView();});
   findCrop();
   // (the size this picture was last used at here, or the size a saved PNG says it was made at; otherwise the
@@ -4648,7 +4649,8 @@ async function showPdfPage(n){const page=await pdfDoc.getPage(n),v1=page.getView
   await page.render({canvasContext:g,viewport:vp}).promise;S.axes=null;S.fileSize=null;S.pdfDpi=c.width/(v1.width/72);
   loadImage(c,pdfName+(pdfDoc.numPages>1?'-p'+n:''),false);}
 $('pdfPage').addEventListener('change',e=>{if(pdfDoc)showPdfPage(+e.target.value).catch(()=>setStatus('Could not read that page of the PDF.',false));});
-function loadFile(file){if(file&&(file.type==='application/pdf'||/\.pdf$/i.test(file.name||''))){openPdf(file);return;}
+function loadFile(file){if(file&&(file.type==='application/json'||/\.json$/i.test(file.name||''))){openProject(file);return;}
+  if(file&&(file.type==='application/pdf'||/\.pdf$/i.test(file.name||''))){openPdf(file);return;}
   if(pdfDoc){try{pdfDoc.destroy();}catch(e){}pdfDoc=null;}$('pdfPage').hidden=true;
   if(!file||!/^image\//.test(file.type)){setStatus('That file is not a picture or PDF. Try a PNG, JPG or PDF.',false);return;}S.axes=null;
   const url=URL.createObjectURL(file);const img=new Image();S.fileSize=null;
@@ -4659,6 +4661,30 @@ function loadFile(file){if(file&&(file.type==='application/pdf'||/\.pdf$/i.test(
   img.onload=async()=>{try{const meta=readPngSize(await file.arrayBuffer());if(meta)S.fileSize=meta;}catch(e){}loadImage(img,file.name.replace(/\.[^.]+$/,''),false);URL.revokeObjectURL(url);};
   img.onerror=()=>setStatus('Could not read that image. Try exporting it as PNG or JPG.',false);img.src=url;}
 $('fileInput').addEventListener('change',e=>{loadFile(e.target.files[0]);e.target.value='';});
+// ---- Project file: the picture (exactly as it was opened), every setting, all the fixes and whether it was levelled,
+// in one file. Fixes otherwise live only in this browser; a project can be kept, moved to another computer, or sent.
+const PROJECT_SETTINGS=['sizeW','sizeH','lockRatio','widthNum','unit','borderOn','borderNum','borderPos','smooth','thresh','threshAuto','invert','dropText','photoIn','ovalToRect','dropIslands','joinPieces','keepGaps','exactShapes','squareUp','transparent','fixReach','pngPPI','exactSize'];
+function projectSettings(){const o={};for(const id of PROJECT_SETTINGS){const e=$(id);if(!e)continue;o[id]=e.type==='checkbox'?e.checked:e.value;}return o;}
+function setProjectSettings(o){for(const id of PROJECT_SETTINGS){const e=$(id);if(!e||!(id in o))continue;if(e.type==='checkbox')e.checked=!!o[id];else e.value=o[id];}}
+$('saveProject').addEventListener('click',()=>{if(!S.src)return;const name=S.name+'-project.json',tgt=saveTarget('json',name);
+  const data=JSON.stringify({app:'lead-line-leveler',kind:'project',version:1,saved:new Date().toISOString(),name:S.name,
+    image:S.src.toDataURL('image/png'),settings:projectSettings(),fixes:S.fixes||[],mode:S.go?S.mode:null});
+  save(data,'json',tgt,name);});
+function openProject(file){const r=new FileReader();r.onerror=()=>setStatus('Could not read that file.',false);
+  r.onload=()=>{let P;try{P=JSON.parse(r.result);}catch(e){P=null;}
+    if(!P||P.app!=='lead-line-leveler'||P.kind!=='project'||typeof P.image!=='string'){setStatus('That file is not a Lead Line Leveler project.',false);return;}
+    const img=new Image();img.onerror=()=>setStatus('The picture in that project could not be read.',false);
+    img.onload=()=>{if(pdfDoc){try{pdfDoc.destroy();}catch(e){}pdfDoc=null;}$('pdfPage').hidden=true;S.axes=null;S.fileSize=null;S.pdfDpi=0;
+      const st=P.settings||{};setProjectSettings(st);
+      loadImage(img,P.name||file.name.replace(/(-project)?\.json$/i,''),false);
+      // (the project's own size, settings and fixes win over anything this browser remembered for the picture)
+      setProjectSettings(st);updateLabels();rememberSize();prepare();
+      S.fixes=Array.isArray(P.fixes)?P.fixes:[];S.undo=[];saveFixes();
+      if(P.mode==='level'||P.mode==='drawn')setMode(P.mode);
+      $('note').textContent='Opened the project '+(P.name||'')+(P.saved?' (saved '+new Date(P.saved).toLocaleString()+')':'')+'.';};
+    img.src=P.image;};
+  r.readAsText(file);}
+
 const mat=$('mat');
 ['dragenter','dragover'].forEach(t=>mat.addEventListener(t,e=>{e.preventDefault();mat.classList.add('dragging');}));
 ['dragleave','drop'].forEach(t=>mat.addEventListener(t,e=>{e.preventDefault();mat.classList.remove('dragging');}));
@@ -4688,7 +4714,7 @@ if(canPick&&typeof window.showDirectoryPicker==='function'){$('saveFolder').hidd
   $('saveFolder').addEventListener('click',async()=>{try{const h=await window.showDirectoryPicker({id:'lll-save',mode:'readwrite',startIn:S.saveDir||'downloads'});
       S.saveDir=h;await kvSet('saveDir',h);showFolder();$('note').textContent='Saves now go into the '+h.name+' folder.';}
     catch(e){if(e&&e.name!=='AbortError')$('note').textContent='Could not use that folder.';}});}
-const saveTypes={png:['PNG picture','image/png'],svg:['SVG drawing','image/svg+xml'],dxf:['DXF cut file','application/dxf'],zip:['Zip','application/zip']};
+const saveTypes={json:['Lead Line Leveler project','application/json'],png:['PNG picture','image/png'],svg:['SVG drawing','image/svg+xml'],dxf:['DXF cut file','application/dxf'],zip:['Zip','application/zip']};
 // (the browser lets a page open a save box, or ask to write in the chosen folder, only just after a click: a file that
 // takes a few seconds to make (a cut file, a large PNG) came too late, and the browser quietly sent it to Downloads.
 // So the place is settled the moment Save is clicked, and the file written there once it is made)

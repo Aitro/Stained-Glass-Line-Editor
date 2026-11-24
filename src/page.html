@@ -16,7 +16,8 @@
     <div class="file-name" id="fileName">sample-pattern</div>
     <div class="actions">
       <select id="pdfPage" hidden aria-label="PDF page to open" title="Page of the PDF to open"></select>
-      <label class="btn" for="fileInput">Open pattern<input id="fileInput" type="file" accept="image/*,application/pdf,.pdf"></label>
+      <label class="btn" for="fileInput" title="A pattern picture, a PDF, or a project saved here">Open pattern<input id="fileInput" type="file" accept="image/*,application/pdf,.pdf,.json,application/json"></label>
+      <button id="saveProject" disabled title="One file with the picture, every setting and all your fixes: open it later, on any computer, to carry on where you left off">Save project</button>
       <button id="saveFolder" hidden title="Choose the folder your saves go into">Save folder: ask each time</button>
       <button id="saveSvg" disabled>Save SVG</button>
       <button id="saveDxf" disabled title="Each glass piece as a closed cut line, with the lead gap between pieces: for Silhouette and other cutters">Save DXF for cutter</button>
