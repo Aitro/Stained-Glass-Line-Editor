@@ -5022,12 +5022,8 @@ function markFixes(PUR,BLU,w,h,toW,cell){const pts=S.strokes,offs=S.offs,lwW=Mat
     const runs=offL>=1.2*lwW?[[0,sm.length-1]]:[];
     for(const[ra,rb]of runs){if(rb-ra<2)continue;
     let poly=rdp(sm.slice(ra,rb+1),0.25*lwW);const path2=path.slice(ra,rb+1);
-    // (the stretch it replaces: a line close beside the mark all along, that is not just crossing it)
-    const segD=(x,y)=>{let bd=Infinity;for(let j=1;j<poly.length;j++){const a=poly[j-1],b=poly[j],dx=b[0]-a[0],dy=b[1]-a[1],l2=dx*dx+dy*dy||1;let t=((x-a[0])*dx+(y-a[1])*dy)/l2;t=Math.max(0,Math.min(1,t));bd=Math.min(bd,Math.hypot(a[0]+t*dx-x,a[1]+t*dy-y));}return bd;};
-    let markL=0;for(let j=1;j<poly.length;j++)markL+=Math.hypot(poly[j][0]-poly[j-1][0],poly[j][1]-poly[j-1][1]);
-    const cand=new Map();for(const p of path2){const r=nearPt(p[0],p[1],2*lwW);if(!r)continue;const[lo,hi]=K.piece(r.s,r.i);cand.set(r.s+':'+lo+':'+hi,{s:r.s,i:r.i,lo,hi});}
-    for(const v of cand.values()){let L=0,close=0,far=0;for(let i=v.lo;i<=v.hi;i++){const dd=segD(pts[2*i],pts[2*i+1]);if(i>v.lo){const l=Math.hypot(pts[2*i]-pts[2*i-2],pts[2*i+1]-pts[2*i-1]);L+=l;if(dd<2.5*lwW)close+=l;}far=Math.max(far,dd);}
-      if(L>0&&close>=0.75*L&&L<=1.6*markL+2*lwW&&far>0.6*lwW){let fi=v.i,fd=-1;for(let i=v.lo;i<=v.hi;i++){const dd=segD(pts[2*i],pts[2*i+1]);if(dd>fd){fd=dd;fi=i;}}removeStretch(v.s,fi,true);}}
+    // (a blue mark only adds a line: it takes nothing out, even a line it runs beside. Lines to go are marked in purple,
+    // so nothing disappears that was not marked to)
     // (each end carried to the line it reaches, when one is close)
     for(const end of[0,poly.length-1]){const p=poly[end],r=nearPt(p[0],p[1],3*lwW,true);if(r)poly[end]=[pts[2*r.i],pts[2*r.i+1]];}
     // (a mark is drawn by hand and seldom lies right on the lead: it is kept as a guide, and the tool looks for the
