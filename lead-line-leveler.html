@@ -4689,25 +4689,30 @@ if(canPick&&typeof window.showDirectoryPicker==='function'){$('saveFolder').hidd
       S.saveDir=h;await kvSet('saveDir',h);showFolder();$('note').textContent='Saves now go into the '+h.name+' folder.';}
     catch(e){if(e&&e.name!=='AbortError')$('note').textContent='Could not use that folder.';}});}
 const saveTypes={png:['PNG picture','image/png'],svg:['SVG drawing','image/svg+xml'],dxf:['DXF cut file','application/dxf'],zip:['Zip','application/zip']};
-async function saveLocal(data,ext){const name=fname(ext),blob=data instanceof Blob?data:new Blob([data],{type:(saveTypes[ext]||[,'application/octet-stream'])[1]});
-  if(S.saveDir){try{let ok=await S.saveDir.queryPermission({mode:'readwrite'});if(ok!=='granted')ok=await S.saveDir.requestPermission({mode:'readwrite'});
-      if(ok==='granted'){const fh=await S.saveDir.getFileHandle(name,{create:true}),w=await fh.createWritable();await w.write(blob);await w.close();
-        $('note').textContent='Saved '+name+' in the '+S.saveDir.name+' folder.';return true;}}
-    catch(e){}}
-  try{const t=saveTypes[ext];const fh=await window.showSaveFilePicker({id:'lll-save',suggestedName:name,startIn:S.saveDir||'downloads',types:t?[{description:t[0],accept:{[t[1]]:['.'+ext]}}]:undefined});
-    const w=await fh.createWritable();await w.write(blob);await w.close();$('note').textContent='Saved '+fh.name+'.';return true;}
-  catch(e){if(e&&e.name==='AbortError'){$('note').textContent='Save cancelled.';return true;}return false;}}
-async function save(data,ext){const note=$('note');
-  if(canPick&&await saveLocal(data,ext))return;
+// (the browser lets a page open a save box, or ask to write in the chosen folder, only just after a click: a file that
+// takes a few seconds to make (a cut file, a large PNG) came too late, and the browser quietly sent it to Downloads.
+// So the place is settled the moment Save is clicked, and the file written there once it is made)
+function saveTarget(ext,name){if(!canPick)return null;name=name||fname(ext);
+  return(async()=>{if(S.saveDir){try{let ok=await S.saveDir.queryPermission({mode:'readwrite'});if(ok!=='granted')ok=await S.saveDir.requestPermission({mode:'readwrite'});
+        if(ok==='granted')return{dir:S.saveDir,name};S.saveWhy='the browser did not allow writing in the '+S.saveDir.name+' folder ('+ok+')';}catch(e){S.saveWhy='the '+S.saveDir.name+' folder could not be used ('+(e&&e.message||e)+')';}}
+    try{const t=saveTypes[ext];const fh=await window.showSaveFilePicker({id:'lll-save',suggestedName:name,startIn:S.saveDir||'downloads',types:t?[{description:t[0],accept:{[t[1]]:['.'+ext]}}]:undefined});return{fh,name};}
+    catch(e){if(e&&e.name==='AbortError')return{cancel:true};S.saveWhy='the save box could not open ('+(e&&e.message||e)+')';return null;}})();}
+async function saveLocal(data,ext,tgt,name){const blob=data instanceof Blob?data:new Blob([data],{type:(saveTypes[ext]||[,'application/octet-stream'])[1]});
+  const t=await(tgt||saveTarget(ext,name));if(!t)return false;if(t.cancel){$('note').textContent='Save cancelled.';return true;}
+  try{if(t.dir){const fh=await t.dir.getFileHandle(t.name,{create:true}),w=await fh.createWritable();await w.write(blob);await w.close();$('note').textContent='Saved '+t.name+' in the '+t.dir.name+' folder.';return true;}
+    const w=await t.fh.createWritable();await w.write(blob);await w.close();$('note').textContent='Saved '+t.fh.name+'.';return true;}
+  catch(e){S.saveWhy='writing the file failed ('+(e&&e.message||e)+')';return false;}}
+async function save(data,ext,tgt,name){const note=$('note');S.saveWhy='';
+  if(canPick&&await saveLocal(data,ext,tgt,name))return;
   if(!S.dl&&!window.claude){const blob=data instanceof Blob?data:new Blob([data],{type:ext==='svg'?'image/svg+xml':'application/octet-stream'});
-    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=fname(ext);document.body.appendChild(a);a.click();
-    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);note.textContent='Saved '+fname(ext)+'.';return;}
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name||fname(ext);document.body.appendChild(a);a.click();
+    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);note.textContent='Saved '+(name||fname(ext))+(S.saveWhy?' to Downloads: '+S.saveWhy+'.':canPick?'.':' to Downloads (this browser cannot save into a chosen folder: Chrome or Edge can).');return;}
   if(!S.dl){note.textContent='Saving is not available in this view. Switch to Result, then right-click (or long-press) the image and choose Save image.';return;}
-  try{const name=fname(ext);await S.dl.save({filename:name,data});note.textContent='Saved '+name+'.';}
+  try{name=name||fname(ext);await S.dl.save({filename:name,data});note.textContent='Saved '+name+'.';}
   catch(err){const c=err&&err.code;
     // (Claude's viewer saves only some kinds of file, and a .dxf is not one of them: the cut file goes inside a .zip,
     // which it does save; open the .zip and the .dxf is in it)
-    if(c==='rejected_extension'&&ext!=='zip'){try{const name=fname(ext),z=zipOne(name,data),zn=name.replace(/\.[a-z0-9]+$/i,'')+'.zip';
+    if(c==='rejected_extension'&&ext!=='zip'){try{name=name||fname(ext);const z=zipOne(name,data),zn=name.replace(/\.[a-z0-9]+$/i,'')+'.zip';
         await S.dl.save({filename:zn,data:z});note.textContent='Saved '+zn+'. This view cannot save a .'+ext+' file directly, so it is inside the .zip: open the .zip and use the .'+ext+' in it.';return;}
       catch(e2){const c2=e2&&e2.code;note.textContent=c2==='declined'?'Save cancelled.':c2==='rate_limited'?'A save prompt is already open. Finish it, then try again.':'Saving is not available here.';return;}}note.textContent=c==='declined'?'Save cancelled.':c==='rate_limited'?'A save prompt is already open. Finish it, then try again.':
     'Saving is not available here. Switch to Result, then right-click (or long-press) the image and choose Save image.';}}
@@ -4717,12 +4722,13 @@ try{$('exactSize').checked=localStorage.getItem('exactSize')==='1';}catch(e){}
 $('exactSize').addEventListener('change',e=>{try{localStorage.setItem('exactSize',e.target.checked?'1':'0');}catch(_){}if(S.strokes)showStats(pageGeom());});
 // (the preview is drawn at 300 px per inch; a finer PNG is drawn afresh at the chosen resolution when it is saved)
 $('savePng').addEventListener('click',async()=>{if(!S.resultBlob)return;const ppi=+$('pngPPI').value||OUT_PPI;if(ppi===OUT_PPI&&!exactOn()){save(S.resultBlob,'png');return;}
+  const tgt=saveTarget('png');
   const note=$('note');note.textContent='Drawing the PNG at '+ppi+' px per inch…';await new Promise(r=>setTimeout(r,30));
   const geo=saveGeom(),f=ppi/OUT_PPI,c=drawPage(geo,f);
   if(!c){note.textContent='This browser cannot draw a picture that large. Try 300 px per inch, or Save SVG.';return;}
   const b=await new Promise(r=>c.toBlob(r,'image/png'));c.width=c.height=0;
   if(!b){note.textContent='This browser cannot make a PNG that large ('+Math.round(geo.pw*f)+' × '+Math.round(geo.ph*f)+' px). Try 300 px per inch, or Save SVG.';return;}
-  save(await withPPI(b,ppi),'png');});
+  save(await withPPI(b,ppi),'png',tgt);});
 $('saveSvg').addEventListener('click',()=>{if(!S.svg)return;save(exactOn()?buildSVG(exactGeo()):S.svg,'svg');});
 // ---- cut file for a cutter (Silhouette and the like) ----
 // Every glass piece is the white space between the new lines; its edge is a closed cut line that already sits half
@@ -4773,9 +4779,9 @@ function dxfFile(cut){const o=['0','SECTION','2','HEADER','9','$ACADVER','1','AC
   for(const L of cut.loops){o.push('0','POLYLINE','8','PIECES','66','1','70','1','10','0','20','0','30','0');
     for(const[x,y]of L)o.push('0','VERTEX','8','PIECES','10',x.toFixed(4),'20',(cut.h-y).toFixed(4),'30','0');o.push('0','SEQEND','8','PIECES');}
   o.push('0','ENDSEC','0','EOF');return o.join('\r\n')+'\r\n';}
-$('saveDxf').addEventListener('click',async()=>{if(!S.resultURL)return;$('note').textContent='Making the cut file…';
+$('saveDxf').addEventListener('click',async()=>{if(!S.resultURL)return;const tgt=saveTarget('dxf');$('note').textContent='Making the cut file…';
   try{let url=null;if(exactOn()){const c=drawPage(exactGeo(),1);const b=await new Promise(r=>c.toBlob(r,'image/png'));url=URL.createObjectURL(b);}
-    const cut=await cutLoops(false,url);if(url)URL.revokeObjectURL(url);save(dxfFile(cut),'dxf');$('note').textContent+=' '+cut.loops.length+' cut lines.';}catch(err){$('note').textContent='Could not make the cut file: '+(err&&err.message||err);}});
+    const cut=await cutLoops(false,url);if(url)URL.revokeObjectURL(url);await save(dxfFile(cut),'dxf',tgt);$('note').textContent+=' '+cut.loops.length+' cut lines.';}catch(err){$('note').textContent='Could not make the cut file: '+(err&&err.message||err);}});
 (async()=>{try{S.dl=await (window.claude&&window.claude.use?window.claude.use('downloads'):null);}catch(e){S.dl=null;}})();
 
 // example pattern with deliberately uneven lines
@@ -4851,7 +4857,7 @@ document.addEventListener('keydown',e=>{if(!S.penMode&&!S.penMarks.length)return
 // one of the ordinary fixes: purple takes out the stretches of line it covers (Remove), blue is drawn as a line
 // (Draw a line, in short straight pieces along the mark, its ends carried to the lines they reach) and the stretch it
 // replaces is taken out. All of it is one change, which Undo takes back.
-$('saveCheckPic').addEventListener('click',()=>{if(!S.strokes)return;makeOverlay(async()=>{const b=await (await fetch(S.overlayURL)).blob();const n=S.name;S.name=n+'-check';try{await save(b,'png');}finally{S.name=n;}});});
+$('saveCheckPic').addEventListener('click',()=>{if(!S.strokes)return;const nm=fname('png').replace(S.name,S.name+'-check'),tgt=saveTarget('png',nm);makeOverlay(async()=>{const b=await (await fetch(S.overlayURL)).blob();await save(b,'png',tgt,nm);});});
 $('loadMarks').addEventListener('click',()=>{if(!S.strokes){setStatus('Make the lines first, then load the marked picture',false);return;}$('marksFile').value='';$('marksFile').click();});
 $('marksFile').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const img=new Image();
   img.onload=()=>{let r=null;try{r=readMarks(img);}catch(err){console.error(err);}URL.revokeObjectURL(img.src);
