@@ -1942,6 +1942,7 @@ onmessage=e=>{const m=e.data;
   if(m.type==='load'){W=m.w;H=m.h;gray=new Uint8Array(m.buf);otsuT=otsu(gray);colorIn=!!m.colored;mxBuf=m.mx?new Uint8Array(m.mx):null;chBuf=m.ch?new Uint8Array(m.ch):null;
     // colored glass: the lines are the darkest group of all; split them from the darkest glass color
     if(m.colored){const lo=gray.filter(v=>v<otsuT);if(lo.length)otsuT=Math.min(otsuT,otsu(lo)+1);}postMessage({type:'loaded',otsu:otsuT,id:m.id});return;}
+  if(m.type==='previewGuides'){let g=[];try{g=(m.guides||[]).map(previewGuide);}catch(err){g=m.guides||[];}postMessage({type:'previewGuides',id:m.id,guides:g});return;}
   if(m.type==='run'){const t0=Date.now();
     const cw=colorIn;try{const r=process(m.params);postMessage({type:'done',id:m.id,rect:r.rect,photo:r.photo,axes:r.axes,junctions:r.junctions,pts:r.pts,offs:r.offs,hw:r.hw,stats:r.stats,rot:r.rot,fill:r.fill,fcurve:r.fcurve,ms:Date.now()-t0},[r.pts.buffer,r.offs.buffer,r.hw.buffer]);}
     catch(err){colorIn=cw;postMessage({type:'error',id:m.id,message:String(err&&err.message||err)});}}};
@@ -3602,6 +3603,25 @@ function followGuide(m,G,lw){if(!G||G.length<4)return true;const N=W*H,R=1.3*lw;
   let acc=0;for(let i=2;i+1<G.length;i+=2){const ax=G[i-2],ay=G[i-1],bx=G[i],by=G[i+1],l=Math.hypot(bx-ax,by-ay);const n=Math.max(1,Math.ceil(l/(lw/2)));
     for(let j=0;j<n;j++){const t=acc+l*(j+0.5)/n,k=Math.min(nb-1,Math.floor(t/lw));if(use&&hit[k])continue;const px=ax+(bx-ax)*j/n,py=ay+(by-ay)*j/n,qx=ax+(bx-ax)*(j+1)/n,qy=ay+(by-ay)*(j+1)/n;drawSeg(m,px,py,qx,qy,lw/2);}acc+=l;}
   return use;}
+
+// (for the blue pen's preview: the line a guide will become, before it is applied. Along the guide, where the photo
+// shows lead beside it (as followGuide decides), the middle of that lead; elsewhere the guide itself)
+function previewGuide(G){const P=photoLast||photoBase;if(!mxBuf||!chBuf||!P||P.mx!==mxBuf||!G||G.length<4)return G;
+  const lw=P.lw,R=1.3*lw;let L=0;const seg=[];for(let i=2;i+1<G.length;i+=2){const l=Math.hypot(G[i]-G[i-2],G[i+1]-G[i-1]);seg.push(l);L+=l;}
+  let x0=W,y0=H,x1=0,y1=0;for(let i=0;i<G.length;i+=2){x0=Math.min(x0,G[i]);x1=Math.max(x1,G[i]);y0=Math.min(y0,G[i+1]);y1=Math.max(y1,G[i+1]);}
+  x0=Math.max(0,Math.floor(x0-R-2));y0=Math.max(0,Math.floor(y0-R-2));x1=Math.min(W-1,Math.ceil(x1+R+2));y1=Math.min(H-1,Math.ceil(y1+R+2));
+  const near=(x,y)=>{let bd=Infinity,bt=0,acc=0;for(let i=2,k=0;i+1<G.length;i+=2,k++){const ax=G[i-2],ay=G[i-1],dx=G[i]-ax,dy=G[i+1]-ay,l=seg[k]||1;let t=((x-ax)*dx+(y-ay)*dy)/(l*l);t=Math.max(0,Math.min(1,t));const d=Math.hypot(ax+t*dx-x,ay+t*dy-y);if(d<bd){bd=d;bt=acc+t*l;}acc+=l;}return[bd,bt];};
+  const band=[];for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const[d,t]=near(x,y);if(d<=R)band.push([x,y,t]);}
+  if(!band.length)return G;const vals=band.map(b=>mxBuf[b[1]*W+b[0]]).sort((a,b)=>a-b);const lo=vals[Math.floor(0.05*vals.length)],hi=vals[Math.floor(0.6*vals.length)];
+  const T=Math.min(90,lo+0.4*(hi-lo)),nb=Math.max(1,Math.ceil(L/lw)),sx=new Float64Array(nb),sy=new Float64Array(nb),cnt=new Float64Array(nb);let nf=0;
+  for(const[x,y,t]of band){const i=y*W+x;if(mxBuf[i]<=T&&chBuf[i]<50){nf++;const k=Math.min(nb-1,Math.floor(t/lw));sx[k]+=x;sy[k]+=y;cnt[k]++;}}
+  let c=0;for(let k=0;k<nb;k++)if(cnt[k])c++;const use=nf<0.5*band.length&&c>=0.7*nb&&hi-lo>25;if(!use)return G;
+  // (each stretch of a lead's width: the middle of the lead found there, or the guide where none was)
+  const out=[];const at=t=>{let acc=0;for(let i=2,k=0;i+1<G.length;i+=2,k++){const l=seg[k];if(t<=acc+l||i+2>=G.length){const u=l?Math.max(0,Math.min(1,(t-acc)/l)):0;return[G[i-2]+(G[i]-G[i-2])*u,G[i-1]+(G[i+1]-G[i-1])*u];}acc+=l;}return[G[0],G[1]];};
+  out.push(G[0],G[1]);for(let k=0;k<nb;k++){const g=at(Math.min(L,(k+0.5)*lw));if(cnt[k]>=2)out.push(sx[k]/cnt[k],sy[k]/cnt[k]);else out.push(g[0],g[1]);}out.push(G[G.length-2],G[G.length-1]);
+  // (smoothed a little, as the finished line will be)
+  for(let pass=0;pass<2;pass++){const c=out.slice();for(let i=2;i+3<out.length;i+=2){out[i]=(c[i-2]+2*c[i]+c[i+2])/4;out[i+1]=(c[i-1]+2*c[i+1]+c[i+3])/4;}}
+  return out;}
 </script>
 
 <script>
@@ -3616,6 +3636,7 @@ const S={name:'sample-pattern',src:null,crop:null,work:null,workPPI:0,strokes:nu
 const worker=new Worker(URL.createObjectURL(new Blob([$('worker-src').textContent],{type:'text/javascript'})));
 worker.onmessage=e=>{const m=e.data;
   if(m.type==='progress')setStatus(m.text,true);
+  else if(m.type==='previewGuides'){if(typeof penPreviewDone==='function')penPreviewDone(m);}
   else if(m.type==='loaded'){if(m.id!==S.loadId)return;S.otsu=m.otsu;if($('threshAuto').checked)$('thresh').value=m.otsu;updateLabels();S.running=false;run();}
   else if(m.type==='done'){S.running=false;if(!S.go){S.pending=false;return;}
     if(S.pending){S.pending=false;run();return;}
@@ -3641,7 +3662,7 @@ function syncSize(changed){if(!S.crop||!$('lockRatio').checked)return;const r=S.
 // ---- load & prepare ----
 function loadImage(img,name,isSample){
   // (marks painted with the pens and not applied belong to the picture they were painted on)
-  if(S.penMarks&&S.penMarks.length){S.penMarks=[];if(typeof penBar==='function')penBar();}
+  if(S.penMarks&&S.penMarks.length){S.penMarks=[];S.penPreview=[];if(typeof penBar==='function')penBar();}
   const c=document.createElement('canvas');c.width=img.width||img.naturalWidth;c.height=img.height||img.naturalHeight;
   const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(img,0,0);
   S.src=c;S.name=name;S.sample=isSample;S.go=false;S.strokes=null;if(S.resultURL)URL.revokeObjectURL(S.resultURL);S.resultURL=null;S.resultBlob=null;S.svg=null;
@@ -4414,7 +4435,7 @@ $('fixLayer').addEventListener('pointermove',e=>{if(!press){if(e.pointerType==='
     h+=`<path d="${pth}" fill="none" stroke="var(--fix)" stroke-width="${3*k}" stroke-linecap="round" opacity=".9"/>`;}
   drawFixLayer();$('fixLayer').insertAdjacentHTML('beforeend',h);});
 $('fixLayer').addEventListener('pointerup',e=>{if(!press)return;const p=press;
-  if(p.pen){press=null;penBar();return;}
+  if(p.pen){press=null;penBar();requestPenPreview();return;}
   if(p.draw){press=null;const d=S.drawLine;S.drawLine=null;if(!d||!d.b||Math.hypot(d.b[0]-d.a[0],d.b[1]-d.a[1])<10/layerScale()){drawFixLayer();return;}
     const[ax,ay]=workToSrc(...pageToWorkInternal(d.a[0],d.a[1])),[bx,by]=workToSrc(...pageToWorkInternal(d.b[0],d.b[1]));changeFixes(()=>S.fixes.push({mode:'line',ax,ay,bx,by}));return;}
   if(p.sym){press=null;const hv=S.symPending;if(hv&&p.dragging)hv.off=(hv.off||0)+p.off/(hv.flip==='tb'?S.sy:S.sx);drawFixLayer();symMenu();return;}
@@ -4581,7 +4602,7 @@ $('fixBtn').addEventListener('click',()=>{if(!S.go&&!S.fixMode)setMode('drawn');
   closeFixPop();drawFixLayer();updateFixBar();});
 // (only drags changed: redraw straight away; anything else: the program runs again)
 function afterFixChange(before){const key=a=>JSON.stringify(a.filter(f=>!PAGE_FIX.has(f.mode)));if(key(before)!==key(S.fixes))schedule(run,0);else redrawDrags();}
-$('fixUndo').addEventListener('click',()=>{if(S.penMarks&&S.penMarks.length){S.penMarks.pop();penBar();drawPen();return;}if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
+$('fixUndo').addEventListener('click',()=>{if(S.penMarks&&S.penMarks.length){S.penMarks.pop();penBar();drawPen();requestPenPreview();return;}if(!S.undo||!S.undo.length)return;const before=S.fixes;S.fixes=JSON.parse(S.undo.pop());saveFixes();closeFixPop();afterFixChange(before);});
 // (clearing asks first, naming how many fixes go; Cancel is the default, and Undo can still bring them back)
 $('fixClear').addEventListener('click',()=>{const n=S.fixes.length;if(!n)return;
   openFixPop(`<h3>Clear all fixes?</h3><p>All ${n} fix${n===1?'':'es'} on ${S.name.replace(/[<>&"]/g,'')} will be taken out. Undo can bring them back.</p><div class="row"><button data-act="clear" class="danger">Clear ${n} fix${n===1?'':'es'}</button><button data-act="cancel">Cancel</button></div>`,24,24);
@@ -4835,21 +4856,31 @@ loadImage(sample(),'sample-pattern',true);
 S.penMode=null;S.penMarks=[];
 function penLwPage(){return Math.max(2,widthIn()*S.workPPI)*pageGeom().k;}
 function penMarkup(){if(!S.penMarks||!S.penMarks.length)return'';const k=1/layerScale(),lw=penLwPage();let h='';
+  for(const L of S.penPreview||[])if(L.length>1)h+=`<path d="${L.map((q,i)=>(i?'L':'M')+q[0].toFixed(1)+','+q[1].toFixed(1)).join('')}" fill="none" stroke="#0b9b55" stroke-width="${Math.max(2.5*k,0.45*lw)}" stroke-dasharray="${6*k} ${4*k}" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>`;
   for(const m of S.penMarks){const d=m.pts.map((q,i)=>(i?'L':'M')+q[0].toFixed(1)+','+q[1].toFixed(1)).join('')+(m.pts.length===1?'l0.01,0':'');
     h+=m.c==='p'?`<path d="${d}" fill="none" stroke="#8a10d0" stroke-opacity=".55" stroke-width="${Math.max(1.6*lw,8*k)}" stroke-linecap="round" stroke-linejoin="round"/>`
       :`<path d="${d}" fill="none" stroke="#0a5cff" stroke-width="${3*k}" stroke-linecap="round" stroke-linejoin="round"/>`;}
   return h;}
 function drawPen(){const g=$('fixLayer').querySelector('#penG');if(g)g.innerHTML=penMarkup();else drawFixLayer();}
+// (while blue marks wait to be applied, the lines they will make are shown dashed: worked out as Apply would, then
+// on a photo moved onto the lead the tool will follow; redraw a mark if its line is not where you want it)
+S.penPreview=[];S.penPrevId=0;let penPrevTimer=null;
+function requestPenPreview(){clearTimeout(penPrevTimer);penPrevTimer=setTimeout(()=>{const id=++S.penPrevId;
+    if(!S.penMarks.some(m=>m.c==='b')){S.penPreview=[];drawPen();return;}
+    const r=penFixes();const G=r?r.fixes.filter(f=>f.mode==='guide').map(f=>{const o=[];for(let i=0;i<f.pts.length;i+=2)o.push(...srcToWork(f.pts[i],f.pts[i+1]));return o;}):[];
+    if(!G.length){S.penPreview=[];drawPen();return;}worker.postMessage({type:'previewGuides',id,guides:G});},150);}
+function penPreviewDone(m){if(m.id!==S.penPrevId||!S.penMarks.length)return;const geo=pageGeom();
+  S.penPreview=m.guides.map(G=>{const o=[];for(let i=0;i+1<G.length;i+=2){const q=outPos(G[i],G[i+1]);o.push(geo.map(q[0],q[1]));}return o;});drawPen();}
 function penBar(){const n=S.penMarks.length;$('penApply').disabled=!n;$('penClear').disabled=!n;
   if(n)$('fixUndo').disabled=false;else updateFixBar();}
 function setPen(mode){if(mode){if(S.drawMode)setDrawMode(false);setAreaMode(false);S.symPending=null;closeFixPop();}
   S.penMode=mode;$('penPurple').setAttribute('aria-pressed',String(mode==='p'));$('penBlue').setAttribute('aria-pressed',String(mode==='b'));
   $('fixLayer').classList.toggle('picking-area',!!mode);
   $('fixHelp').textContent=mode==='p'?'Paint over the lines that should go. Switch pens any time; nothing changes until you press Apply marks (Enter). Esc stops.'
-    :mode==='b'?'Draw where a line should be, from line to line. It need not be exact: the tool looks for the lead in your picture along it. Press Apply marks (Enter) when done. Esc stops.'
+    :mode==='b'?'Draw where a line should be, from line to line. It need not be exact: the dashed green line shows where the tool will put it (on a photo, on the lead it finds). Not right? Undo and draw again. Press Apply marks (Enter) when done. Esc stops.'
     :'Click a dot or a line to choose how it should look, or drag it to reshape it. To bend a line at a spot of your own, click the line and choose Add a dot here, then drag the dot.';
   drawFixLayer();penBar();}
-function applyPen(){if(!S.penMarks.length||!S.strokes)return;const geo=pageGeom(),lw=penLwPage(),f=12/lw;
+function penFixes(){if(!S.penMarks.length||!S.strokes)return null;const geo=pageGeom(),lw=penLwPage(),f=12/lw;
   // (painted on a canvas just big enough for the marks, at a quarter of a lead's width to the cell, so a small loop
   // round an eye or a nostril keeps its shape)
   let bx0=Infinity,by0=Infinity,bx1=-Infinity,by1=-Infinity;for(const m of S.penMarks)for(const q of m.pts){bx0=Math.min(bx0,q[0]);by0=Math.min(by0,q[1]);bx1=Math.max(bx1,q[0]);by1=Math.max(by1,q[1]);}
@@ -4860,7 +4891,9 @@ function applyPen(){if(!S.penMarks.length||!S.strokes)return;const geo=pageGeom(
     const d=g.getImageData(0,0,W_,H_).data,M=new Uint8Array(W_*H_);for(let i=0;i<M.length;i++)M[i]=d[4*i+3]>100?1:0;return M;};
   const PUR=paint('p',19),BLU=paint('b',2.5),ox=PAD*S.sx,oy=PAD*S.sy;
   const toW=(X,Y)=>[(X/f+bx0-geo.m)/geo.k+ox,(Y/f+by0-geo.m)/geo.k+oy];
-  let r=null;try{r=markFixes(PUR,BLU,W_,H_,toW,3);}catch(err){console.error(err);}
+  try{return markFixes(PUR,BLU,W_,H_,toW,3);}catch(err){console.error(err);return null;}}
+function applyPen(){if(!S.penMarks.length||!S.strokes)return;
+  const r=penFixes();S.penPreview=[];
   S.penMarks=[];penBar();drawPen();
   if(!r||!r.fixes.length){setStatus('Those marks did not land on or between lines: nothing changed',false);return;}
   addMarkFixes(r);}
@@ -4872,11 +4905,11 @@ function addMarkFixes(r){S.undo=S.undo||[];S.undo.push(JSON.stringify(S.fixes));
 $('penPurple').addEventListener('click',()=>setPen(S.penMode==='p'?null:'p'));
 $('penBlue').addEventListener('click',()=>setPen(S.penMode==='b'?null:'b'));
 $('penApply').addEventListener('click',applyPen);
-$('penClear').addEventListener('click',()=>{S.penMarks=[];penBar();drawPen();});
+$('penClear').addEventListener('click',()=>{S.penMarks=[];S.penPreview=[];penBar();drawPen();});
 document.addEventListener('keydown',e=>{if(!S.penMode&&!S.penMarks.length)return;if(/^(INPUT|SELECT|TEXTAREA)$/.test((e.target||{}).tagName||''))return;
   if(e.key==='Enter'&&S.penMarks.length){e.preventDefault();applyPen();}
   else if(e.key==='Escape'&&S.penMode){e.stopImmediatePropagation();setPen(null);}
-  else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&S.penMarks.length){e.preventDefault();e.stopImmediatePropagation();S.penMarks.pop();penBar();drawPen();}},true);
+  else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&S.penMarks.length){e.preventDefault();e.stopImmediatePropagation();S.penMarks.pop();penBar();drawPen();requestPenPreview();}},true);
 // ---- marking up a check picture ----
 // The check picture is the Overlay view saved as a picture: the lines in red over the original. Marked up in any
 // paint program (purple over a line to take it out, blue where a line should be) and loaded back, each mark becomes

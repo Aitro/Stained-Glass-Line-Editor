@@ -205,3 +205,22 @@ function followGuide(m,G,lw){if(!G||G.length<4)return true;const N=W*H,R=1.3*lw;
   let acc=0;for(let i=2;i+1<G.length;i+=2){const ax=G[i-2],ay=G[i-1],bx=G[i],by=G[i+1],l=Math.hypot(bx-ax,by-ay);const n=Math.max(1,Math.ceil(l/(lw/2)));
     for(let j=0;j<n;j++){const t=acc+l*(j+0.5)/n,k=Math.min(nb-1,Math.floor(t/lw));if(use&&hit[k])continue;const px=ax+(bx-ax)*j/n,py=ay+(by-ay)*j/n,qx=ax+(bx-ax)*(j+1)/n,qy=ay+(by-ay)*(j+1)/n;drawSeg(m,px,py,qx,qy,lw/2);}acc+=l;}
   return use;}
+
+// (for the blue pen's preview: the line a guide will become, before it is applied. Along the guide, where the photo
+// shows lead beside it (as followGuide decides), the middle of that lead; elsewhere the guide itself)
+function previewGuide(G){const P=photoLast||photoBase;if(!mxBuf||!chBuf||!P||P.mx!==mxBuf||!G||G.length<4)return G;
+  const lw=P.lw,R=1.3*lw;let L=0;const seg=[];for(let i=2;i+1<G.length;i+=2){const l=Math.hypot(G[i]-G[i-2],G[i+1]-G[i-1]);seg.push(l);L+=l;}
+  let x0=W,y0=H,x1=0,y1=0;for(let i=0;i<G.length;i+=2){x0=Math.min(x0,G[i]);x1=Math.max(x1,G[i]);y0=Math.min(y0,G[i+1]);y1=Math.max(y1,G[i+1]);}
+  x0=Math.max(0,Math.floor(x0-R-2));y0=Math.max(0,Math.floor(y0-R-2));x1=Math.min(W-1,Math.ceil(x1+R+2));y1=Math.min(H-1,Math.ceil(y1+R+2));
+  const near=(x,y)=>{let bd=Infinity,bt=0,acc=0;for(let i=2,k=0;i+1<G.length;i+=2,k++){const ax=G[i-2],ay=G[i-1],dx=G[i]-ax,dy=G[i+1]-ay,l=seg[k]||1;let t=((x-ax)*dx+(y-ay)*dy)/(l*l);t=Math.max(0,Math.min(1,t));const d=Math.hypot(ax+t*dx-x,ay+t*dy-y);if(d<bd){bd=d;bt=acc+t*l;}acc+=l;}return[bd,bt];};
+  const band=[];for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const[d,t]=near(x,y);if(d<=R)band.push([x,y,t]);}
+  if(!band.length)return G;const vals=band.map(b=>mxBuf[b[1]*W+b[0]]).sort((a,b)=>a-b);const lo=vals[Math.floor(0.05*vals.length)],hi=vals[Math.floor(0.6*vals.length)];
+  const T=Math.min(90,lo+0.4*(hi-lo)),nb=Math.max(1,Math.ceil(L/lw)),sx=new Float64Array(nb),sy=new Float64Array(nb),cnt=new Float64Array(nb);let nf=0;
+  for(const[x,y,t]of band){const i=y*W+x;if(mxBuf[i]<=T&&chBuf[i]<50){nf++;const k=Math.min(nb-1,Math.floor(t/lw));sx[k]+=x;sy[k]+=y;cnt[k]++;}}
+  let c=0;for(let k=0;k<nb;k++)if(cnt[k])c++;const use=nf<0.5*band.length&&c>=0.7*nb&&hi-lo>25;if(!use)return G;
+  // (each stretch of a lead's width: the middle of the lead found there, or the guide where none was)
+  const out=[];const at=t=>{let acc=0;for(let i=2,k=0;i+1<G.length;i+=2,k++){const l=seg[k];if(t<=acc+l||i+2>=G.length){const u=l?Math.max(0,Math.min(1,(t-acc)/l)):0;return[G[i-2]+(G[i]-G[i-2])*u,G[i-1]+(G[i+1]-G[i-1])*u];}acc+=l;}return[G[0],G[1]];};
+  out.push(G[0],G[1]);for(let k=0;k<nb;k++){const g=at(Math.min(L,(k+0.5)*lw));if(cnt[k]>=2)out.push(sx[k]/cnt[k],sy[k]/cnt[k]);else out.push(g[0],g[1]);}out.push(G[G.length-2],G[G.length-1]);
+  // (smoothed a little, as the finished line will be)
+  for(let pass=0;pass<2;pass++){const c=out.slice();for(let i=2;i+3<out.length;i+=2){out[i]=(c[i-2]+2*c[i]+c[i+2])/4;out[i+1]=(c[i-1]+2*c[i+1]+c[i+3])/4;}}
+  return out;}
