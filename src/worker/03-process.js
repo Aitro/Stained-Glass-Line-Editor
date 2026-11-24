@@ -70,7 +70,7 @@ function process(p){
   const lines=Array.isArray(p.lines)?p.lines.filter(L=>L&&[L.ax,L.ay,L.bx,L.by].every(isFinite)):[];
   if(lines.length){const lw=inkWidth(m);for(const L of lines)drawSeg(m,L.ax,L.ay,L.bx,L.by,lw/2);}
   // (guides marked by hand, on a plain drawing: drawn as they are)
-  if(!photoInfo&&Array.isArray(p.guides)&&p.guides.length){const lw=inkWidth(m);for(const G of p.guides)for(let i=2;i+1<G.length;i+=2)drawSeg(m,G[i-2],G[i-1],G[i],G[i+1],lw/2);}
+  if(!photoInfo&&Array.isArray(p.guides)&&p.guides.length){const lw=inkWidth(m);for(const G0 of p.guides){const G=guideParts(G0).g;for(let i=2;i+1<G.length;i+=2)drawSeg(m,G[i-2],G[i-1],G[i],G[i+1],lw/2);}}
   // numbers and labels written in the pieces: small separate bits of ink drawn much thinner than the lines
   if(p.dropText!==false){dropOutside(m);dropWords(m);dropText(m);}
   // (an oval border made rectangular, when asked)

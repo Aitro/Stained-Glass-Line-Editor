@@ -11,6 +11,10 @@ let mxBuf=null,chBuf=null;
 // (the lead found before any hand guides, and the last finished result, kept for the next run: a fix only redoes
 // what it changes)
 let photoBase=null,photoLast=null;
+// (a guide drawn with the exact pen comes marked by a leading -1e9: it is drawn just where it was put, never moved
+// onto lead found in the photo, and after the cleaning, so a wide patch of dark round it cannot swallow it)
+const EXACT_MARK=-1e9;
+function guideParts(G){return Array.isArray(G)&&G[0]===EXACT_MARK?{exact:true,g:G.slice(1)}:{exact:false,g:G};}
 // (the largest or smallest value within r either side, along rows or columns: van Herk / Gil-Werman)
 function runMaxMin(src,r,isMax,horiz){const N=W*H,out=new Uint8Array(N),L=horiz?W:H,n=horiz?H:W,k=2*r+1;
   const g=new Uint8Array(L+k),h=new Uint8Array(L+k),line=new Uint8Array(L+2*r),pad=isMax?0:255;
@@ -79,7 +83,7 @@ function cleanPhoto(m,guides,lw,edge){const N=W*H,lab=new Int32Array(N),st=new I
   // (a guide through a wide patch of dark, lead or dark glass with no line of its own to find, is drawn again once the
   // patch has been cleaned down to lines: drawn into it before, it would be lost in it)
   const late=[];
-  let gm=null;if(Array.isArray(guides)&&guides.length){gm=new Uint8Array(N);for(const G of guides){if(!followGuide(m,G,lw))late.push(G);for(let i=2;i+1<G.length;i+=2)drawSeg(gm,G[i-2],G[i-1],G[i],G[i+1],0.65*lw);}}
+  let gm=null;if(Array.isArray(guides)&&guides.length){gm=new Uint8Array(N);for(const G0 of guides){const{exact,g:G}=guideParts(G0);if(exact)late.push(G);else if(!followGuide(m,G,lw))late.push(G);for(let i=2;i+1<G.length;i+=2)drawSeg(gm,G[i-2],G[i-1],G[i],G[i+1],0.65*lw);}}
   if(edge){if(!gm)gm=new Uint8Array(N);for(let i=0;i<N;i++)if(edge[i])gm[i]=1;}
   let sk=null;
   let lightKeep=null;
@@ -115,15 +119,15 @@ function cleanPhoto(m,guides,lw,edge){const N=W*H,lab=new Int32Array(N),st=new I
 function photoLocal(m,guides,lw,bkey){const P=photoLast;if(!P||P.mx!==mxBuf||P.bkey!==bkey||!P.guides)return null;
   const now=Array.isArray(guides)?guides:[],kn=new Set(now.map(g=>JSON.stringify(g))),kp=new Set(P.guides.map(g=>JSON.stringify(g)));
   const changed=now.filter(g=>!kp.has(JSON.stringify(g))).concat(P.guides.filter(g=>!kn.has(JSON.stringify(g))));if(!changed.length)return null;
-  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(const G of changed)for(let i=0;i+1<G.length;i+=2){x0=Math.min(x0,G[i]);x1=Math.max(x1,G[i]);y0=Math.min(y0,G[i+1]);y1=Math.max(y1,G[i+1]);}
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(const G0 of changed){const G=guideParts(G0).g;for(let i=0;i+1<G.length;i+=2){x0=Math.min(x0,G[i]);x1=Math.max(x1,G[i]);y0=Math.min(y0,G[i+1]);y1=Math.max(y1,G[i+1]);}}
   if(!isFinite(x0))return null;const M=Math.ceil(14*lw),pad=Math.ceil(5*lw);
   const cx0=Math.max(0,Math.floor(x0-M)),cy0=Math.max(0,Math.floor(y0-M)),cx1=Math.min(W-1,Math.ceil(x1+M)),cy1=Math.min(H-1,Math.ceil(y1+M));
   const cw=cx1-cx0+1,ch=cy1-cy0+1;if(cw*ch>0.35*W*H||cw<4*pad||ch<4*pad)return null;
   const FW=W,FH=H,fmx=mxBuf,fch=chBuf;
   const sub=a=>{const o=new Uint8Array(cw*ch);for(let y=0;y<ch;y++)o.set(a.subarray((cy0+y)*FW+cx0,(cy0+y)*FW+cx0+cw),y*cw);return o;};
   const mC=sub(m),mxC=sub(fmx),chC=sub(fch);
-  const gC=[];for(const G of now){let hit=false;for(let i=0;i+1<G.length;i+=2)if(G[i]>=cx0-lw&&G[i]<=cx1+lw&&G[i+1]>=cy0-lw&&G[i+1]<=cy1+lw){hit=true;break;}
-    if(hit){const g=new Array(G.length);for(let i=0;i+1<G.length;i+=2){g[i]=G[i]-cx0;g[i+1]=G[i+1]-cy0;}gC.push(g);}}
+  const gC=[];for(const G0 of now){const{exact,g:G}=guideParts(G0);let hit=false;for(let i=0;i+1<G.length;i+=2)if(G[i]>=cx0-lw&&G[i]<=cx1+lw&&G[i+1]>=cy0-lw&&G[i+1]<=cy1+lw){hit=true;break;}
+    if(hit){const g=new Array(G.length);for(let i=0;i+1<G.length;i+=2){g[i]=G[i]-cx0;g[i+1]=G[i+1]-cy0;}gC.push(exact?[EXACT_MARK].concat(g):g);}}
   // (the part's own edges, where it is cut from the rest: not the picture's edges)
   const edge=new Uint8Array(cw*ch);for(let y=0;y<ch;y++)for(let x=0;x<cw;x++){if((x<2&&cx0>0)||(x>=cw-2&&cx1<FW-1)||(y<2&&cy0>0)||(y>=ch-2&&cy1<FH-1))edge[y*cw+x]=1;}
   let r;W=cw;H=ch;mxBuf=mxC;chBuf=chC;try{r=cleanPhoto(mC,gC,lw,edge);}finally{W=FW;H=FH;mxBuf=fmx;chBuf=fch;}
@@ -208,7 +212,7 @@ function followGuide(m,G,lw){if(!G||G.length<4)return true;const N=W*H,R=1.3*lw;
 
 // (for the blue pen's preview: the line a guide will become, before it is applied. Along the guide, where the photo
 // shows lead beside it (as followGuide decides), the middle of that lead; elsewhere the guide itself)
-function previewGuide(G){const P=photoLast||photoBase;if(!mxBuf||!chBuf||!P||P.mx!==mxBuf||!G||G.length<4)return G;
+function previewGuide(G0){const{exact,g:G}=guideParts(G0);if(exact)return G;const P=photoLast||photoBase;if(!mxBuf||!chBuf||!P||P.mx!==mxBuf||!G||G.length<4)return G;
   const lw=P.lw,R=1.3*lw;let L=0;const seg=[];for(let i=2;i+1<G.length;i+=2){const l=Math.hypot(G[i]-G[i-2],G[i+1]-G[i-1]);seg.push(l);L+=l;}
   let x0=W,y0=H,x1=0,y1=0;for(let i=0;i<G.length;i+=2){x0=Math.min(x0,G[i]);x1=Math.max(x1,G[i]);y0=Math.min(y0,G[i+1]);y1=Math.max(y1,G[i+1]);}
   x0=Math.max(0,Math.floor(x0-R-2));y0=Math.max(0,Math.floor(y0-R-2));x1=Math.min(W-1,Math.ceil(x1+R+2));y1=Math.min(H-1,Math.ceil(y1+R+2));
