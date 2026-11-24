@@ -32,16 +32,21 @@ function workerSource() {
   }).join('');
 }
 
-function runCase(src, c, gray) {
+function runCase(src, c, gray, extra) {
   const msgs = [];
   const ctx = { postMessage: m => msgs.push(m), Math, Date, console, Float64Array, Float32Array, Int32Array,
     Uint8Array, Uint16Array, Uint32Array, Int8Array, Int16Array, Array, Map, Set, Object, JSON, Number, String,
     Infinity, NaN, isFinite, Error };
   vm.createContext(ctx);
   vm.runInContext(src + ';this.__onm=onmessage;', ctx);
-  ctx.__onm({ data: { type: 'load', id: 1, w: c.w, h: c.h, colored: !!c.colored, buf: new Uint8Array(gray).buffer } });
+  // (a photo of a finished panel also needs its brightest-channel and colour pictures)
+  ctx.__onm({ data: { type: 'load', id: 1, w: c.w, h: c.h, colored: !!c.colored, buf: new Uint8Array(gray).buffer,
+    mx: extra && extra.mx ? new Uint8Array(extra.mx).buffer : undefined, ch: extra && extra.ch ? new Uint8Array(extra.ch).buffer : undefined } });
   const p = Object.assign({ auto: true, threshold: 128, invert: false, smooth: 1, exact: true, square: true }, c.params || {});
   ctx.__onm({ data: { type: 'run', id: 1, params: p } });
+  // (a case with a second set of settings is run twice, the way the page does after a fix, and the second result is
+  // the one compared: this checks that a fix redone in part gives the same lines as a whole run)
+  if (c.params2) { msgs.length = 0; ctx.__onm({ data: { type: 'run', id: 2, params: Object.assign({}, p, c.params2) } }); }
   const d = msgs.find(m => m.type === 'done') || msgs.find(m => m.type === 'error');
   if (!d) throw new Error('worker gave no result');
   if (d.type === 'error') throw new Error('worker error: ' + d.message);
@@ -111,7 +116,11 @@ for (const name of todo) {
   const gfile = path.join(CASES, name + '.gray.gz');
   if (!fs.existsSync(gfile)) { console.log(`skip   ${name}: its pattern file (${name}.gray.gz) is not in tests/cases`); skipped++; continue; }
   const gray = zlib.gunzipSync(fs.readFileSync(gfile));
-  const r = runCase(src, c, gray);
+  let extra = null;
+  if (c.photo) { const mf = path.join(CASES, name + '.mx.gz'), cf = path.join(CASES, name + '.ch.gz');
+    if (!fs.existsSync(mf) || !fs.existsSync(cf)) { console.log(`skip   ${name}: its photo files (${name}.mx.gz, ${name}.ch.gz) are not in tests/cases`); skipped++; continue; }
+    extra = { mx: zlib.gunzipSync(fs.readFileSync(mf)), ch: zlib.gunzipSync(fs.readFileSync(cf)) }; }
+  const r = runCase(src, c, gray, extra);
   const apFile = path.join(CASES, name + '.approved.gz');
   if (approveAll || approveOne || !fs.existsSync(apFile)) {
     fs.writeFileSync(apFile, zlib.gzipSync(JSON.stringify({ pts: r.pts, offs: r.offs })));
