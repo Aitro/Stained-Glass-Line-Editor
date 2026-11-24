@@ -4856,10 +4856,11 @@ loadImage(sample(),'sample-pattern',true);
 S.penMode=null;S.penMarks=[];
 function penLwPage(){return Math.max(2,widthIn()*S.workPPI)*pageGeom().k;}
 function penMarkup(){if(!S.penMarks||!S.penMarks.length)return'';const k=1/layerScale(),lw=penLwPage();let h='';
-  for(const L of S.penPreview||[])if(L.length>1)h+=`<path d="${L.map((q,i)=>(i?'L':'M')+q[0].toFixed(1)+','+q[1].toFixed(1)).join('')}" fill="none" stroke="#0b9b55" stroke-width="${Math.max(2.5*k,0.45*lw)}" stroke-dasharray="${6*k} ${4*k}" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>`;
   for(const m of S.penMarks){const d=m.pts.map((q,i)=>(i?'L':'M')+q[0].toFixed(1)+','+q[1].toFixed(1)).join('')+(m.pts.length===1?'l0.01,0':'');
     h+=m.c==='p'?`<path d="${d}" fill="none" stroke="#8a10d0" stroke-opacity=".55" stroke-width="${Math.max(1.6*lw,8*k)}" stroke-linecap="round" stroke-linejoin="round"/>`
       :`<path d="${d}" fill="none" stroke="#0a5cff" stroke-width="${3*k}" stroke-linecap="round" stroke-linejoin="round"/>`;}
+  // (the preview on top of the marks, so it is seen even where it runs along them)
+  for(const L of S.penPreview||[])if(L.length>1)h+=`<path d="${L.map((q,i)=>(i?'L':'M')+q[0].toFixed(1)+','+q[1].toFixed(1)).join('')}" fill="none" stroke="#0b9b55" stroke-width="${Math.max(2.5*k,0.45*lw)}" stroke-dasharray="${6*k} ${4*k}" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>`;
   return h;}
 function drawPen(){const g=$('fixLayer').querySelector('#penG');if(g)g.innerHTML=penMarkup();else drawFixLayer();}
 // (while blue marks wait to be applied, the lines they will make are shown dashed: worked out as Apply would, then
