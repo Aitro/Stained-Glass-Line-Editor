@@ -2011,8 +2011,12 @@ function traceAsDrawn(sk,u,dmap,p){
        for(const y of B){const ty=away(y,kb);if(!ty)continue;if(tx[0]*ty[0]+tx[1]*ty[1]>-0.85)continue;
          const off=Math.abs((cb[0]-ca[0])*tx[1]-(cb[1]-ca[1])*tx[0]);if(off<=Math.min(2.5*rL,0.8*len(br.P)))ok=true;}
        if(!ok)return false;}return true;};
+   // (two lines each running on through its own joint, with a short piece between them, are two joints back to back,
+   // like a short bar joining two lines, not a crossing: at a crossing the lines at each joint come in at an angle)
+   const backToBack=br=>{for(const k of[br.a,br.b]){const L=ch.filter(c=>c!==br&&(c.a===k||c.b===k));if(L.length!==2)return false;
+       const t0=away(L[0],k),t1=away(L[1],k);if(!t0||!t1||t0[0]*t1[0]+t0[1]*t1[1]>-0.8)return false;}return true;};
    for(let guard=0;guard<ch.length;guard++){const deg=new Map();for(const c of ch)for(const k of[c.a,c.b])if(k!=null)deg.set(k,(deg.get(k)||0)+1);
-    const i=ch.findIndex(c=>c.a!=null&&c.b!=null&&c.a!==c.b&&deg.get(c.a)>=3&&deg.get(c.b)>=3&&(len(c.P)<3*u||!merged.has(c.a)&&!merged.has(c.b)&&len(c.P)<6*u&&straightThrough(c,ch)));if(i<0)break;
+    const i=ch.findIndex(c=>c.a!=null&&c.b!=null&&c.a!==c.b&&deg.get(c.a)>=3&&deg.get(c.b)>=3&&(len(c.P)<3*u&&!backToBack(c)||!merged.has(c.a)&&!merged.has(c.b)&&len(c.P)<6*u&&straightThrough(c,ch)));if(i<0)break;
     const longOne=len(ch[i].P)>=3*u;
     const ka=ch[i].a,kb=ch[i].b;cent[ka]=[(cent[ka][0]+cent[kb][0])/2,(cent[ka][1]+cent[kb][1])/2];if(free.has(kb))free.add(ka);ch.splice(i,1);
     for(const c of ch){if(c.a===kb||c.a===ka){c.a=ka;c.P[0]=cent[ka].slice();}if(c.b===kb||c.b===ka){c.b=ka;c.P[c.P.length-1]=cent[ka].slice();}}if(longOne)merged.add(ka);}}
@@ -5012,14 +5016,69 @@ function markFixes(PUR,BLU,w,h,toW,cell){const pts=S.strokes,offs=S.offs,lwW=Mat
   const fixes=[],removed=new Set();let np=0,nb=0;
   const removeStretch=(s,i,at)=>{const[lo,hi]=K.piece(s,i);const key=s+':'+lo+':'+hi;if(removed.has(key))return false;removed.add(key);for(let t=lo+1;t<hi;t++)gone[t]=1;const m=at?i:Math.round((lo+hi)/2);const[sx,sy]=toSrc(pts[2*m],pts[2*m+1]);fixes.push({sx,sy,mode:'remove'});return true;};
   // (purple: a stretch of line goes when most of it lies under the mark)
+  const prm=new Map();
   for(const comp of groups(PUR)){const cand=new Map();
-    for(const c of comp){const r=nearPt(c.p[0],c.p[1],2*lwW);if(!r)continue;const[lo,hi]=K.piece(r.s,r.i);cand.set(r.s+':'+lo+':'+hi,{s:r.s,i:r.i,lo,hi});}
+    for(const c of comp){const r=nearPt(c.p[0],c.p[1],2*lwW);if(!r)continue;const a=offs[r.s],b=offs[r.s+1]-1;
+      // (a point right on a joint: the stretches at both sides of it, not one running across it)
+      const P1=K.piece(r.s,r.i),own=[];if(r.i>a&&r.i<b){const A=K.piece(r.s,r.i-1),B=K.piece(r.s,r.i+1);if(A[0]!==B[0]||A[1]!==B[1])own.push([r.i-1,A],[r.i+1,B]);}if(!own.length)own.push([r.i,P1]);
+      for(const[i,[lo,hi]]of own)cand.set(r.s+':'+lo+':'+hi,{s:r.s,i,lo,hi});}
     const cov=[];for(const v of cand.values()){let L=0,under=0;for(let i=v.lo+1;i<=v.hi;i++){const l=Math.hypot(pts[2*i]-pts[2*i-2],pts[2*i+1]-pts[2*i-1]);L+=l;
         let dmin=Infinity;for(const c of comp)dmin=Math.min(dmin,Math.hypot(c.p[0]-pts[2*i],c.p[1]-pts[2*i+1]));if(dmin<1.5*lwW)under+=l;}
       if(L>0)cov.push({v,f:under/L});}
     // (the stretch the mark is on goes; another only when the mark covers nearly all of it too, so a mark that
     // brushes the line beside it leaves that line alone)
-    cov.sort((a,b)=>b.f-a.f);cov.forEach((c,j)=>{if((j===0&&c.f>=0.3)||c.f>=0.85){if(removeStretch(c.v.s,c.v.i))np++;}});}
+    cov.sort((a,b)=>b.f-a.f);cov.forEach((c,j)=>{if((j===0&&c.f>=0.3)||c.f>=0.85){
+      // (kept as the stretches from joint to joint, never one reaching across a joint)
+      const{s:s0,lo:l0,hi:h0}=c.v;for(let t=l0+1;t<h0;){const[lo,hi]=K.piece(s0,t);const key=s0+':'+lo+':'+hi;const was=prm.get(key);if(!was||was.f<c.f)prm.set(key,{s:s0,i:Math.round((lo+hi)/2),lo,hi,f:c.f});t=Math.max(hi,t)+1;}}});}
+  // (a real line can be caught under a mark only because scraps being taken out meet it there, a lead or so apart,
+  // cutting it into bits between them. Such a run of bits, with the line going on smoothly at both sides and a joint
+  // that was only those scraps, stays: once they are gone it is just part of the line again. A line marked from
+  // joint to joint where other lines still meet it goes)
+  {const keyOf=(s,j)=>{const[lo,hi]=K.piece(s,j);return s+':'+lo+':'+hi;};
+    // (the stretch that starts at point j and runs on in the way side: a point right on a joint belongs to neither)
+    const keyToward=(s,j,side)=>{const a=offs[s],b=offs[s+1]-1;if(j>a&&j<b&&keyOf(s,j-1)!==keyOf(s,j+1)&&j+side>=a&&j+side<=b)j+=side;return keyOf(s,j);};
+    const dirFrom=(s,j,side,x,y)=>{const a=offs[s],b=offs[s+1]-1;let k=j;while(k+side>=a&&k+side<=b&&Math.hypot(pts[2*k]-x,pts[2*k+1]-y)<2*lwW)k+=side;
+      const dx=pts[2*k]-x,dy=pts[2*k+1]-y,dl=Math.hypot(dx,dy);return dl<0.5*lwW?null:[dx/dl,dy/dl];};
+    // (the lines leaving point e of a run of stroke s: its own line beyond the run when e is a run end, and every other
+    // line that ends or passes there, each with the way it leaves)
+    const branchesAt=(s0,e,lo,hi)=>{const x=pts[2*e],y=pts[2*e+1],out=[],a0=offs[s0],b0=offs[s0+1]-1;
+      if(e===lo&&e>a0){const u=dirFrom(s0,e-1,-1,x,y);if(u)out.push({key:keyToward(s0,e-1,-1),u});}
+      if(e===hi&&e<b0){const u=dirFrom(s0,e+1,1,x,y);if(u)out.push({key:keyToward(s0,e+1,1),u});}
+      const near=new Map(),r=1.5*lwW,cx=Math.floor(x/gc),cy=Math.floor(y/gc),R=Math.ceil(r/gc);
+      for(let a=cx-R;a<=cx+R;a++)for(let b=cy-R;b<=cy+R;b++){const L=grid.get(a+','+b);if(!L)continue;for(const i of L){const s=sOf[i];if(s===s0)continue;const d=Math.hypot(pts[2*i]-x,pts[2*i+1]-y);if(d<r){const w=near.get(s);if(!w||d<w.d)near.set(s,{i,d});}}}
+      for(const[s,{i}]of near){const a=offs[s],b=offs[s+1]-1;
+        const atA=Math.hypot(pts[2*a]-x,pts[2*a+1]-y)<r,atB=Math.hypot(pts[2*b]-x,pts[2*b+1]-y)<r;
+        if(atA&&!atB){const u=dirFrom(s,a,1,x,y);if(u)out.push({key:keyToward(s,a,1),u});continue;}
+        if(atB&&!atA){const u=dirFrom(s,b,-1,x,y);if(u)out.push({key:keyToward(s,b,-1),u});continue;}
+        for(const side of[-1,1]){const j=i+side;if(j<a||j>b)continue;const u=dirFrom(s,j,side,x,y);if(u)out.push({key:keyToward(s,i,side),u});}}
+      return out;};
+    // (the way a run heads as it reaches its end e, from a point about two leads back)
+    const headAt=(e,inn,lo,hi)=>{let k=e;while(k+inn>=lo&&k+inn<=hi&&Math.hypot(pts[2*k]-pts[2*e],pts[2*k+1]-pts[2*e+1])<2*lwW)k+=inn;
+      const dx=pts[2*e]-pts[2*k],dy=pts[2*e+1]-pts[2*k+1],dl=Math.hypot(dx,dy)||1;return[dx/dl,dy/dl];};
+    const byS=new Map();for(const v of prm.values()){let L=byS.get(v.s);if(!L)byS.set(v.s,L=[]);L.push(v);}
+    // (one run at a time, the one going on most smoothly first: once a real line's bit is back, a scrap leaving that
+    // line no longer looks like the line going on)
+    for(;;){let best=null;
+      for(const[s,L]of byS){L.sort((p,q)=>p.lo-q.lo);
+        // (every run of bits next to each other along the line, each part of a longer run too: of a line that runs on
+        // into a scrap, the line's own part comes back and the scrap's goes)
+        for(let k=0;k<L.length;k++)for(let m=k;m<L.length;m++){if(m>k&&L[m].lo>L[m-1].hi)break;
+          const lo=L[k].lo,hi=Math.max(...L.slice(k,m+1).map(v=>v.hi));
+          // (such bits lie between scraps a few leads apart at most, or the mark only brushed them; a long line all
+          // under a mark was meant)
+          let len=0,under=0;for(let t=k;t<=m;t++){let l=0;for(let i=L[t].lo+1;i<=L[t].hi;i++)l+=Math.hypot(pts[2*i]-pts[2*i-2],pts[2*i+1]-pts[2*i-1]);len+=l;under+=l*L[t].f;}
+          if(len>8*lwW&&under>0.6*len)continue;
+          let ok=true,free=false,score=1;
+          for(const[e,inn]of[[lo,1],[hi,-1]]){const u=headAt(e,inn,lo,hi),all=branchesAt(s,e,lo,hi),live=all.filter(q=>!prm.has(q.key));
+            const dots=live.map(q=>q.u[0]*u[0]+q.u[1]*u[1]),on=dots.filter(d=>d>=0.5);
+            // (a line still running on through both sides of this joint: the run only leaves it, a scrap)
+            let thru=false;for(let x=0;x<live.length;x++)for(let y=x+1;y<live.length;y++)if(live[x].u[0]*live[y].u[0]+live[x].u[1]*live[y].u[1]<-0.5)thru=true;
+            if(!on.length||thru){ok=false;break;}score=Math.min(score,Math.max(...on));if(live.length===on.length&&all.length>live.length)free=true;}
+          // (or where the run's own bits meet, only scraps that go)
+          if(ok&&!free)for(let t=k;t<m&&!free;t++){const e=L[t].hi;if(e>=hi)continue;const all=branchesAt(s,e,-1,-1);if(all.length&&all.every(q=>prm.has(q.key)))free=true;}
+          if(ok&&free&&(!best||score>best.score))best={score,s,k,m};}}
+      if(!best)break;const L=byS.get(best.s);for(let t=best.k;t<=best.m;t++)prm.delete(L[t].s+':'+L[t].lo+':'+L[t].hi);L.splice(best.k,best.m-best.k+1);}}
+  for(const v of prm.values())if(removeStretch(v.s,v.i))np++;
   // (blue: the mark's middle as a path, end to end along it)
   // (a mark may branch or close on itself (a nostril drawn round, a line run off the outline): it is taken apart
   // into its branches, the longest first, each later one carried to the branch it leaves)

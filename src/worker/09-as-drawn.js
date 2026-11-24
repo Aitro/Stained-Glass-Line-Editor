@@ -55,8 +55,12 @@ function traceAsDrawn(sk,u,dmap,p){
        for(const y of B){const ty=away(y,kb);if(!ty)continue;if(tx[0]*ty[0]+tx[1]*ty[1]>-0.85)continue;
          const off=Math.abs((cb[0]-ca[0])*tx[1]-(cb[1]-ca[1])*tx[0]);if(off<=Math.min(2.5*rL,0.8*len(br.P)))ok=true;}
        if(!ok)return false;}return true;};
+   // (two lines each running on through its own joint, with a short piece between them, are two joints back to back,
+   // like a short bar joining two lines, not a crossing: at a crossing the lines at each joint come in at an angle)
+   const backToBack=br=>{for(const k of[br.a,br.b]){const L=ch.filter(c=>c!==br&&(c.a===k||c.b===k));if(L.length!==2)return false;
+       const t0=away(L[0],k),t1=away(L[1],k);if(!t0||!t1||t0[0]*t1[0]+t0[1]*t1[1]>-0.8)return false;}return true;};
    for(let guard=0;guard<ch.length;guard++){const deg=new Map();for(const c of ch)for(const k of[c.a,c.b])if(k!=null)deg.set(k,(deg.get(k)||0)+1);
-    const i=ch.findIndex(c=>c.a!=null&&c.b!=null&&c.a!==c.b&&deg.get(c.a)>=3&&deg.get(c.b)>=3&&(len(c.P)<3*u||!merged.has(c.a)&&!merged.has(c.b)&&len(c.P)<6*u&&straightThrough(c,ch)));if(i<0)break;
+    const i=ch.findIndex(c=>c.a!=null&&c.b!=null&&c.a!==c.b&&deg.get(c.a)>=3&&deg.get(c.b)>=3&&(len(c.P)<3*u&&!backToBack(c)||!merged.has(c.a)&&!merged.has(c.b)&&len(c.P)<6*u&&straightThrough(c,ch)));if(i<0)break;
     const longOne=len(ch[i].P)>=3*u;
     const ka=ch[i].a,kb=ch[i].b;cent[ka]=[(cent[ka][0]+cent[kb][0])/2,(cent[ka][1]+cent[kb][1])/2];if(free.has(kb))free.add(ka);ch.splice(i,1);
     for(const c of ch){if(c.a===kb||c.a===ka){c.a=ka;c.P[0]=cent[ka].slice();}if(c.b===kb||c.b===ka){c.b=ka;c.P[c.P.length-1]=cent[ka].slice();}}if(longOne)merged.add(ka);}}
