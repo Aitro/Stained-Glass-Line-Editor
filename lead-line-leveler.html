@@ -4779,7 +4779,7 @@ async function save(data,ext,tgt,name){const note=$('note');S.saveWhy='';
   if(canPick&&await saveLocal(data,ext,tgt,name))return;
   if(!S.dl&&!window.claude){const blob=data instanceof Blob?data:new Blob([data],{type:ext==='svg'?'image/svg+xml':'application/octet-stream'});
     const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name||fname(ext);document.body.appendChild(a);a.click();
-    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);note.textContent='Saved '+(name||fname(ext))+(S.saveWhy?' to Downloads: '+S.saveWhy+'.':canPick?'.':' to Downloads (this browser cannot save into a chosen folder: Chrome or Edge can).');return;}
+    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);note.textContent='Saved '+(name||fname(ext))+(S.saveWhy?' to Downloads: '+S.saveWhy+'.':canPick?'.':(/firefox/i.test(navigator.userAgent)?'. Firefox saves into its Downloads folder; to pick the folder each time, turn on "Always ask you where to save files" in Firefox Settings, General, Downloads (Chrome or Edge can also save straight into a chosen folder).':' to Downloads (this browser cannot save into a chosen folder: Chrome or Edge can).'));return;}
   if(!S.dl){note.textContent='Saving is not available in this view. Switch to Result, then right-click (or long-press) the image and choose Save image.';return;}
   try{name=name||fname(ext);await S.dl.save({filename:name,data});note.textContent='Saved '+name+'.';}
   catch(err){const c=err&&err.code;
